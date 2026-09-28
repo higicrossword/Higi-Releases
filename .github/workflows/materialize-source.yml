@@ -1,0 +1,22 @@
+name: Materialize Higi Source
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/materialize-source.yml"
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release source
+        run: |
+          curl -L --fail --retry 3 -o HebrewCrosswordApp_v0.15.60_SOURCE.zip "https://github.com/higicrossword/Higi-Releases/releases/download/v0.15.60/HebrewCrosswordApp_v0.15.60_SOURCE.zip"
+          sha256sum HebrewCrosswordApp_v0.15.60_SOURCE.zip
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-source-0.15.60
+          path: HebrewCrosswordApp_v0.15.60_SOURCE.zip
+          retention-days: 1
