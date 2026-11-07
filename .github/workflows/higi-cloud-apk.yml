@@ -1,0 +1,120 @@
+name: Higi Cloud APK - validation only
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release containing the SOURCE.zip file
+        required: true
+        default: v0.15.174
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/higi-cloud-apk.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build APK and verify existing signer (never publish)
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || 'v0.15.174' }}
+      REPO: higicrossword/Higi-Releases
+
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Download published source ZIP and previously published APK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\higi-source" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\higi-baseline" | Out-Null
+          gh release download "$env:RELEASE_TAG" --repo "$env:REPO" --pattern "HebrewCrosswordApp_v*_SOURCE.zip" --dir "$env:RUNNER_TEMP\higi-source"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot download source ZIP for $env:RELEASE_TAG" }
+          gh release download --repo "$env:REPO" --pattern "Higi-latest.apk" --dir "$env:RUNNER_TEMP\higi-baseline"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot download the current released APK" }
+          $archives = @(Get-ChildItem -Path "$env:RUNNER_TEMP\higi-source" -Filter '*.zip' -File)
+          if ($archives.Count -ne 1) { throw "Expected one SOURCE.zip; found $($archives.Count)" }
+          $extract = Join-Path "$env:RUNNER_TEMP" 'higi-extracted'
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath $extract -Force
+          $buildFiles = @(Get-ChildItem -Path $extract -Filter build.gradle.kts -Recurse -File | Where-Object { $_.Directory.Name -eq 'app' })
+          if ($buildFiles.Count -ne 1) { throw "Expected one Android app/build.gradle.kts; found $($buildFiles.Count)" }
+          $root = $buildFiles[0].Directory.Parent.FullName
+          Add-Content -Path "$env:GITHUB_ENV" -Value "HIGI_ROOT=$root"
+          Write-Host "Extracted Android project: $root"
+
+      - name: Build and test debug APK (no deployment)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location -LiteralPath "$env:HIGI_ROOT"
+          $wrapper = Join-Path "$env:HIGI_ROOT" 'gradlew.bat'
+          if (Test-Path -LiteralPath $wrapper) {
+            & $wrapper --no-daemon clean testDebugUnitTest assembleDebug
+          } else {
+            Write-Host "No Gradle wrapper; using provisioned Gradle 8.10.2"
+            & gradle --no-daemon clean testDebugUnitTest assembleDebug
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Gradle build/tests failed" }
+          $builtApk = Join-Path "$env:HIGI_ROOT" 'app\build\outputs\apk\debug\app-debug.apk'
+          if (-not (Test-Path $builtApk)) { throw "Gradle succeeded but APK is missing" }
+          Add-Content -Path "$env:GITHUB_ENV" -Value "HIGI_BUILT_APK=$builtApk"
+
+      - name: Check signer against the installed-release baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = $env:ANDROID_HOME
+          if (-not $sdk) { $sdk = $env:ANDROID_SDK_ROOT }
+          if (-not $sdk) { throw "Android SDK root not found" }
+          $signers = @(Get-ChildItem -Path (Join-Path $sdk 'build-tools') -Filter apksigner.bat -Recurse -File | Sort-Object FullName -Descending)
+          if ($signers.Count -eq 0) { throw "apksigner.bat missing from Android SDK" }
+          $signer = $signers[0].FullName
+          $baseline = Join-Path "$env:RUNNER_TEMP" 'higi-baseline\Higi-latest.apk'
+          $built = "$env:HIGI_BUILT_APK"
+          $newOutput = (& $signer verify --print-certs "$built" | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "New APK failed signature verification" }
+          $oldOutput = (& $signer verify --print-certs "$baseline" | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "Baseline APK failed signature verification" }
+          $re = 'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
+          $new = [regex]::Match($newOutput, $re).Groups[1].Value.ToUpperInvariant()
+          $old = [regex]::Match($oldOutput, $re).Groups[1].Value.ToUpperInvariant()
+          if (-not $new -or -not $old) { throw "Cannot extract signer certificate fingerprints" }
+          $summary = "Current release signer: $old`nCloud-built signer:     $new"
+          $summary | Set-Content -Path "$env:RUNNER_TEMP\higi-signing-check.txt"
+          Write-Host $summary
+          if ($new -ne $old) {
+            throw "SIGNATURE MISMATCH: cloud APK cannot update installed Higi. No APK will be published or distributed. Existing signing keystore is required."
+          }
+          Write-Host "Signing certificate matches the currently published APK."
+
+      - name: Upload matching APK for inspection (not a release)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-cloud-APK-validated-not-published
+          path: ${{ env.HIGI_BUILT_APK }}
+          retention-days: 7
+
+      - name: Save signer diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-cloud-signing-diagnostic
+          path: ${{ runner.temp }}/higi-signing-check.txt
+          if-no-files-found: ignore
+          retention-days: 7
