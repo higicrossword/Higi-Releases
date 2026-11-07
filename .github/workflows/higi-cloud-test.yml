@@ -1,0 +1,150 @@
+name: Higi Cloud APK - test only (no publishing)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Published Higi release containing HebrewCrosswordApp_v*_SOURCE.zip"
+        required: true
+        type: string
+        default: "v0.15.174"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/higi-cloud-test.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: higi-cloud-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-apk:
+    name: Validate source and build non-upgradeable test APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      RELEASE_TAG: ${{ inputs.release_tag || 'v0.15.174' }}
+
+    steps:
+      - name: Verify release selector and download source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE_TAG" =~ ^v0\.15\.[0-9]+(-DRY)?$ ]]; then
+            echo "::error::Unexpected release tag format."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/higi-source" "$RUNNER_TEMP/higi-unpacked"
+          gh release download "$RELEASE_TAG" --repo "$REPO" \
+            --pattern 'HebrewCrosswordApp_v*_SOURCE.zip' \
+            --dir "$RUNNER_TEMP/higi-source"
+          mapfile -t archives < <(find "$RUNNER_TEMP/higi-source" -maxdepth 1 -type f -name '*.zip')
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected one source ZIP in release $RELEASE_TAG, found ${#archives[@]}."
+            exit 1
+          fi
+          sha256sum "${archives[0]}"
+          unzip -q "${archives[0]}" -d "$RUNNER_TEMP/higi-unpacked"
+          mapfile -t projects < <(find "$RUNNER_TEMP/higi-unpacked" -type f -path '*/app/build.gradle.kts')
+          if [ "${#projects[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one Android app/build.gradle.kts, found ${#projects[@]}."
+            exit 1
+          fi
+          project_dir="$(dirname "$(dirname "${projects[0]}")")"
+          test -f "$project_dir/settings.gradle.kts"
+          test -f "$project_dir/app/google-services.json"
+          echo "HIGI_ROOT=$project_dir" >> "$GITHUB_ENV"
+          echo "Source selected: $RELEASE_TAG"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -x "$sdk/cmdline-tools/latest/bin/sdkmanager"
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          printf 'sdk.dir=%s\n' "$sdk" > "$HIGI_ROOT/local.properties"
+
+      - name: Generate ephemeral TEST ONLY debug signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          # A fresh key per run. Never use the original production signing key here.
+          keytool -genkeypair -noprompt \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          chmod 600 "$HOME/.android/debug.keystore"
+          echo "::warning::APK uses a NEW TEST KEY; it cannot upgrade existing installed Higi and cannot install alongside it under the same package name."
+
+      - name: Validate release metadata and compile APK
+        shell: bash
+        working-directory: ${{ env.HIGI_ROOT }}
+        run: |
+          set -euo pipefail
+          if [ -f tools/sync-release-version.py ]; then
+            python3 tools/sync-release-version.py --check
+          fi
+          if [ -f tools/test-version-staging.sh ]; then
+            bash tools/test-version-staging.sh
+          fi
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify test APK signature and record hashes
+        shell: bash
+        working-directory: ${{ env.HIGI_ROOT }}
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          signer="$sdk/build-tools/35.0.0/apksigner"
+          "$signer" verify --print-certs "$apk" | tee "$RUNNER_TEMP/higi-apk-signature.txt"
+          sha256sum "$apk" | tee "$RUNNER_TEMP/higi-apk-sha256.txt"
+          {
+            echo "### Higi cloud test APK (NOT FOR DISTRIBUTION)"
+            echo "Source: $RELEASE_TAG"
+            echo "This APK uses a one-time debug key. It **cannot update** an existing Higi installation."
+            echo "It also shares the same application ID, so it **cannot coexist** with installed Higi."
+            echo "No GitHub Release, production update metadata, Firebase, or Cloudflare deployment occurred."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK as temporary Actions artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-TEST-APK-NOT-FOR-DISTRIBUTION
+          path: ${{ env.HIGI_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build and signature diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-cloud-build-diagnostics
+          path: |
+            ${{ env.HIGI_ROOT }}/app/build/reports/
+            ${{ env.HIGI_ROOT }}/app/build/test-results/
+            ${{ runner.temp }}/higi-apk-signature.txt
+            ${{ runner.temp }}/higi-apk-sha256.txt
+          if-no-files-found: ignore
+          retention-days: 7
