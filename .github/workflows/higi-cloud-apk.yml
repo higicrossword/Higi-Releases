@@ -1,6 +1,10 @@
 name: Higi Cloud APK - validation only
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/higi-cloud-apk.yml"
   workflow_dispatch:
     inputs:
       release_tag:
