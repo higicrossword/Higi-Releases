@@ -35,7 +35,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.11.1'
 
       - name: Download published source ZIP and previously published APK
         shell: pwsh
@@ -66,7 +66,7 @@ jobs:
           if (Test-Path -LiteralPath $wrapper) {
             & $wrapper --no-daemon clean testDebugUnitTest assembleDebug
           } else {
-            Write-Host "No Gradle wrapper; using provisioned Gradle 8.10.2"
+            Write-Host "No Gradle wrapper; using provisioned Gradle 8.11.1"
             & gradle --no-daemon clean testDebugUnitTest assembleDebug
           }
           if ($LASTEXITCODE -ne 0) { throw "Gradle build/tests failed" }
