@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing GitHub release containing the SOURCE.zip file
+        description: Existing published or draft GitHub release containing the SOURCE.zip file
         required: true
         default: v0.15.174
 
 permissions:
-  contents: read
+  # Draft releases require push-level authorization to enumerate and download.
+  contents: write
 
 jobs:
   build:
@@ -17,7 +18,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 50
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag || 'v0.15.174' }}
       REPO: higicrossword/Higi-Releases
 
@@ -33,16 +33,61 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Download published source ZIP and previously published APK
+      - name: Download source ZIP (published or draft) and previously published APK
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\higi-source" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\higi-baseline" | Out-Null
-          gh release download "$env:RELEASE_TAG" --repo "$env:REPO" --pattern "HebrewCrosswordApp_v*_SOURCE.zip" --dir "$env:RUNNER_TEMP\higi-source"
-          if ($LASTEXITCODE -ne 0) { throw "Cannot download source ZIP for $env:RELEASE_TAG" }
-          gh release download --repo "$env:REPO" --pattern "Higi-latest.apk" --dir "$env:RUNNER_TEMP\higi-baseline"
-          if ($LASTEXITCODE -ne 0) { throw "Cannot download the current released APK" }
+          if ($env:RELEASE_TAG -notmatch '^v0\.15\.[0-9]+(-DRY)?$') {
+            throw "Invalid release tag"
+          }
+          $sourceDir = Join-Path $env:RUNNER_TEMP 'higi-source'
+          $baselineDir = Join-Path $env:RUNNER_TEMP 'higi-baseline'
+          New-Item -ItemType Directory -Force -Path $sourceDir | Out-Null
+          New-Item -ItemType Directory -Force -Path $baselineDir | Out-Null
+
+          # Published releases are downloadable by tag. GitHub draft release
+          # tags are not publicly resolvable until the draft is published.
+          gh release download "$env:RELEASE_TAG" --repo "$env:REPO" --pattern "HebrewCrosswordApp_v*_SOURCE.zip" --dir $sourceDir
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Tag is not publicly downloadable; checking authenticated draft releases."
+            $release = $null
+            for ($page = 1; $page -le 20; $page++) {
+              $raw = & gh api "repos/$env:REPO/releases?per_page=100&page=$page"
+              if ($LASTEXITCODE -ne 0) { throw "GitHub API release enumeration failed" }
+              $items = @(($raw | Out-String | ConvertFrom-Json))
+              $match = @($items | Where-Object { $_.tag_name -eq $env:RELEASE_TAG })
+              if ($match.Count -gt 1) { throw "Multiple releases share the requested tag" }
+              if ($match.Count -eq 1) { $release = $match[0]; break }
+              if ($items.Count -lt 100) { break }
+            }
+            if ($null -eq $release) {
+              throw "Release $env:RELEASE_TAG is not accessible as a published or draft release"
+            }
+            $expected = "HebrewCrosswordApp_$($env:RELEASE_TAG)_SOURCE.zip"
+            $assets = @($release.assets | Where-Object { $_.name -eq $expected })
+            if ($assets.Count -ne 1) { throw "Expected exactly one source asset named $expected" }
+            $asset = $assets[0]
+            $zipFile = Join-Path $sourceDir $expected
+            $assetApiUrl = "https://api.github.com/repos/$env:REPO/releases/assets/$($asset.id)"
+            # Keep draft sources out of public release and Actions artifacts.
+            & curl.exe --silent --show-error --location --fail --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $zipFile $assetApiUrl
+            if ($LASTEXITCODE -ne 0) { throw "Draft ZIP download failed" }
+            $actualSize = (Get-Item -LiteralPath $zipFile).Length
+            if ($actualSize -ne [long]$asset.size) {
+              throw "Draft ZIP size mismatch: $actualSize bytes; expected $($asset.size)"
+            }
+            if ($asset.digest -match '^sha256:([a-fA-F0-9]{64})$') {
+              $expectedHash = $Matches[1].ToUpperInvariant()
+              $actualHash = (Get-FileHash -LiteralPath $zipFile -Algorithm SHA256).Hash
+              if ($actualHash -ne $expectedHash) { throw "Draft ZIP SHA256 mismatch" }
+            }
+            Write-Host "Retrieved source ZIP from draft release $env:RELEASE_TAG."
+          }
+
+          gh release download --repo "$env:REPO" --pattern "Higi-latest.apk" --dir $baselineDir
+          if ($LASTEXITCODE -ne 0) { throw "Cannot download the current published APK" }
           $archives = @(Get-ChildItem -Path "$env:RUNNER_TEMP\higi-source" -Filter '*.zip' -File)
           if ($archives.Count -ne 1) { throw "Expected one SOURCE.zip; found $($archives.Count)" }
           $extract = Join-Path "$env:RUNNER_TEMP" 'higi-extracted'
