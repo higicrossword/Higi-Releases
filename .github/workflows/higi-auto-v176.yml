@@ -1,4 +1,4 @@
-name: Higi 0.15.176 DRY - automatic cloud APK validation
+name: Higi 0.15.176 DRY - automatic build and manager prerelease
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-dry:
-    name: Build 0.15.176 DRY, test, verify signer, keep unpublished
+    name: Build 0.15.176 DRY, test, verify signer, publish admin prerelease
     runs-on: windows-latest
     timeout-minutes: 50
     env:
@@ -169,12 +169,87 @@ jobs:
           $new = ([regex]::Match($newOutput,$re).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToUpperInvariant()
           $old = ([regex]::Match($oldOutput,$re).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToUpperInvariant()
           if ($new.Length -ne 64 -or $old.Length -ne 64 -or $new -ne $old) { throw 'Signer mismatch or invalid digest' }
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_VERIFIED_SIGNER=$new"
           Write-Host 'APK 0.15.176/326 verified and signed with the original app certificate.'
 
-      - name: Upload DRY APK artifact only - no public release
+      - name: Upload verified DRY APK as workflow artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Higi-0.15.176-DRY-validated-not-published
           path: ${{ env.HIGI_BUILT_APK }}
           retention-days: 7
+
+      - name: Publish verified DRY prerelease for administrator updater only
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'v0.15.176-DRY'
+          $version = '0.15.176'
+          $versionCode = 326
+          $assetName = "Higi-$version-DRY.apk"
+          $apk = $env:HIGI_BUILT_APK
+          if (!(Test-Path -LiteralPath $apk)) { throw 'Verified APK missing' }
+          $sha = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+          $signer = ($env:HIGI_VERIFIED_SIGNER).ToLowerInvariant()
+          if ($sha -notmatch '^[a-f0-9]{64}$' -or $signer -notmatch '^[a-f0-9]{64}$') {
+            throw 'Invalid APK or signer digest'
+          }
+          $dir = Join-Path $env:RUNNER_TEMP 'higi-dry-prerelease'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $releaseApk = Join-Path $dir $assetName
+          Copy-Item -LiteralPath $apk -Destination $releaseApk
+          $manifestFile = Join-Path $dir 'Higi-Dry-Manifest.json'
+          $sumsFile = Join-Path $dir 'SHA256SUMS.txt'
+          $notesFile = Join-Path $dir 'RELEASE_NOTES.txt'
+          $manifest = [ordered]@{
+            schemaVersion = 1
+            channel = 'dry'
+            repository = $env:REPO
+            packageName = 'com.example.hebrewcrossword'
+            tag = $tag
+            versionName = $version
+            versionCode = $versionCode
+            assetName = $assetName
+            sha256 = $sha
+            signerSha256 = $signer
+          }
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [IO.File]::WriteAllText($manifestFile, ($manifest | ConvertTo-Json -Depth 5) + "`n", $utf8)
+          [IO.File]::WriteAllText($sumsFile, "$sha  $assetName`n", $utf8)
+          $notes = @(
+            "Higi $version DRY (administrator test build)",
+            '',
+            "versionCode: $versionCode",
+            "APK SHA-256: $sha",
+            "Signer SHA-256: $signer",
+            '',
+            'Administrator testing prerelease. Not a normal-user update.',
+            'No Firebase deployment, no canonical content publication.',
+            'The APK is public on GitHub; the in-app DRY updater is admin-only.'
+          ) -join "`n"
+          [IO.File]::WriteAllText($notesFile, $notes + "`n", $utf8)
+          # Never overwrite a tag, a release, or its APK once published.
+          & gh release create $tag $releaseApk $manifestFile $sumsFile --repo $env:REPO --title "Higi $version DRY (admin testers)" --notes-file $notesFile --prerelease --target main
+          if ($LASTEXITCODE -ne 0) { throw 'Failed publishing DRY prerelease' }
+          $raw = (& gh api "repos/$env:REPO/releases/tags/$tag" | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify published DRY release' }
+          $published = $raw | ConvertFrom-Json
+          if (!$published.prerelease -or $published.draft -or $published.tag_name -ne $tag) {
+            throw 'DRY release published with incorrect metadata'
+          }
+          $assets = @($published.assets)
+          $names = @($assets | ForEach-Object { $_.name })
+          if ($assets.Count -ne 3 -or $names -notcontains $assetName -or
+              $names -notcontains 'Higi-Dry-Manifest.json' -or
+              $names -notcontains 'SHA256SUMS.txt') {
+            throw 'DRY release asset list mismatch'
+          }
+          $apkAsset = @($assets | Where-Object { $_.name -eq $assetName })[0]
+          if ($apkAsset.digest -match '^sha256:([a-fA-F0-9]{64})$') {
+            if ($Matches[1].ToLowerInvariant() -ne $sha) { throw 'Published APK SHA-256 mismatch' }
+          }
+          Write-Host "Verified manager-only prerelease: https://github.com/$env:REPO/releases/tag/$tag"
