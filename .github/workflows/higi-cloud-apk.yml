@@ -53,6 +53,26 @@ jobs:
           Add-Content -Path "$env:GITHUB_ENV" -Value "HIGI_ROOT=$root"
           Write-Host "Extracted Android project: $root"
 
+      - name: Restore original debug signing keystore if it already exists as a GitHub secret
+        shell: pwsh
+        env:
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)) {
+            throw 'ANDROID_DEBUG_KEYSTORE_B64 is NOT configured in the Higi-Releases repository. No compatible APK can be published without the original signing keystore.'
+          }
+          $keyDirectory = Join-Path $env:USERPROFILE '.android'
+          New-Item -ItemType Directory -Path $keyDirectory -Force | Out-Null
+          $keyPath = Join-Path $keyDirectory 'debug.keystore'
+          try {
+            [IO.File]::WriteAllBytes($keyPath, [Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
+          } catch {
+            throw 'ANDROID_DEBUG_KEYSTORE_B64 is not a valid Base64-encoded keystore.'
+          }
+          if ((Get-Item -LiteralPath $keyPath).Length -lt 512) { throw 'Restored keystore is unexpectedly short' }
+          Write-Host 'Signing key restored securely to the standard Android debug keystore path; key bytes are not logged.'
+
       - name: Build and test debug APK (no deployment)
         shell: pwsh
         run: |
