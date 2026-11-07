@@ -86,14 +86,23 @@ jobs:
           $signer = $signers[0].FullName
           $baseline = Join-Path "$env:RUNNER_TEMP" 'higi-baseline\Higi-latest.apk'
           $built = "$env:HIGI_BUILT_APK"
-          $newOutput = (& $signer verify --print-certs "$built" | Out-String)
-          if ($LASTEXITCODE -ne 0) { throw "New APK failed signature verification" }
-          $oldOutput = (& $signer verify --print-certs "$baseline" | Out-String)
-          if ($LASTEXITCODE -ne 0) { throw "Baseline APK failed signature verification" }
-          $re = 'Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)'
-          $new = [regex]::Match($newOutput, $re).Groups[1].Value.ToUpperInvariant()
-          $old = [regex]::Match($oldOutput, $re).Groups[1].Value.ToUpperInvariant()
-          if (-not $new -or -not $old) { throw "Cannot extract signer certificate fingerprints" }
+          $newOutput = (& $signer verify --print-certs "$built" 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "New APK failed signature verification: $newOutput" }
+          $oldOutput = (& $signer verify --print-certs "$baseline" 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "Baseline APK failed signature verification: $oldOutput" }
+          # Certificate digests are public metadata. Print them to diagnose any SDK output format changes.
+          Write-Host "Cloud-built apksigner certificate output:"
+          Write-Host $newOutput
+          Write-Host "Published APK apksigner certificate output:"
+          Write-Host $oldOutput
+          $re = '(?i)Signer\s*#\d+\s+certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $newMatch = [regex]::Match($newOutput, $re)
+          $oldMatch = [regex]::Match($oldOutput, $re)
+          $new = ($newMatch.Groups[1].Value -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+          $old = ($oldMatch.Groups[1].Value -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+          if ($new.Length -ne 64 -or $old.Length -ne 64) {
+            throw "Cannot extract 64-character signer certificate SHA-256 digests. Inspect the apksigner output above."
+          }
           $summary = "Current release signer: $old`nCloud-built signer:     $new"
           $summary | Set-Content -Path "$env:RUNNER_TEMP\higi-signing-check.txt"
           Write-Host $summary
