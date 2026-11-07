@@ -7,10 +7,6 @@ on:
         description: Existing GitHub release containing the SOURCE.zip file
         required: true
         default: v0.15.174
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/higi-cloud-apk.yml"
 
 permissions:
   contents: read
@@ -95,7 +91,7 @@ jobs:
           Write-Host $newOutput
           Write-Host "Published APK apksigner certificate output:"
           Write-Host $oldOutput
-          $re = '(?i)Signer\s*#\d+\s+certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $re = '(?i)certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
           $newMatch = [regex]::Match($newOutput, $re)
           $oldMatch = [regex]::Match($oldOutput, $re)
           $new = ($newMatch.Groups[1].Value -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
