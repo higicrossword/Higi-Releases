@@ -46,4 +46,7 @@ jobs:
                   print(f"{i+1}: {s[:170]}")
           print("========== FILE LENGTH ==========")
           print(fn,len(lines))
+          for a,b in [(85,95),(130,177),(300,365),(455,510)]:
+              print(f"========== SOURCE {a}-{b} ==========")
+              for i in range(a-1,b):print(f"{i+1}: {lines[i]}")
           PY
