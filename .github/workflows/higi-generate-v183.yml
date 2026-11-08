@@ -66,8 +66,10 @@ jobs:
           assert hashlib.sha256(raw).hexdigest()=="4f51b683e527288ce7613b1884c98089eb022f1afafaca0141b030c3ea28e66e","v183 delta SHA mismatch"
           pathlib.Path(sys.argv[2]).write_bytes(raw)
           PY
-          git -C "$ROOT" apply --check "$BASE/183-delta.patch"
-          git -C "$ROOT" apply "$BASE/183-delta.patch"
+          # V182's local QA-only test file is not in the pinned cloud
+          # source; do not require or patch it. The new V183 test is included.
+          git -C "$ROOT" apply --check --exclude='app/src/test/java/com/example/hebrewcrossword/OcrInlineHeadingAndSequenceV182Test.kt' "$BASE/183-delta.patch"
+          git -C "$ROOT" apply --exclude='app/src/test/java/com/example/hebrewcrossword/OcrInlineHeadingAndSequenceV182Test.kt' "$BASE/183-delta.patch"
           python "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
           grep -q 'versionCode = 333' "$ROOT/app/build.gradle.kts"
           grep -q 'versionName = "0.15.183"' "$ROOT/app/build.gradle.kts"
