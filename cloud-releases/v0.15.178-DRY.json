@@ -3,5 +3,6 @@
   "version": "0.15.178",
   "versionCode": 328,
   "patchFile": "cloud-patches/v0.15.178-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "d3e55c33bf0b98e639061c811f406cc7663f675631827fece5f382cb8ae78fd5"
+  "patchSha256": "d3e55c33bf0b98e639061c811f406cc7663f675631827fece5f382cb8ae78fd5",
+  "triggerRevision": 2
 }
