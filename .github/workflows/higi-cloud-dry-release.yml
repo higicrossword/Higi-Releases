@@ -256,6 +256,8 @@ jobs:
           $notes = @(
             "Higi $version DRY - administrator-only beta",
             "versionCode: $code",
+            "APK SHA-256: $sha",
+            "Signer SHA-256: $signer",
             'Cloud-built, tested and signed with original app certificate.',
             'No Firebase deployment or Remote Config change.',
             'No automatic canonical OCR crop approval.',
@@ -272,6 +274,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Could not verify the published prerelease' }
           $published = $raw | ConvertFrom-Json
           if (!$published.prerelease -or $published.draft -or $published.tag_name -ne $tag) { throw 'Wrong DRY release metadata' }
+          # Older installed clients require all three exact body metadata fields before
+          # even considering the manifest. Verify here so 'published' means updater-visible.
+          if ($published.body -notmatch "(?m)^versionCode: $code\s*$" -or
+              $published.body -notmatch "(?m)^APK SHA-256: $sha\s*$" -or
+              $published.body -notmatch "(?m)^Signer SHA-256: $signer\s*$") {
+            throw 'Release body is missing fields required by installed DRY updater'
+          }
           $names = @($published.assets | ForEach-Object { $_.name })
           if ($names.Count -ne 3 -or $names -notcontains $assetName -or
               $names -notcontains 'Higi-Dry-Manifest.json' -or $names -notcontains 'SHA256SUMS.txt') {
