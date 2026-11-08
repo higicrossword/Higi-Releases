@@ -1,0 +1,25 @@
+name: Export Higi public source delta for review
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-export-public-patch.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate public 0.15.180 patch exists
+        run: |
+          test -s cloud-patches/v0.15.180-from-v0.15.175.patch.xz.b64
+      - name: Preserve public patch for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-v180-public-patch-only
+          path: cloud-patches/v0.15.180-from-v0.15.175.patch.xz.b64
+          retention-days: 2
