@@ -3,5 +3,6 @@
   "version": "0.15.183",
   "versionCode": 333,
   "patchFile": "cloud-patches/v0.15.183-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "20b6cf4422206d772fda902381bf73af888e5f4b119f02b82c83d63d1823e513"
+  "patchSha256": "20b6cf4422206d772fda902381bf73af888e5f4b119f02b82c83d63d1823e513",
+  "releaseNotes": "Admin DRY OCR review: safely recover unique truncated printed numbers, retain source-pixel segments, preserve ambiguity fail-closed; 24/24 local fixture previews; no canonical write"
 }
