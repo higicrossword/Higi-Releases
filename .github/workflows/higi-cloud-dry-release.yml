@@ -1,0 +1,279 @@
+name: Higi DRY - cloud build and admin update
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud-releases/v0.15.*-DRY.json'
+  workflow_dispatch:
+    inputs:
+      manifest_file:
+        description: 'Cloud release manifest, e.g. cloud-releases/v0.15.178-DRY.json'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: higi-dry-cloud-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Verify source, build, sign and publish DRY APK
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      REPO: higicrossword/Higi-Releases
+      GH_TOKEN: ${{ github.token }}
+      BASELINE_TAG: v0.15.175
+      BASELINE_ASSET: HebrewCrosswordApp_v0.15.175_SOURCE.zip
+      BASELINE_SHA256: AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7
+
+    steps:
+      - name: Checkout cloud release definitions
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select a single trusted DRY release manifest
+        shell: pwsh
+        env:
+          DISPATCH_MANIFEST: ${{ inputs.manifest_file }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $path = $env:DISPATCH_MANIFEST
+          } else {
+            $paths = @(& git diff --name-only "$env:GITHUB_SHA^" "$env:GITHUB_SHA" -- cloud-releases)
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot determine changed release manifests' }
+            $matches = @($paths | Where-Object { $_ -match '^cloud-releases/v0\.15\.[0-9]+-DRY\.json$' })
+            if ($matches.Count -ne 1) { throw "Expected exactly one changed DRY manifest; found $($matches.Count)" }
+            $path = $matches[0]
+          }
+          if ($path -notmatch '^cloud-releases/v0\.15\.[0-9]+-DRY\.json$') { throw 'Unsafe release manifest path' }
+          if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing manifest $path" }
+          $cfg = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
+          if ($cfg.channel -cne 'dry' -or $cfg.version -notmatch '^0\.15\.[0-9]+$' -or
+              $cfg.versionCode -notmatch '^[0-9]+$' -or
+              $cfg.patchSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+              $cfg.patchFile -notmatch '^cloud-patches/v0\.15\.[0-9]+-from-v0\.15\.175\.patch\.xz\.b64$') {
+            throw 'Invalid or unsafe DRY manifest fields'
+          }
+          $version = [string]$cfg.version
+          $code = [int]$cfg.versionCode
+          if ($path -ne "cloud-releases/v$version-DRY.json" -or
+              $cfg.patchFile -ne "cloud-patches/v$version-from-v0.15.175.patch.xz.b64") {
+            throw 'Manifest filename, version and patch path disagree'
+          }
+          if ($code -lt 328) { throw 'Version code is below the new cloud DRY baseline' }
+          if (!(Test-Path -LiteralPath $cfg.patchFile -PathType Leaf)) { throw 'Missing source patch' }
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_VERSION=$version"
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_CODE=$code"
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_PATCH_FILE=$($cfg.patchFile)"
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_PATCH_SHA256=$($cfg.patchSha256)"
+          Write-Host "Selected cloud DRY build $version ($code)"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Download pinned private baseline and latest public APK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:RUNNER_TEMP 'higi-source'
+          $base = Join-Path $env:RUNNER_TEMP 'higi-baseline'
+          New-Item -ItemType Directory -Force -Path $src,$base | Out-Null
+          $release = $null
+          for ($page = 1; $page -le 20; $page++) {
+            $raw = (& gh api "repos/$env:REPO/releases?per_page=100&page=$page" | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw 'Failed listing releases' }
+            $items = @(($raw | ConvertFrom-Json))
+            $matches = @($items | Where-Object { $_.tag_name -eq $env:BASELINE_TAG })
+            if ($matches.Count -gt 1) { throw 'Ambiguous baseline tag' }
+            if ($matches.Count -eq 1) { $release = $matches[0]; break }
+            if ($items.Count -lt 100) { break }
+          }
+          if ($null -eq $release -or $release.draft -ne $true) { throw 'Expected a private draft 0.15.175 source' }
+          $assets = @($release.assets | Where-Object { $_.name -eq $env:BASELINE_ASSET })
+          if ($assets.Count -ne 1) { throw 'Missing or ambiguous baseline source ZIP' }
+          $asset = $assets[0]
+          $zip = Join-Path $src $env:BASELINE_ASSET
+          & curl.exe --silent --show-error --fail --location --retry 3 `
+            --header "Authorization: Bearer $env:GH_TOKEN" `
+            --header 'Accept: application/octet-stream' `
+            --header 'X-GitHub-Api-Version: 2022-11-28' --output $zip `
+            "https://api.github.com/repos/$env:REPO/releases/assets/$($asset.id)"
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $zip)) { throw 'Cannot download baseline ZIP' }
+          if ((Get-Item -LiteralPath $zip).Length -ne [long]$asset.size) { throw 'Baseline ZIP length mismatch' }
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $env:BASELINE_SHA256) { throw 'Baseline SHA256 mismatch' }
+          & gh release download --repo $env:REPO --pattern Higi-latest.apk --dir $base
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download current published APK' }
+          $extract = Join-Path $env:RUNNER_TEMP 'higi-extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $gradleFiles = @(Get-ChildItem -Path $extract -Filter build.gradle.kts -Recurse -File | Where-Object { $_.Directory.Name -eq 'app' })
+          if ($gradleFiles.Count -ne 1) { throw 'Expected exactly one app/build.gradle.kts' }
+          $root = $gradleFiles[0].Directory.Parent.FullName
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_ROOT=$root"
+
+      - name: Apply exact source patch and verify DRY version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $encodedPath = Join-Path $env:GITHUB_WORKSPACE $env:HIGI_PATCH_FILE
+          $patch = Join-Path $env:RUNNER_TEMP 'higi-source.patch'
+          & python -c 'import base64,hashlib,lzma,pathlib,sys; raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True)); assert hashlib.sha256(raw).hexdigest().lower()==sys.argv[3].lower(),"Patch SHA256 mismatch"; pathlib.Path(sys.argv[2]).write_bytes(raw)' $encodedPath $patch $env:HIGI_PATCH_SHA256
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot decode or verify patch' }
+          & git -C "$env:HIGI_ROOT" apply --check "$patch"
+          if ($LASTEXITCODE -ne 0) { throw 'Patch does not match pinned source' }
+          & git -C "$env:HIGI_ROOT" apply "$patch"
+          if ($LASTEXITCODE -ne 0) { throw 'Patch application failed' }
+          $gradle = Get-Content -Raw -LiteralPath (Join-Path $env:HIGI_ROOT 'app/build.gradle.kts')
+          if ($gradle -notmatch "versionCode\s*=\s*$($env:HIGI_CODE)\b" -or
+              $gradle -notmatch ('versionName\s*=\s*"' + [regex]::Escape($env:HIGI_VERSION) + '"') -or
+              $gradle -notmatch 'HIGI_DRY_BUILD') { throw 'Wrong source version or missing DRY build flag' }
+          Set-Location -LiteralPath $env:HIGI_ROOT
+          & python tools/sync-release-version.py --check
+          if ($LASTEXITCODE -ne 0) { throw 'App version metadata inconsistent' }
+          Write-Host 'Cloud source reconstructed and version metadata verified.'
+
+      - name: Restore original app signing key
+        shell: pwsh
+        env:
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)) { throw 'Original signing key secret is unavailable' }
+          $dir = Join-Path $env:USERPROFILE '.android'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $dir 'debug.keystore'),[Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
+          if ((Get-Item (Join-Path $dir 'debug.keystore')).Length -lt 512) { throw 'Signing key is unexpectedly short' }
+
+      - name: Build DRY APK and run Android unit tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location -LiteralPath $env:HIGI_ROOT
+          $wrapper = Join-Path $env:HIGI_ROOT 'gradlew.bat'
+          if (Test-Path -LiteralPath $wrapper) {
+            & $wrapper --no-daemon -PhigiDryBuild=true clean testDebugUnitTest assembleDebug
+          } else {
+            & gradle --no-daemon -PhigiDryBuild=true clean testDebugUnitTest assembleDebug
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Gradle tests/build failed: nothing will be published' }
+          $apk = Join-Path $env:HIGI_ROOT 'app/build/outputs/apk/debug/app-debug.apk'
+          if (!(Test-Path -LiteralPath $apk)) { throw 'APK missing after successful Gradle build' }
+          $config = Join-Path $env:HIGI_ROOT 'app/build/generated/source/buildConfig/debug/com/example/hebrewcrossword/BuildConfig.java'
+          if (!(Test-Path -LiteralPath $config) -or (Get-Content -Raw -LiteralPath $config) -notmatch 'HIGI_DRY_BUILD\s*=\s*true') {
+            throw 'FAIL CLOSED: compiled APK is not explicitly marked DRY'
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_BUILT_APK=$apk"
+
+      - name: Verify version, package and original signing certificate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = $env:ANDROID_HOME
+          if (!$sdk) { $sdk = $env:ANDROID_SDK_ROOT }
+          if (!$sdk) { throw 'Android SDK unavailable' }
+          $tools = Join-Path $sdk 'build-tools'
+          $aapt = @(Get-ChildItem $tools -Filter aapt.exe -Recurse -File | Sort-Object FullName -Descending | Select-Object -First 1)
+          $signer = @(Get-ChildItem $tools -Filter apksigner.bat -Recurse -File | Sort-Object FullName -Descending | Select-Object -First 1)
+          if (!$aapt -or !$signer) { throw 'Android packaging tools unavailable' }
+          $apk = $env:HIGI_BUILT_APK
+          $line = (& ($aapt[0].FullName) dump badging $apk | Select-String '^package:').ToString()
+          $expected = "name='com.example.hebrewcrossword' versionCode='$($env:HIGI_CODE)' versionName='$($env:HIGI_VERSION)'"
+          if (!$line.Contains($expected)) { throw "Wrong APK package/version: $line" }
+          $baseline = Join-Path $env:RUNNER_TEMP 'higi-baseline/Higi-latest.apk'
+          $oldCert = (& ($signer[0].FullName) verify --print-certs $baseline 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline APK signature is invalid' }
+          $newCert = (& ($signer[0].FullName) verify --print-certs $apk 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw 'New APK signature is invalid' }
+          $re = '(?i)certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $old = ([regex]::Match($oldCert,$re).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          $new = ([regex]::Match($newCert,$re).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          if ($old.Length -ne 64 -or $new.Length -ne 64 -or $old -ne $new) { throw 'Signing certificate mismatch: cannot upgrade installed Higi' }
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_VERIFIED_SIGNER=$new"
+          Write-Host 'Validated signed DRY APK with the installed app certificate.'
+
+      - name: Preserve validated APK as Actions artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-${{ env.HIGI_VERSION }}-DRY-validated
+          path: ${{ env.HIGI_BUILT_APK }}
+          retention-days: 7
+
+      - name: Publish verified DRY prerelease for administrator updater
+        if: success()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:HIGI_VERSION
+          $code = [int]$env:HIGI_CODE
+          $tag = "v$version-DRY"
+          $assetName = "Higi-$version-DRY.apk"
+          $apk = $env:HIGI_BUILT_APK
+          $sha = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
+          $signer = $env:HIGI_VERIFIED_SIGNER
+          $dir = Join-Path $env:RUNNER_TEMP 'higi-dry-release'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $releaseApk = Join-Path $dir $assetName
+          Copy-Item -LiteralPath $apk -Destination $releaseApk
+          $manifestFile = Join-Path $dir 'Higi-Dry-Manifest.json'
+          $sumsFile = Join-Path $dir 'SHA256SUMS.txt'
+          $notesFile = Join-Path $dir 'RELEASE_NOTES.txt'
+          $manifest = [ordered]@{
+            schemaVersion = 1
+            channel = 'dry'
+            repository = $env:REPO
+            packageName = 'com.example.hebrewcrossword'
+            tag = $tag
+            versionName = $version
+            versionCode = $code
+            assetName = $assetName
+            sha256 = $sha
+            signerSha256 = $signer
+          }
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [IO.File]::WriteAllText($manifestFile,($manifest | ConvertTo-Json -Depth 5) + "`n",$utf8)
+          [IO.File]::WriteAllText($sumsFile,"$sha  $assetName`n",$utf8)
+          $notes = @(
+            "Higi $version DRY - administrator-only beta",
+            "versionCode: $code",
+            'Cloud-built, tested and signed with original app certificate.',
+            'No Firebase deployment or Remote Config change.',
+            'No automatic canonical OCR crop approval.',
+            'Not a normal-user update.'
+          ) -join "`n"
+          [IO.File]::WriteAllText($notesFile,$notes + "`n",$utf8)
+          # Fail closed: never overwrite an existing release tag or its assets.
+          $existing = (& gh release view $tag --repo $env:REPO --json tagName 2>$null | Out-String)
+          if ($LASTEXITCODE -eq 0 -and $existing) { throw "Tag $tag already exists; refusing to overwrite" }
+          & gh release create $tag $releaseApk $manifestFile $sumsFile --repo $env:REPO `
+            --title "Higi $version DRY (admin testers)" --notes-file $notesFile --prerelease --target main
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publication failed' }
+          $raw = (& gh api "repos/$env:REPO/releases/tags/$tag" | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify the published prerelease' }
+          $published = $raw | ConvertFrom-Json
+          if (!$published.prerelease -or $published.draft -or $published.tag_name -ne $tag) { throw 'Wrong DRY release metadata' }
+          $names = @($published.assets | ForEach-Object { $_.name })
+          if ($names.Count -ne 3 -or $names -notcontains $assetName -or
+              $names -notcontains 'Higi-Dry-Manifest.json' -or $names -notcontains 'SHA256SUMS.txt') {
+            throw 'Missing APK or updater manifest on published prerelease'
+          }
+          Write-Host "Verified admin-only DRY update: https://github.com/$env:REPO/releases/tag/$tag"
