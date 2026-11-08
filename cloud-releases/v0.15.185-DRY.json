@@ -3,5 +3,6 @@
   "version": "0.15.185",
   "versionCode": 335,
   "patchFile": "cloud-patches/v0.15.185-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "c34d9fcd0349be8689de0737d6d04d520bbe81c39df92c75587d378d14a63606"
+  "patchSha256": "c34d9fcd0349be8689de0737d6d04d520bbe81c39df92c75587d378d14a63606",
+  "releaseNotes": "Admin DRY OCR: guard low-confidence printed clue numbers using actual source-pixel boundaries and preceding length markers; V5/V19 review-only; no canonical writes or normal-user update."
 }
