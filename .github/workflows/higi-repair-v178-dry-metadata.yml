@@ -1,0 +1,117 @@
+name: Repair Higi 0.15.178 DRY updater metadata
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-repair-v178-dry-metadata.yml'
+      - 'metadata-repairs/v0.15.178-DRY.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-release-notes:
+    name: Verify published DRY assets and repair notes only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      TAG: v0.15.178-DRY
+
+    steps:
+      - name: Validate currently published assets and prepare compatible notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/dry-metadata-repair"
+          mkdir -p "$dir"
+          gh api "repos/$REPO/releases/tags/$TAG" > "$dir/release.json"
+          gh release download "$TAG" --repo "$REPO" \
+            --pattern 'Higi-Dry-Manifest.json' \
+            --pattern 'SHA256SUMS.txt' \
+            --dir "$dir"
+          python3 - "$dir" <<'PY'
+          import hashlib, json, pathlib, re, sys
+          p = pathlib.Path(sys.argv[1])
+          release = json.loads((p / 'release.json').read_text(encoding='utf-8'))
+          manifest_bytes = (p / 'Higi-Dry-Manifest.json').read_bytes()
+          sums_bytes = (p / 'SHA256SUMS.txt').read_bytes()
+          manifest = json.loads(manifest_bytes)
+          required = {
+              'schemaVersion': 1,
+              'channel': 'dry',
+              'repository': 'higicrossword/Higi-Releases',
+              'packageName': 'com.example.hebrewcrossword',
+              'tag': 'v0.15.178-DRY',
+              'versionName': '0.15.178',
+              'versionCode': 328,
+              'assetName': 'Higi-0.15.178-DRY.apk',
+          }
+          for key, value in required.items():
+              if manifest.get(key) != value:
+                  raise SystemExit(f'Unexpected DRY manifest {key}')
+          if (release.get('tag_name') != required['tag'] or release.get('draft') or not release.get('prerelease')):
+              raise SystemExit('Not the expected published DRY prerelease')
+          assets = release.get('assets', [])
+          if len(assets) != 3 or len({a['name'] for a in assets}) != 3:
+              raise SystemExit('Unexpected published asset count')
+          by_name = {a['name']: a for a in assets}
+          expected_names = {'Higi-0.15.178-DRY.apk', 'Higi-Dry-Manifest.json', 'SHA256SUMS.txt'}
+          if set(by_name) != expected_names:
+              raise SystemExit('Unexpected published asset names')
+          for name, content in [('Higi-Dry-Manifest.json', manifest_bytes), ('SHA256SUMS.txt', sums_bytes)]:
+              asset = by_name[name]
+              if asset.get('state') != 'uploaded':
+                  raise SystemExit('Published metadata asset not uploaded')
+              actual_hash = 'sha256:' + hashlib.sha256(content).hexdigest()
+              if asset.get('digest') and asset['digest'].lower() != actual_hash:
+                  raise SystemExit(f'Published {name} digest mismatch')
+          sha = str(manifest.get('sha256', '')).lower()
+          signer = str(manifest.get('signerSha256', '')).lower()
+          if not re.fullmatch(r'[0-9a-f]{64}', sha) or not re.fullmatch(r'[0-9a-f]{64}', signer):
+              raise SystemExit('Invalid signer or APK SHA256')
+          apk = by_name['Higi-0.15.178-DRY.apk']
+          if apk.get('state') != 'uploaded' or apk.get('digest', '').lower() != 'sha256:' + sha:
+              raise SystemExit('APK digest disagreement')
+          if sums_bytes.decode('utf-8').strip() != f'{sha}  Higi-0.15.178-DRY.apk':
+              raise SystemExit('SHA256SUMS mismatch')
+          lines = (release.get('body') or '').rstrip().splitlines()
+          def ensure_field(field, value):
+              pattern = re.compile(r'^\s*' + re.escape(field) + r':\s*(.*?)\s*$', re.IGNORECASE)
+              hits = [m.group(1) for line in lines if (m := pattern.fullmatch(line))]
+              if len(hits) > 1 or (hits and hits[0].lower() != str(value).lower()):
+                  raise SystemExit(f'Conflicting {field} already in release notes')
+              if not hits:
+                  lines.append(f'{field}: {value}')
+          ensure_field('versionCode', 328)
+          ensure_field('APK SHA-256', sha)
+          ensure_field('Signer SHA-256', signer)
+          (p / 'notes.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          print('Verified published assets; prepared updater-compatible notes; APK unchanged.')
+          PY
+
+      - name: Update release description (not the APK or assets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/dry-metadata-repair"
+          gh release edit "$TAG" --repo "$REPO" --notes-file "$dir/notes.txt"
+          gh api "repos/$REPO/releases/tags/$TAG" > "$dir/after.json"
+          python3 - "$dir" <<'PY'
+          import json, pathlib, re, sys
+          p = pathlib.Path(sys.argv[1])
+          before = json.loads((p/'release.json').read_text(encoding='utf-8'))
+          after = json.loads((p/'after.json').read_text(encoding='utf-8'))
+          if [(a['id'],a['name'],a.get('digest')) for a in before['assets']] != [(a['id'],a['name'],a.get('digest')) for a in after['assets']]:
+              raise SystemExit('Unexpected release asset change')
+          manifest = json.loads((p/'Higi-Dry-Manifest.json').read_text(encoding='utf-8'))
+          required = {'versionCode': '328', 'APK SHA-256': manifest['sha256'], 'Signer SHA-256': manifest['signerSha256']}
+          for field, value in required.items():
+              matches = re.findall(r'^\s*' + re.escape(field) + r':\s*(.*?)\s*$', after.get('body', ''), re.MULTILINE | re.IGNORECASE)
+              if len(matches) != 1 or matches[0].lower() != value.lower():
+                  raise SystemExit(f'Release metadata field missing after edit: {field}')
+          print('Confirmed release notes and all existing assets remain valid.')
+          PY
