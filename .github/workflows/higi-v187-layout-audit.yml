@@ -1,0 +1,64 @@
+name: Higi v187 layout audit
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-v187-layout-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct exact pinned source and inspect OCR layout path
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/higi"
+          mkdir -p "$BASE"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --output "$BASE/base.zip" \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7' "$BASE/base.zip" | sha256sum -c --status
+          unzip -q "$BASE/base.zip" -d "$BASE/source"
+          ROOT="$BASE/source/HebrewCrosswordApp_v0.15.175"
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.187-from-v0.15.175.patch.xz.b64" "$BASE/v187.patch" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=="199ad749bff027dfe5b429a0686bf0872e853bdf2b642c7c20753badfa02df37"
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$BASE/v187.patch"
+          git -C "$ROOT" apply "$BASE/v187.patch"
+          python - "$ROOT" <<'PY'
+          import pathlib,re,sys
+          root=pathlib.Path(sys.argv[1])
+          src=root/'app/src/main/java/com/example/hebrewcrossword'
+          files=sorted(p for p in src.glob('*.kt') if ('Ocr' in p.name or 'Crop' in p.name))
+          print("========== OCR FILES ==========")
+          for p in files: print(p.name)
+          p=src/'OcrInlineClueRecoveryV180.kt'
+          ls=p.read_text().splitlines()
+          print("========== V180 PUBLIC METHODS, LAYOUT GUARDS ==========")
+          needles=['internal fun ','fun recover','fun propose','heading','segment','source','column','width','lineIds','rtl','Regex','findHeading']
+          for i,line in enumerate(ls,1):
+              if any(s.lower() in line.lower() for s in needles) and (len(line)<205):
+                  print(f"V180 {i}: {line}")
+          print("========== V180 LINES 50-175 ==========")
+          for i in range(49,min(175,len(ls))):print(f"V180 {i+1}: {ls[i]}")
+          print("========== V180 LINES 330-445 ==========")
+          for i in range(329,min(445,len(ls))):print(f"V180 {i+1}: {ls[i]}")
+          print("========== INTEGRATION ==========")
+          for p in src.glob('*.kt'):
+              ls=p.read_text(errors='replace').splitlines()
+              idx=[i for i,t in enumerate(ls) if 'OcrInlineClueRecoveryV180' in t or 'V180_WORD_SPLIT_ADMIN_REVIEW_ONLY' in t or 'V178_PREVIEW_ONLY' in t]
+              for i in idx[:15]:
+                  print('FILE',p.name,'LINE',i+1)
+                  for j in range(max(0,i-10),min(len(ls),i+15)): print(f"  {j+1}: {ls[j][:220]}")
+          PY
