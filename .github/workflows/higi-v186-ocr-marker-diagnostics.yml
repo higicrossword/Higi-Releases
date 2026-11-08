@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-v186-ocr-marker-diagnostics.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
