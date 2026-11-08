@@ -3,5 +3,6 @@
   "version": "0.15.187",
   "versionCode": 337,
   "patchFile": "cloud-patches/v0.15.187-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "199ad749bff027dfe5b429a0686bf0872e853bdf2b642c7c20753badfa02df37"
+  "patchSha256": "199ad749bff027dfe5b429a0686bf0872e853bdf2b642c7c20753badfa02df37",
+  "releaseNotes": "Admin DRY OCR review: recognize OCR comma after standalone printed clue numbers as an alternative to dot/colon (V5/V19), retaining geometry and one-clue ownership protections. Parenthesized answer lengths stay excluded; no canonical write or normal-user update."
 }
