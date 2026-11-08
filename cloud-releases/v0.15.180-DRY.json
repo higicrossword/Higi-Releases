@@ -1,0 +1,7 @@
+{
+  "channel": "dry",
+  "version": "0.15.180",
+  "versionCode": 330,
+  "patchFile": "cloud-patches/v0.15.180-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "dba6581ba10e50ab0ff11533cda17d94d3de9236943d23b6401badd1e77f8530"
+}
