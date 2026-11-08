@@ -3,5 +3,6 @@
   "version": "0.15.181",
   "versionCode": 331,
   "patchFile": "cloud-patches/v0.15.181-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "dd0294a3cf8edbc67d99d06cb2458c38ccced09de910434514b42a8f60d0f9c4"
+  "patchSha256": "dd0294a3cf8edbc67d99d06cb2458c38ccced09de910434514b42a8f60d0f9c4",
+  "releaseNotes": "OCR shared-row safety, separate continuation strips and clearer administrator preview; DRY only"
 }
