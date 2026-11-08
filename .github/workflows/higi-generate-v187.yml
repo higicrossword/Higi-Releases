@@ -1,0 +1,134 @@
+name: Higi 0.15.187 - pinned source patch generator
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-generate-v187.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v187-patch-generation
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASE_SHA: ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7
+      PATCH_SHA: ae9b8516e5ba9a2f93916bbdd89e3671aaa1dd4d09adf452eeedc91e0ac140a0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify and retrieve pinned draft source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/releases/437513599" |
+            jq -e '.draft==true and .tag_name=="v0.15.175" and ([.assets[] |
+              select(.id==720424907 and .name=="HebrewCrosswordApp_v0.15.175_SOURCE.zip")] | length)==1'
+          mkdir -p "$RUNNER_TEMP/higi-v187"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$RUNNER_TEMP/higi-v187/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "$BASE_SHA  $RUNNER_TEMP/higi-v187/base.zip" | sha256sum --check --status
+      - name: Reconstruct v186 and prepare exact v187 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/higi-v187"
+          unzip -q "$BASE/base.zip" -d "$BASE/source"
+          ROOT="$BASE/source/HebrewCrosswordApp_v0.15.175"
+          test -f "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi build' \
+            -c user.email='higi-build@users.noreply.github.com' commit -qm 'pinned v175'
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.186-from-v0.15.175.patch.xz.b64" "$BASE/186.patch" "$PATCH_SHA" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v186 source SHA mismatch"
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$BASE/186.patch"
+          git -C "$ROOT" apply "$BASE/186.patch"
+          python - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+          root=Path(sys.argv[1])
+          path=root/'app/src/main/java/com/example/hebrewcrossword/OcrInlineClueRecoveryV180.kt'
+          s=path.read_text()
+          # OCR sometimes recognizes the printed dot after a clue number as
+          # a comma. Permit it ONLY as the punctuation of a bounded 1/2 digit
+          # number, with existing independent RTL geometry checks unchanged.
+          for old,new in (
+              (r'[.:]|[.:]',r'[.,:]|[.,:]'),
+              (r'Regex("^[.:]$")',r'Regex("^[.,:]$")'),
+              (r'([0-9]{1,2})[.:](?![0-9])',r'([0-9]{1,2})[.,:](?![0-9])'),
+          ):
+              if s.count(old)!=1: raise RuntimeError(f"Unexpected source marker pattern {old} x{s.count(old)}")
+              s=s.replace(old,new,1)
+          path.write_text(s)
+          gradle=root/'app/build.gradle.kts'
+          t=gradle.read_text()
+          for old,new in (('versionCode = 336','versionCode = 337'),('versionName = "0.15.186"','versionName = "0.15.187"')):
+              if t.count(old)!=1: raise RuntimeError("Unexpected version "+old)
+              t=t.replace(old,new,1)
+          gradle.write_text(t)
+          PY
+          python "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          grep -q 'versionCode = 337' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.187"' "$ROOT/app/build.gradle.kts"
+          python - "$ROOT" <<'PY'
+          import pathlib,re,sys
+          src=(pathlib.Path(sys.argv[1])/'app/src/main/java/com/example/hebrewcrossword/OcrInlineClueRecoveryV180.kt').read_text()
+          assert src.count('[.,:]')==4
+          standalone=re.compile(r'^(?:([0-9]{1,2})[.,:]|[.,:]([0-9]{1,2}))$')
+          inline=re.compile(r'(?<![0-9])([0-9]{1,2})[.,:](?![0-9])')
+          for t,n in [('5,','5'),('19,','19'),('5.','5'),('19.','19'),('5:','5')]:
+              m=standalone.fullmatch(t)
+              assert m and (m[1] or m[2])==n,(t,n)
+              assert n in [z[1] for z in inline.finditer(t)],t
+          for t in ('(3,3)','3,3','(4)','19','5','1,234'):
+              assert standalone.fullmatch(t) is None,t
+          for t in ('(3,3)','3,3','1,234'):
+              assert not list(inline.finditer(t)),t
+          print("v187 OCR punctuation safeguards passed")
+          PY
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff HEAD --binary > "$BASE/187.patch"
+          test -s "$BASE/187.patch"
+          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$BASE/187.patch"
+          git -C "$ROOT" apply "$BASE/187.patch"
+          python "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          python - "$BASE/187.patch" "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          root=pathlib.Path(sys.argv[2])
+          name='cloud-patches/v0.15.187-from-v0.15.175.patch.xz.b64'
+          (root/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.187','versionCode':337,'patchFile':name,
+               'patchSha256':hashlib.sha256(raw).hexdigest()}
+          (root/'cloud-releases/v0.15.187-DRY.json').write_text(json.dumps(cfg,indent=2)+'\n')
+          print('v187 full patch SHA256:',cfg['patchSha256'])
+          PY
+      - name: Commit only compressed patch and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-patches/v0.15.187-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.187-DRY.json
+          git commit -m 'Build Higi 0.15.187 DRY from pinned source and OCR fixes'
+          git push origin HEAD:main
