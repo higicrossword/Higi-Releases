@@ -1,0 +1,100 @@
+name: Higi 0.15.192 - pinned source patch generator
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-generate-v192.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v192-patch-generation
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASE_SHA: ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7
+      PATCH_SHA: 8cab4b5ca544b7297c329e4f27f63b993a1e470fd57813918c95c5d14d87db86
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify and retrieve pinned draft source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/releases/437513599" |
+            jq -e '.draft==true and .tag_name=="v0.15.175" and ([.assets[] |
+              select(.id==720424907 and .name=="HebrewCrosswordApp_v0.15.175_SOURCE.zip")] | length)==1'
+          mkdir -p "$RUNNER_TEMP/higi-v192"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$RUNNER_TEMP/higi-v192/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "$BASE_SHA  $RUNNER_TEMP/higi-v192/base.zip" | sha256sum --check --status
+      - name: Reconstruct v190 and prepare exact v192 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/higi-v192"
+          unzip -q "$BASE/base.zip" -d "$BASE/source"
+          ROOT="$BASE/source/HebrewCrosswordApp_v0.15.175"
+          test -f "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi build' \
+            -c user.email='higi-build@users.noreply.github.com' commit -qm 'pinned v175'
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.191-from-v0.15.175.patch.xz.b64" "$BASE/186.patch" "$PATCH_SHA" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v190 source SHA mismatch"
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$BASE/186.patch"
+          git -C "$ROOT" apply "$BASE/186.patch"
+          python "$GITHUB_WORKSPACE/cloud-tools/higi-v192-apply.py" "$ROOT"
+          python "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          grep -q 'versionCode = 342' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.192"' "$ROOT/app/build.gradle.kts"
+          grep -q 'OcrColumnBoundaryV192.review' "$ROOT/app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt"
+          # OCR analysis is executed by plain JVM unit tests: no Android logging in the added path.
+          ! grep -q 'DebugLog.i("OCR_COLUMN_V192"' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrInlineClueRecoveryV180.kt"
+          ! grep -q 'DebugLog.i("LOCAL_OCR_V192"' "$ROOT/app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt"
+          test -f "$ROOT/app/src/test/java/com/example/hebrewcrossword/OcrColumnBoundaryV192Test.kt"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff HEAD --binary > "$BASE/187.patch"
+          test -s "$BASE/187.patch"
+          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$BASE/187.patch"
+          git -C "$ROOT" apply "$BASE/187.patch"
+          python "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          python - "$BASE/187.patch" "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          root=pathlib.Path(sys.argv[2])
+          name='cloud-patches/v0.15.192-from-v0.15.175.patch.xz.b64'
+          (root/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.192','versionCode':342,'patchFile':name,
+               'patchSha256':hashlib.sha256(raw).hexdigest()}
+          (root/'cloud-releases/v0.15.192-DRY.json').write_text(json.dumps(cfg,indent=2)+'\n')
+          print('v192 full patch SHA256:',cfg['patchSha256'])
+          PY
+      - name: Commit only compressed patch and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-patches/v0.15.192-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.192-DRY.json
+          git commit -m 'Build Higi 0.15.192 DRY from pinned source and OCR fixes'
+          git push origin HEAD:main
