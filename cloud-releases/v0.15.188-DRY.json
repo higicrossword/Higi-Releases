@@ -3,5 +3,6 @@
   "version": "0.15.188",
   "versionCode": 338,
   "patchFile": "cloud-patches/v0.15.188-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "03d3c5b79917fd83d286f8d6a83f4251f468b9cd80555bd90fb90c558e09aa33"
+  "patchSha256": "03d3c5b79917fd83d286f8d6a83f4251f468b9cd80555bd90fb90c558e09aa33",
+  "notes": "V188 administrator-only narrow-column source-word crop review; no canonical writes"
 }
