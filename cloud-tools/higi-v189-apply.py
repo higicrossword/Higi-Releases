@@ -22,13 +22,7 @@ new='''            // V189 DRY: require independent real printed-number boxes in
                 singleAnchorRows>=2 && compactRows>=2 &&
                 rightLaneStarts*2>=anchored.size &&
                 verticalSpan>=height/80
-            DebugLog.i("OCR_COLUMN_V189",
-                "dir="+section.direction+" rawRows="+section.rows.size+
-                " expected="+expected.size+" wordAnchors="+
-                candidates.sumOf{it.third.size}+" aligned="+anchored.size+
-                " single="+singleAnchorRows+" compact="+compactRows+
-                " right="+rightLaneStarts+" shared="+shared+
-                " span="+verticalSpan+" enabled="+narrowColumn)
+            // Keep the pure source-word candidate evaluator Android-free for JVM unit tests.
             if(shared==0 && !narrowColumn)continue
             foundInline=true'''
 if s.count(old)!=1:raise SystemExit('v188 compact gate is not unique; aborting')
@@ -93,9 +87,7 @@ block=r'''        // V189 DRY review-only safety guard. A legacy whole-row crop 
                     newPreviewReasons[candidate]="V189_UNSAFE_LEGACY_PREVIEW:"+why+
                         "; source-word evidence; withheld for manual review; "+
                         "NO AI re-decode / NO canonical write"
-                    DebugLog.i("LOCAL_OCR_V189",
-                        "key="+wire(candidate)+" reason="+why+
-                        " legacyPreviewWithheld=true")
+                    // Reason is retained in newPreviewReasons for the admin report.
                 }
             }
         }
