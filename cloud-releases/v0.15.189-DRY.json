@@ -3,5 +3,6 @@
   "version": "0.15.189",
   "versionCode": 339,
   "patchFile": "cloud-patches/v0.15.189-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "d2748588bd208a8572a09fe67806d0ad3da6a48065b890ba9444c7fee189510c"
+  "patchSha256": "d2748588bd208a8572a09fe67806d0ad3da6a48065b890ba9444c7fee189510c",
+  "notes": "V189 admin-only OCR narrow-column review: sparse physical anchors and legacy-preview safety filter; no canonical writes"
 }
