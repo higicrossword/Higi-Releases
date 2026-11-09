@@ -66,6 +66,9 @@ jobs:
           grep -q 'versionCode = 339' "$ROOT/app/build.gradle.kts"
           grep -q 'versionName = "0.15.189"' "$ROOT/app/build.gradle.kts"
           grep -q 'compactRows=candidates.count' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrInlineClueRecoveryV180.kt"
+          # OCR analysis is executed by plain JVM unit tests: no Android logging in the added path.
+          ! grep -q 'DebugLog.i("OCR_COLUMN_V189"' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrInlineClueRecoveryV180.kt"
+          ! grep -q 'DebugLog.i("LOCAL_OCR_V189"' "$ROOT/app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt"
           test -f "$ROOT/app/src/test/java/com/example/hebrewcrossword/OcrCompactColumnV188Test.kt"
           git -C "$ROOT" add -N -A
           git -C "$ROOT" diff HEAD --binary > "$BASE/187.patch"
