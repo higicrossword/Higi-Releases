@@ -1,0 +1,61 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrColumnSourceWordV190Test {
+    private fun w(t:String,x:Int,y:Int,x2:Int=x+58,c:Int=92)=
+        OcrSharedRowSplitterV161.Word(t,CropRect(x,y,x2,y+29),c)
+    private val expected=setOf("H1","H5","H8","H9","H10","H12","H14")
+    private fun sourceWords()=listOf(
+        w("1.",2870,290,2900),w("נוצרי",2740,290),w("שהיה",2640,291),
+        w("שוהה",2470,290),w("למסע",2280,291),
+        w("הגומל",2740,361),w("(4,3)",2610,361,2680),
+        w("5.",2520,361,2550),w("הלבינו",2380,361),
+        w("פניהם",2200,361),w("(5)",2120,361,2160),
+        w("10.",2396,541,2451),w("אפשר",2270,541),
+        w("לשאוב",2120,541),w("מה",2830,601),
+        w("הר",2770,601),w("(4,3)",2570,601,2650),
+        w("12.",2427,601,2466),w("איפה",2310,601),
+        w("מושכים",2110,601),w("בכוונה",2810,661),
+        w("(3)",2620,661),w("14.",2255,661,2294),
+        w("בדרך",2130,661),w("חזרה",2810,721),
+        w("נשק",2480,721),w("(6)",2180,721,2220)
+    )
+    @Test fun splitSourcePixelRowsWithoutAbsorbingNextPrintedNumber(){
+        val regions=mapOf("H1" to listOf(CropRect(2100,281,2940,405)),
+            "H10" to listOf(CropRect(2050,517,2960,648)),
+            "H12" to listOf(CropRect(2050,585,2960,708)),
+            "H14" to listOf(CropRect(2050,635,2960,766)),
+            "H9" to listOf(CropRect(2050,400,2960,580)))
+        val r=OcrColumnSourceWordV190.review(regions,sourceWords(),
+            expected,3000,2440)
+        assertTrue(r.previews["H1"]?.size==2)
+        assertTrue(r.previews["H10"]?.size==2)
+        assertTrue(r.previews["H12"]?.size==2)
+        assertTrue(r.previews["H14"]?.size==2)
+        assertFalse("H9" in r.previews)
+        assertFalse("H8" in r.previews)
+        // The next exact number is excluded even on a shared printed line.
+        assertTrue(r.previews.getValue("H1").none{
+            it.left<=2535 && it.right>=2535 && it.top<=376 && it.bottom>=376
+        })
+        assertTrue(r.previews.values.flatten().all{it.valid})
+    }
+    @Test fun oldWideNewspaperCropsAreNotModified(){
+        val regions=mapOf("H1" to listOf(CropRect(40,300,2900,360)))
+        val r=OcrColumnSourceWordV190.review(regions,sourceWords(),
+            expected,3000,2440)
+        assertTrue(r.previews.isEmpty())
+        assertTrue(r.withheld.isEmpty())
+    }
+    @Test fun missingExactNumberWithForeignAnchorIsNotDisplayed(){
+        val r=OcrColumnSourceWordV190.review(
+            mapOf("H9" to listOf(CropRect(2000,465,2940,650))),
+            sourceWords(),expected,3000,2440)
+        assertFalse("H9" in r.previews)
+        assertTrue(r.withheld["H9"]?.contains("MISSING_EXACT_OWN_NUMBER")==true)
+    }
+}
