@@ -1,0 +1,70 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.max
+
+/** V191: DRY ADMIN preview safety audit; never modifies accepted/canonical crops. */
+object OcrPreviewSafetyAuditV191 {
+    data class Result(val withheld:Map<String,String>,val diagnostics:Map<String,String>)
+    private val printed=Regex("^([0-9]{1,2})[.,:]$")
+    private val length=Regex("^\\([0-9]{1,2}(?:[,،][0-9]{1,2}){0,3}\\)$")
+    private fun printedNumber(s:String):Int?=printed.matchEntire(
+        s.trim().replace('．','.'))?.groupValues?.get(1)?.toIntOrNull()
+    private fun inside(box:CropRect,word:OcrSharedRowSplitterV161.Word):Boolean {
+        val midX=(word.box.left+word.box.right)/2
+        val midY=(word.box.top+word.box.bottom)/2
+        return midX>=box.left && midX<=box.right &&
+            midY>=box.top && midY<=box.bottom
+    }
+    fun inspect(
+        proposals:Map<String,List<CropRect>>,
+        words:List<OcrSharedRowSplitterV161.Word>,
+        expected:Set<String>,
+        imageWidth:Int,
+        imageHeight:Int
+    ):Result {
+        val withheld=linkedMapOf<String,String>()
+        val diagnostics=linkedMapOf<String,String>()
+        if(imageWidth<=0 || imageHeight<=0)return Result(withheld,diagnostics)
+        for((key,parts) in proposals) {
+            if(key !in expected || parts.size!=1)continue
+            val rect=parts.single()
+            if(!rect.valid || rect.left<imageWidth*58/100 ||
+                rect.right-rect.left>imageWidth*44/100)continue
+            val ownNumber=key.drop(1).toIntOrNull()?:continue
+            val possible=expected.asSequence().filter{
+                it.firstOrNull()==key.firstOrNull()
+            }.mapNotNull{it.drop(1).toIntOrNull()}.toSet()
+            val present=words.filter{
+                it.box.valid && it.confidence>=40 && inside(rect,it)
+            }
+            val anchors=present.mapNotNull{
+                val n=printedNumber(it.text)
+                if(n in possible && it.confidence>=65)n else null
+            }
+            val own=anchors.count{it==ownNumber}
+            val foreign=anchors.filter{it!=ownNumber}.distinct().sorted()
+            val terminals=present.count{it.confidence>=55 &&
+                length.matches(it.text.trim().replace(" ",""))}
+            val coverage=rect.bottom-rect.top
+            val multipleLines=coverage>max(65,imageHeight/34)
+            val reason=when{
+                foreign.isNotEmpty()->"V191_WITHHELD_FOREIGN_PRINTED_NUMBER:"+
+                    foreign.joinToString(",")
+                own==0 && multipleLines->"V191_WITHHELD_OWN_NUMBER_UNCONFIRMED_MULTILINE"
+                own==1 && terminals==0 && multipleLines->
+                    "V191_WITHHELD_UNBOUNDED_MULTILINE"
+                else->null
+            }
+            diagnostics[key]="V191_SOURCE_AUDIT: own=$own foreign="+
+                (if(foreign.isEmpty())"none" else foreign.joinToString(","))+
+                " lengthMarkers=$terminals sourceWords="+present.size+
+                " pixelsHigh=$coverage withheld="+(reason!=null)
+            if(reason!=null){
+                withheld[key]=reason+
+                    "; source-pixel evidence; manual review only; "+
+                    "NO AI re-decode / NO canonical write"
+            }
+        }
+        return Result(withheld,diagnostics)
+    }
+}
