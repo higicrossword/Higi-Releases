@@ -1,0 +1,70 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrColumnBoundaryV192Test {
+    private fun w(t:String,x:Int,y:Int,x2:Int=x+58)=
+        OcrSharedRowSplitterV161.Word(t,CropRect(x,y,x2,y+29),92)
+    private val expected=setOf("H1","H5","H8","H9","H10","H12","H14","V1")
+    private fun words()=listOf(
+        w("1.",2870,290,2900),w("נוצרי",2740,290),w("שהיה",2640,291),
+        w("שותף",2470,290),w("למסע",2280,291),
+        w("הגומל",2740,361),w("(4,3)",2610,361,2680),
+        w("5.",2520,361,2550),w("הלבינו",2380,361),
+        w("פניהם",2200,361),w("(5)",2120,361,2160),
+        w("10.",2396,541,2451),w("אפשר",2270,541),
+        w("לשאוב",2120,541),w("מה",2830,601),
+        w("הר",2770,601),w("(4,3)",2570,601,2650),
+        w("12.",2427,601,2466),w("איפה",2310,601),
+        w("מושכים",2110,601),w("בכוונה",2810,661),
+        w("(3)",2620,661),w("14.",2255,661,2294),
+        w("בדרך",2130,661),w("חזרה",2810,721),
+        w("נשק",2480,721),w("(6)",2180,721,2220))
+    @Test fun fiveLegacyPiecesShrinkToTwoNonOverlappingClueLines() {
+        // Based on the original Higi 0.15.191 H1 06 Nov 2026 report.
+        val h1=listOf(CropRect(2122,288,2903,348),
+            CropRect(2199,344,2887,400),
+            CropRect(2163,404,2906,463),
+            CropRect(2128,466,2906,528),
+            CropRect(2148,523,2906,585))
+        val review=OcrColumnBoundaryV192.review(mapOf("H1" to h1),
+            words(),expected,3000,2440)
+        assertEquals(2,review.previews.getValue("H1").size)
+        assertTrue(review.diagnostics.getValue("H1").startsWith("V192_PREVIEW_ONLY"))
+        // H5 printed marker at x2520..2550, y361: must NOT be in H1.
+        assertTrue(review.previews.getValue("H1").none{r->
+            r.left<=2535 && r.right>=2535 &&
+                r.top<=376 && r.bottom>=376
+        })
+    }
+    @Test fun splitConsecutiveNumbersOnSharedPrintLine(){
+        val review=OcrColumnBoundaryV192.review(
+            mapOf("H10" to listOf(CropRect(2100,518,2930,646)),
+                "H12" to listOf(CropRect(2100,585,2930,709))),
+            words(),expected,3000,2440)
+        assertEquals(2,review.previews.getValue("H10").size)
+        assertEquals(2,review.previews.getValue("H12").size)
+        assertFalse(review.previews.getValue("H10").any{r->
+            r.left<=2440 && r.right>=2440 && r.top<=615 && r.bottom>=615
+        })
+    }
+    @Test fun ambiguousUnanchoredOldFiveRowsAreWithheld() {
+        val r=OcrColumnBoundaryV192.review(
+            mapOf("H9" to listOf(CropRect(2100,340,2940,390),
+                CropRect(2100,392,2940,444),CropRect(2100,446,2940,555))),
+            words(),expected,3000,2440)
+        assertTrue(r.previews.isEmpty())
+        assertTrue(r.withheld["H9"]?.contains("UNANCHORED")==true)
+    }
+    @Test fun originalFullWidthNewspaperDoesNotChange() {
+        val r=OcrColumnBoundaryV192.review(
+            mapOf("H1" to listOf(CropRect(47,1060,2910,1097))),
+            words(),expected,3000,2440)
+        assertTrue(r.previews.isEmpty())
+        assertTrue(r.withheld.isEmpty())
+        assertFalse("H1" in r.diagnostics)
+    }
+}
