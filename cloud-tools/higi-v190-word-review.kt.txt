@@ -1,0 +1,136 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Administrator DRY reviewer only. Re-segment a narrow RTL newspaper column
+ * using source-pixel OCR word boxes, never the AI transcription or text width.
+ * A clue is shown only from an exact own printed-number word to an exact next
+ * printed-number word or an actual parenthesized answer-length word.
+ * Unsafe broad older proposals are withheld, not saved to canonical.
+ */
+object OcrColumnSourceWordV190 {
+    data class Review(val previews:Map<String,List<CropRect>>,
+        val withheld:Map<String,String>,val diagnostic:Map<String,String>)
+    private val printed=Regex("^([0-9]{1,2})[.,:]$")
+    private val length=Regex("^\\([0-9]{1,2}(?:,[0-9]{1,2}){0,3}\\)$")
+    private fun number(text:String):Int?=printed.matchEntire(text.trim())
+        ?.groupValues?.getOrNull(1)?.toIntOrNull()
+    private fun terminal(text:String):Boolean=length.matches(
+        text.trim().replace(" ","").replace('،',','))
+    private fun sameRect(r:CropRect,a:OcrSharedRowSplitterV161.Word):Boolean {
+        val x=(a.box.left+a.box.right)/2
+        val y=(a.box.top+a.box.bottom)/2
+        return x>=r.left-2 && x<=r.right+2 &&
+            y>=r.top-2 && y<=r.bottom+2
+    }
+    fun review(original:Map<String,List<CropRect>>,
+        allWords:List<OcrSharedRowSplitterV161.Word>,
+        expected:Set<String>,width:Int,height:Int):Review {
+        val revised=linkedMapOf<String,List<CropRect>>()
+        val withheld=linkedMapOf<String,String>()
+        val info=linkedMapOf<String,String>()
+        if(width<500 || height<500)return Review(revised,withheld,info)
+        val rowTolerance=max(12,height/135)
+        for((key,parts) in original){
+            if(!key.matches(Regex("^[HV][0-9]{1,2}$")) || parts.size!=1)continue
+            val source=parts.single()
+            // Only narrow right-side source columns; never touch the
+            // successful full-width layouts (e.g. Maariv/Oded Rosen).
+            if(source.left<width*58/100 || source.right-source.left>width*44/100)
+                continue
+            val ownNumber=key.drop(1).toIntOrNull()?:continue
+            val direction=key[0]
+            val validNumbers=expected.filter{it.startsWith(direction)}.mapNotNull{
+                it.drop(1).toIntOrNull()
+            }.toSet()
+            val within=allWords.filter{
+                it.box.valid && it.confidence>=25 &&
+                    it.box.right-it.box.left>=4 &&
+                    it.box.bottom-it.box.top in 7..max(65,height/22) &&
+                    sameRect(source,it)
+            }
+            val starts=within.filter{
+                it.confidence>=65 && number(it.text) in validNumbers
+            }
+            val myStarts=starts.filter{number(it.text)==ownNumber}
+            if(myStarts.size!=1){
+                if(starts.any{number(it.text)!=ownNumber}){
+                    withheld[key]="V190_MISSING_EXACT_OWN_NUMBER; foreign printed source-number " +
+                        "inside older crop; manual review only; NO canonical write"
+                }
+                continue
+            }
+            val own=myStarts.single()
+            // OCR word boxes may be several pixels apart vertically in one
+            // printed line; group by source line then read Hebrew right to left.
+            val physicalRows=mutableListOf<MutableList<OcrSharedRowSplitterV161.Word>>()
+            for(word in within.sortedWith(compareBy<OcrSharedRowSplitterV161.Word>{it.box.top}
+                    .thenByDescending{it.box.right})){
+                val last=physicalRows.lastOrNull()
+                if(last!=null && abs(last.first().box.top-word.box.top)<=rowTolerance)
+                    last+=word
+                else physicalRows+=mutableListOf(word)
+            }
+            val ordered=physicalRows.flatMap{row->row.sortedByDescending{it.box.right}}
+            val startIndex=ordered.indexOf(own)
+            if(startIndex<0)continue
+            val following=ordered.drop(startIndex+1)
+            val nextStart=following.indexOfFirst{w->
+                w in starts && number(w.text)!=ownNumber
+            }
+            val beforeNext=if(nextStart>=0)following.take(nextStart) else following
+            val endLength=beforeNext.indexOfFirst{terminal(it.text)}
+            val chosen=if(endLength>=0)
+                listOf(own)+beforeNext.take(endLength+1)
+            else if(nextStart>=0)
+                listOf(own)+beforeNext
+            else emptyList()
+            if(chosen.size<3 || chosen.size>140){
+                // Even a visible own number is not proof of an end.
+                if(starts.size>1 || ordered.indexOf(own)>0 || terminalMissing(chosen))
+                    withheld[key]="V190_UNPROVEN_WORD_BOUNDARY; source number without " +
+                        "safe next number/length; manual review; NO canonical write"
+                continue
+            }
+            val out=mutableListOf<CropRect>()
+            for(group in physicalRows){
+                val selected=group.filter{it in chosen}
+                if(selected.isEmpty())continue
+                val rect=CropRect(max(0,selected.minOf{it.box.left}-2),
+                    max(0,selected.minOf{it.box.top}-1),
+                    min(width,selected.maxOf{it.box.right}+2),
+                    min(height,selected.maxOf{it.box.bottom}+1))
+                if(!rect.valid || rect.right-rect.left<20 || rect.bottom-rect.top<10){
+                    out.clear();break
+                }
+                out+=rect
+            }
+            if(out.isEmpty() || out.size>5 || out.any{rect->
+                    starts.any{a->a!=own && sameRect(rect,a)}}){
+                withheld[key]="V190_UNSAFE_SOURCE_PIXEL_BOUNDARY; manual review; " +
+                    "NO canonical write"
+                continue
+            }
+            // The complete crop must stay inside the legacy source region,
+            // apart from no more than three pixels of border padding.
+            if(out.any{it.left<source.left-4 || it.right>source.right+4 ||
+                    it.top<source.top-4 || it.bottom>source.bottom+4}){
+                withheld[key]="V190_CROP_OUTSIDE_SOURCE_REGION; manual review only"
+                continue
+            }
+            revised[key]=out
+            info[key]="V190_PREVIEW_ONLY: original OCR source word boxes; " +
+                "exact printed own number; " +
+                (if(endLength>=0)"parenthesized length boundary" else
+                    "next exact printed number boundary") +
+                "; pieces="+out.size+"; NO AI re-decode / NO canonical write"
+        }
+        return Review(revised,withheld,info)
+    }
+    // Conservative rejection of crops lacking usable end evidence.
+    private fun terminalMissing(chosen:List<OcrSharedRowSplitterV161.Word>)=
+        chosen.none{terminal(it.text)}
+}
