@@ -3,5 +3,6 @@
   "version": "0.15.190",
   "versionCode": 340,
   "patchFile": "cloud-patches/v0.15.190-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "e55c236b68464442dc518df5d1cfa2768ddb4478c3f401e346a8db43edd1703e"
+  "patchSha256": "e55c236b68464442dc518df5d1cfa2768ddb4478c3f401e346a8db43edd1703e",
+  "notes": "V190 DRY admin-only original pixel word-boundary review, no AI re-decode or canonical write"
 }
