@@ -3,5 +3,6 @@
   "version": "0.15.189",
   "versionCode": 339,
   "patchFile": "cloud-patches/v0.15.189-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "77a3ba1303c91a1491cc1822e7a693f2a4d36d887405adaa57cde006d510d001"
+  "patchSha256": "77a3ba1303c91a1491cc1822e7a693f2a4d36d887405adaa57cde006d510d001",
+  "notes": "V189 admin-only narrow-column OCR review; Android-free source-word detection for JVM tests; no canonical writes"
 }
