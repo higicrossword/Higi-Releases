@@ -40,7 +40,7 @@ jobs:
             --output "$RUNNER_TEMP/higi-v191/base.zip" \
             "https://api.github.com/repos/$REPO/releases/assets/720424907"
           echo "$BASE_SHA  $RUNNER_TEMP/higi-v191/base.zip" | sha256sum --check --status
-      - name: Reconstruct v191 and prepare exact v191 source patch
+      - name: Reconstruct v190 and prepare exact v191 source patch
         shell: bash
         run: |
           set -euo pipefail
@@ -52,10 +52,10 @@ jobs:
           git -C "$ROOT" add -A
           git -C "$ROOT" -c user.name='Higi build' \
             -c user.email='higi-build@users.noreply.github.com' commit -qm 'pinned v175'
-          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.191-from-v0.15.175.patch.xz.b64" "$BASE/186.patch" "$PATCH_SHA" <<'PY'
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.190-from-v0.15.175.patch.xz.b64" "$BASE/186.patch" "$PATCH_SHA" <<'PY'
           import base64,hashlib,lzma,pathlib,sys
           raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
-          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v191 source SHA mismatch"
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v190 source SHA mismatch"
           pathlib.Path(sys.argv[2]).write_bytes(raw)
           PY
           git -C "$ROOT" apply --check "$BASE/186.patch"
