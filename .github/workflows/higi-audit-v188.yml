@@ -1,0 +1,57 @@
+name: Higi 0.15.188 source audit
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-audit-v188.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect source crop geometry and fallback logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/v188-audit"
+          mkdir -p "$BASE"
+          gh api "repos/higicrossword/Higi-Releases/releases/437513599" | jq -e '.draft==true and .tag_name=="v0.15.175" and any(.assets[];.id==720424907)'
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            -o "$BASE/source.zip" \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  '"$BASE/source.zip" | sha256sum -c --status
+          unzip -q "$BASE/source.zip" -d "$BASE/source"
+          ROOT="$BASE/source/HebrewCrosswordApp_v0.15.175"
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.187-from-v0.15.175.patch.xz.b64" "$BASE/v187.patch" <<'PY'
+          import sys,pathlib,base64,lzma,hashlib
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=="199ad749bff027dfe5b429a0686bf0872e853bdf2b642c7c20753badfa02df37"
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$BASE/v187.patch"
+          git -C "$ROOT" apply "$BASE/v187.patch"
+          python - "$ROOT" <<'PY'
+          import pathlib,sys
+          root=pathlib.Path(sys.argv[1])/'app/src/main/java/com/example/hebrewcrossword'
+          targets={
+            'OcrInlineClueRecoveryV180.kt': [(1,85),(95,120),(140,220),(267,320),(320,395),(400,520)],
+            'OcrPrintedLineRecoveryV178.kt':[(1,180)],
+            'OcrVerticalColumnRecoveryV179.kt':[(1,95)],
+            'HigiLocalOcrCropEngine.kt':[(130,230),(260,450)],
+          }
+          for name,ranges in targets.items():
+              p=root/name
+              ls=p.read_text().splitlines()
+              print(f"----- BEGIN {name} LINES={len(ls)} -----")
+              for a,b in ranges:
+                  print(f"---- {a}-{min(b,len(ls))} ----")
+                  for i in range(a-1,min(b,len(ls))):
+                      print(f"SRC {name}:{i+1}: {ls[i]}")
+          PY
