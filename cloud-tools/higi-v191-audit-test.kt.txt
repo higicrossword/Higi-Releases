@@ -1,0 +1,44 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrPreviewSafetyAuditV191Test {
+    private fun w(s:String,x:Int,y:Int)=OcrSharedRowSplitterV161.Word(
+        s,CropRect(x,y,x+33,y+27),93)
+    private val keys=setOf("H1","H5","H9","H10")
+    @Test fun foreignPrintedNumberRejectsOldBroadCrop() {
+        val r=OcrPreviewSafetyAuditV191.inspect(
+            mapOf("H9" to listOf(CropRect(2000,460,2970,650))),
+            listOf(w("9.",2250,485),w("10.",2620,595)),keys,3054,2444)
+        assertTrue(r.withheld["H9"]?.contains("FOREIGN_PRINTED_NUMBER:10")==true)
+        assertTrue(r.diagnostics["H9"]?.contains("own=1")==true)
+    }
+    @Test fun ownNumberWithNoProvenMultilineTerminatorIsWithheld() {
+        val r=OcrPreviewSafetyAuditV191.inspect(
+            mapOf("H1" to listOf(CropRect(2100,290,2970,410))),
+            listOf(w("1.",2910,310),w("טקסט",2700,310)),keys,3054,2444)
+        assertTrue(r.withheld["H1"]?.contains("UNBOUNDED_MULTILINE")==true)
+    }
+    @Test fun singleCompleteLineRetainsReviewCrop() {
+        val r=OcrPreviewSafetyAuditV191.inspect(
+            mapOf("H9" to listOf(CropRect(2100,480,2910,519))),
+            listOf(w("9.",2242,480),w("(5)",2100,480)),keys,3054,2444)
+        assertTrue(r.withheld.isEmpty())
+    }
+    @Test fun multiPieceStrongCropNeverGetsFiltered() {
+        val r=OcrPreviewSafetyAuditV191.inspect(
+            mapOf("H1" to listOf(CropRect(2600,290,2950,340),
+                CropRect(2450,360,2700,405))),
+            listOf(w("1.",2900,300),w("5.",2515,360)),keys,3054,2444)
+        assertTrue(r.withheld.isEmpty())
+    }
+    @Test fun wideNewspaperLayoutRemainsUntouched() {
+        val r=OcrPreviewSafetyAuditV191.inspect(
+            mapOf("H1" to listOf(CropRect(50,1110,2970,1150))),
+            listOf(w("10.",2500,1120)),keys,3054,2444)
+        assertTrue(r.withheld.isEmpty())
+        assertFalse("H1" in r.diagnostics)
+    }
+}
