@@ -1,0 +1,157 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * V192 DRY administrator reviewer only: narrow RTL column, including legacy
+ * MULTI-PIECE proposals. All decisions use ORIGINAL OCR word pixel coordinates.
+ * No canonical writes, no AI re-decode, no solver or weekly-import changes.
+ */
+object OcrColumnBoundaryV192 {
+    data class Review(
+        val previews:Map<String,List<CropRect>>,
+        val withheld:Map<String,String>,
+        val diagnostics:Map<String,String>
+    )
+    private val numberPattern=Regex("^([0-9]{1,2})[.,:]$")
+    private val lengthPattern=Regex("^\\([0-9]{1,2}(?:[,،][0-9]{1,2}){0,3}\\)$")
+    private fun number(s:String):Int?=numberPattern.matchEntire(
+        s.trim().replace('．','.'))?.groupValues?.get(1)?.toIntOrNull()
+    private fun isLength(s:String)=lengthPattern.matches(s.trim().replace(" ",""))
+    private fun centerX(w:OcrSharedRowSplitterV161.Word)=
+        (w.box.left+w.box.right)/2
+    private fun centerY(w:OcrSharedRowSplitterV161.Word)=
+        (w.box.top+w.box.bottom)/2
+
+    fun review(
+        proposals:Map<String,List<CropRect>>,
+        words:List<OcrSharedRowSplitterV161.Word>,
+        expected:Set<String>,
+        width:Int,
+        height:Int
+    ):Review {
+        val previews=linkedMapOf<String,List<CropRect>>()
+        val withheld=linkedMapOf<String,String>()
+        val diagnostics=linkedMapOf<String,String>()
+        if(width<500 || height<500 || words.isEmpty())
+            return Review(previews,withheld,diagnostics)
+        val rowTolerance=max(10,height/145)
+        val minX=width*58/100
+        val sourceWords=words.filter{
+            it.box.valid && it.confidence>=25 &&
+                it.box.left>=minX-12 &&
+                it.box.right-it.box.left in 4..max(160,width/6) &&
+                it.box.bottom-it.box.top in 7..max(65,height/25)
+        }
+        for((key,parts) in proposals) {
+            if(key !in expected || !key.matches(Regex("^[HV][0-9]{1,2}$"))
+                || parts.isEmpty() || parts.size>8 || parts.any{!it.valid})continue
+            // Scope: only the compact printed right-side columns of
+            // "Hafuch Al Hafuch". Never touch wide Maariv layouts.
+            if(parts.any{it.left<minX || it.right-it.left>width*44/100})continue
+            val region=CropRect(
+                parts.minOf{it.left},parts.minOf{it.top},
+                parts.maxOf{it.right},parts.maxOf{it.bottom}
+            )
+            if(region.bottom-region.top>height/5)continue
+            val ownNumber=key.drop(1).toIntOrNull()?:continue
+            val valid=expected.filter{it.firstOrNull()==key.firstOrNull()}
+                .mapNotNull{it.drop(1).toIntOrNull()}.toSet()
+            val available=sourceWords.filter{
+                centerX(it) in (region.left-5)..(region.right+5) &&
+                    centerY(it) in (region.top-6)..(region.bottom+6)
+            }
+            if(available.isEmpty()){
+                diagnostics[key]="V192_NO_SOURCE_WORD_BOXES; existing preview retained"
+                continue
+            }
+            // Group physical printed lines by source Y, then read each RTL.
+            val rows=mutableListOf<MutableList<OcrSharedRowSplitterV161.Word>>()
+            for(word in available.sortedWith(compareBy<OcrSharedRowSplitterV161.Word>{
+                    it.box.top}.thenByDescending{it.box.right})) {
+                val same=rows.firstOrNull{
+                    abs(it.first().box.top-word.box.top)<=rowTolerance
+                }
+                if(same!=null)same+=word else rows+=mutableListOf(word)
+            }
+            val ordered=rows.flatMap{r->r.sortedByDescending{it.box.right}}
+            val anchors=ordered.filter{
+                it.confidence>=65 && number(it.text) in valid
+            }
+            val mine=anchors.filter{number(it.text)==ownNumber}
+            if(mine.size!=1) {
+                val other=anchors.mapNotNull{number(it.text)}.filter{
+                    it!=ownNumber}.distinct()
+                val diagnosis="V192_EXACT_OWN_NUMBER_"+(if(mine.isEmpty())"MISSING" else "AMBIGUOUS")+
+                    "; foreign="+(if(other.isEmpty())"none" else other.joinToString(","))+
+                    "; segments="+parts.size+"; no canonical write"
+                diagnostics[key]=diagnosis
+                // A multi-piece legacy candidate must not remain displayed
+                // as a validated individual clue when foreign starts exist.
+                if(other.isNotEmpty() && parts.size>1)withheld[key]=
+                    "V192_WITHHELD_UNANCHORED_MULTIPIECE_FOREIGN_NUMBER; "+diagnosis
+                continue
+            }
+            val own=mine.single()
+            val startIndex=ordered.indexOf(own)
+            val later=ordered.drop(startIndex+1)
+            val nextIndex=later.indexOfFirst{
+                it in anchors && number(it.text)!=ownNumber
+            }
+            val beforeNext=if(nextIndex>=0)later.take(nextIndex) else later
+            val lengthIndex=beforeNext.indexOfFirst{isLength(it.text)}
+            val chosen=when {
+                lengthIndex>=0->listOf(own)+beforeNext.take(lengthIndex+1)
+                nextIndex>=0->listOf(own)+beforeNext
+                else->emptyList()
+            }
+            if(chosen.size !in 3..120) {
+                diagnostics[key]="V192_UNPROVEN_END_BOUNDARY; own printed number found; "+
+                    "nextNumber="+(nextIndex>=0)+" length="+(lengthIndex>=0)+
+                    "; segments="+parts.size+"; manual review only"
+                if(parts.size>1)withheld[key]=
+                    "V192_WITHHELD_UNPROVEN_MULTIPIECE_BOUNDARY; "+diagnostics.getValue(key)
+                continue
+            }
+            val rectangles=mutableListOf<CropRect>()
+            for(row in rows){
+                val segment=row.filter{it in chosen}
+                if(segment.isEmpty())continue
+                val rect=CropRect(
+                    max(0,segment.minOf{it.box.left}-2),
+                    max(0,segment.minOf{it.box.top}-2),
+                    min(width,segment.maxOf{it.box.right}+2),
+                    min(height,segment.maxOf{it.box.bottom}+2)
+                )
+                if(!rect.valid || rect.right-rect.left<20 ||
+                    rect.bottom-rect.top<12){
+                    rectangles.clear();break
+                }
+                rectangles+=rect
+            }
+            val foreignInside=rectangles.any{r->anchors.any{
+                it!=own && centerX(it) in r.left..r.right &&
+                    centerY(it) in r.top..r.bottom
+            }}
+            if(rectangles.size !in 1..4 || foreignInside ||
+                rectangles.any{
+                    it.left<region.left-5 || it.right>region.right+5 ||
+                    it.top<region.top-6 || it.bottom>region.bottom+6
+                }){
+                diagnostics[key]="V192_REJECTED_GEOMETRY_OR_FOREIGN_START; "+
+                    "segments="+rectangles.size+" foreignInside=$foreignInside"
+                if(parts.size>1)withheld[key]="V192_WITHHELD_UNSAFE_MULTIPIECE; "+
+                    diagnostics.getValue(key)
+                continue
+            }
+            previews[key]=rectangles
+            diagnostics[key]="V192_PREVIEW_ONLY: exact printed own-number; "+
+                (if(lengthIndex>=0)"printed answer-length" else "next printed-number")+
+                " boundary; source-word RTL rows="+rectangles.size+
+                "; original pixels; NO AI re-decode / NO canonical write"
+        }
+        return Review(previews,withheld,diagnostics)
+    }
+}
