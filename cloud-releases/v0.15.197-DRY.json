@@ -4,5 +4,5 @@
   "versionCode": 347,
   "patchFile": "cloud-patches/v0.15.197-from-v0.15.175.patch.xz.b64",
   "patchSha256": "bd973b2aa48e6e49256d1a1791200ca6b6c2fa5b092d1375d577c02bdc87fdb2",
-  "notes": "V197: series-specific OCR DRY preview, horizontal swipe between clues, compact labeled controls. Tartey/Hafuch paths unchanged; never auto-write Canonical."
+  "notes": "V197 admin-only DRY: independent per-series OCR layout profiles; Monday series printed-number proposals; horizontal swipe between clue crops; compact, clearer controls. Tartey, Hafuch and other series retain previous OCR rules. No automatic canonical edits."
 }
