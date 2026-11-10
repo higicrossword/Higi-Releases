@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.196",
+  "versionCode": 346,
+  "patchFile": "cloud-patches/v0.15.196-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "8aadda20fe58a341100d0ff7aeb825466e64b3e6c08f75a0f2ace99d8d24a445",
+  "notes": "Administrator-only source-number review bridge and completeness gating; preserve canonical and manual crops"
+}
