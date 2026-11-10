@@ -1,0 +1,167 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+
+/**
+ * V194: administrator-only DRY boundary preview for narrow RTL clue columns.
+ * A Hebrew ";" next to parentheses may be merged into a digit by OCR,
+ * e.g. printed ";(5)" -> OCR "(65)". Delimiters are weighted evidence,
+ * NOT an exact answer-length check and NOT sufficient on their own.
+ * Never changes accepted or canonical clue crops.
+ */
+object OcrSemicolonBoundaryV194 {
+    data class Review(
+        val previews: Map<String, List<CropRect>>,
+        val diagnostics: Map<String, String>
+    )
+    private val printed = Regex("^([0-9]{1,2})[.,:]$")
+    private val suspectSix = Regex("^\\(6[0-9]{1,2}\\)$")
+    private fun number(text: String): Int? =
+        printed.matchEntire(text.trim().replace('．', '.'))
+            ?.groupValues?.get(1)?.toIntOrNull()
+    private fun cx(w: OcrSharedRowSplitterV161.Word) =
+        (w.box.left + w.box.right) / 2
+    private fun cy(w: OcrSharedRowSplitterV161.Word) =
+        (w.box.top + w.box.bottom) / 2
+
+    /** Score punctuation as soft evidence, regardless of printed length. */
+    fun delimiterWeight(raw: String): Int {
+        val s = raw.trim().replace('؛', ';').replace(';', ';')
+            .replace('﹔', ';').replace('；', ';')
+        val semi = ';' in s
+        val pair = '(' in s && ')' in s
+        val half = '(' in s || ')' in s
+        return when {
+            semi && pair -> 4
+            semi && half -> 3
+            semi -> 2
+            suspectSix.matches(s) -> 2 // weak OCR surrogate, never proof
+            pair -> 1
+            else -> 0
+        }
+    }
+
+    fun inspect(
+        proposals: Map<String, List<CropRect>>,
+        words: List<OcrSharedRowSplitterV161.Word>,
+        expected: Set<String>,
+        width: Int,
+        height: Int
+    ): Review {
+        val previews = linkedMapOf<String, List<CropRect>>()
+        val diagnostics = linkedMapOf<String, String>()
+        if (width < 700 || height < 700 || words.isEmpty())
+            return Review(previews, diagnostics)
+
+        val sourceNumbers = words.filter {
+            it.box.valid && it.confidence >= 65 && number(it.text) != null
+        }
+        for ((label, parts) in proposals) {
+            if (label !in expected || !label.matches(Regex("^[HV][0-9]{1,2}$")) ||
+                parts.size !in 2..8 || parts.any { !it.valid }) continue
+            // Restrict to compact right-hand column; leave the full-width
+            // Maariv/Oded geometry and single-piece verified crops alone.
+            if (parts.any { it.left < width * 64 / 100 ||
+                    it.right - it.left > width * 36 / 100 }) continue
+            val ownNumber = label.drop(1).toInt()
+            val expectedNext = expected.asSequence().filter {
+                it.firstOrNull() == label.first()
+            }.mapNotNull { it.drop(1).toIntOrNull() }
+                .filter { it > ownNumber }.minOrNull() ?: continue
+
+            val region = CropRect(parts.minOf { it.left }, parts.minOf { it.top },
+                parts.maxOf { it.right }, parts.maxOf { it.bottom })
+            val inside = sourceNumbers.filter { w ->
+                cx(w) in (region.left - 8)..(region.right + 8) &&
+                    cy(w) in (region.top - 8)..(region.bottom + 8)
+            }
+            val own = inside.filter { number(it.text) == ownNumber }
+            val next = inside.filter { number(it.text) == expectedNext }
+            if (own.size != 1 || next.size != 1) {
+                diagnostics[label] = "V194_UNPROVEN_NUMBER_ANCHORS: own=" +
+                    own.size + " expectedNext=" + expectedNext +
+                    " nextCount=" + next.size +
+                    "; semicolon alone cannot confirm a split; manual review"
+                continue
+            }
+            val start = own.single()
+            val following = next.single()
+            val sameLine = abs(following.box.top - start.box.top) <=
+                max(12, height / 130)
+            if (following.box.top < start.box.top - max(12, height / 130) ||
+                (sameLine && following.box.right >= start.box.left)) {
+                diagnostics[label] = "V194_REVERSED_ANCHOR_ORDER; manual review"
+                continue
+            }
+
+            val ordered = parts.sortedWith(compareBy<CropRect> { it.top }
+                .thenByDescending { it.right })
+            val endRow = ordered.indexOfFirst { r ->
+                cx(following) in (r.left - 5)..(r.right + 5) &&
+                    cy(following) in (r.top - 5)..(r.bottom + 5)
+            }
+            if (endRow !in 0..3) {
+                diagnostics[label] = "V194_NEXT_NUMBER_NOT_IN_PREVIEW_ROW; manual review"
+                continue
+            }
+            val selected = mutableListOf<CropRect>()
+            for (i in 0..endRow) {
+                val r = ordered[i]
+                val x = if (i == endRow)
+                    max(r.left, following.box.right + max(5, width / 500))
+                else r.left
+                val y = if (selected.isEmpty()) r.top
+                    else max(r.top, selected.last().bottom)
+                if (x >= r.right - 18 || y >= r.bottom - 9) break
+                selected += CropRect(x, y, r.right, r.bottom)
+            }
+            val ownIncluded = selected.any { r ->
+                cx(start) in r.left..r.right && cy(start) in r.top..r.bottom
+            }
+            val foreignIncluded = selected.any { r ->
+                inside.any { w -> w != start &&
+                    cx(w) in r.left..r.right && cy(w) in r.top..r.bottom }
+            }
+            if (selected.size != endRow + 1 || !ownIncluded || foreignIncluded) {
+                diagnostics[label] = "V194_UNSAFE_PARTITION: own=" +
+                    ownIncluded + " foreign=" + foreignIncluded +
+                    "; manual review; NO canonical write"
+                continue
+            }
+
+            val nearby = words.filter { w ->
+                w.box.valid && w.confidence >= 20 &&
+                    abs(cy(w) - cy(following)) <= max(21, height / 100) &&
+                    w.box.left >= following.box.right - 5 &&
+                    w.box.left <= following.box.right + width / 8
+            }
+            val delimiterScore = nearby.maxOfOrNull {
+                delimiterWeight(it.text)
+            } ?: 0
+            // Exact source printed-number anchors and the expected sequential
+            // clue count outweigh unreliable punctuation. A likely ";" gives
+            // extra confidence without imposing the answer-length digits.
+            val score = 3 + 4 + 2 + 1 + delimiterScore
+            if (score < 9) {
+                diagnostics[label] = "V194_LOW_BOUNDARY_SCORE:" +
+                    score + "; manual review"
+                continue
+            }
+            val kind = when (delimiterScore) {
+                4 -> "SEMICOLON_AND_BRACKETS"
+                3 -> "SEMICOLON_PARTIAL_BRACKETS"
+                2 -> "SEMICOLON_OR_WEAK_OCR_6"
+                1 -> "BRACKETS_ONLY"
+                else -> "PUNCTUATION_NOT_RECOGNIZED"
+            }
+            previews[label] = selected
+            diagnostics[label] = "V194_PREVIEW_ONLY: score=" + score +
+                " delimiter=" + kind + " own=" + ownNumber +
+                " next=" + expectedNext + " pieces=" + selected.size +
+                "; no answer-length match required; admin review only; " +
+                "NO AI re-decode / NO canonical write"
+        }
+        return Review(previews, diagnostics)
+    }
+}
