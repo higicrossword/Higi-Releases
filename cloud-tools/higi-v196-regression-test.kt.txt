@@ -1,0 +1,75 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrReviewSafetyV196Test {
+    private fun word(text:String,x:Int,y:Int,right:Int,c:Int=93)=
+        OcrSharedRowSplitterV161.Word(text,CropRect(x,y,right,y+31),c)
+    private fun row(id:Int,text:String,x:Int,y:Int,right:Int,bottom:Int=y+52)=
+        OcrTextLocatorV033.Line(id,text,CropRect(x,y,right,bottom),91)
+    private val expected=setOf("H1","H5","H8","H9","H10","H12","H14")
+    private val lines=listOf(
+        row(3,"1. נוצרי שהיה שותף למסע בעיר יכול לברך",2125,290,2900),
+        row(4,"הגומל? (מ) (3,4); 5. הלבינו את פניהם",2203,345,2884),
+        row(7,"בשביל שיהיה ריח נעים? (מ) (5); 8. אולי",2166,405,2903),
+        row(8,"הכניסו לקלפי צעיף מאיר (5); 9. שחיין עבר",2131,467,2903),
+        row(9,"יכול להסיר חלודה (4,3); 10. אפשר לשאוב",2148,525,2903)
+    )
+    private val words=listOf(
+        word("1.",2870,290,2900),word("5.",2520,361,2550),
+        word("10.",2396,541,2451))
+    private val legacyH1=listOf(CropRect(2122,289,2903,348),
+        CropRect(2199,344,2887,400),CropRect(2163,404,2906,463),
+        CropRect(2128,466,2906,528),CropRect(2148,523,2906,585))
+
+    @Test fun existingV178FiveRowPreviewGetsIndependentTwoPieceAdminReview(){
+        val r=OcrLegacyReviewBridgeV196.inspect(mapOf("H1" to legacyH1),
+            lines,words,expected,3000,2433)
+        assertEquals(2,r.previews.getValue("H1").size)
+        assertTrue(r.previews.getValue("H1")[1].left>2550)
+        assertTrue(r.diagnostics.getValue("H1").contains("NO canonical write"))
+    }
+
+    @Test fun tarteyStyleTwoRowAndBroadLayoutsDoNotActivateBridge(){
+        val tartey= listOf(CropRect(718,417,1063,469),
+            CropRect(718,469,1063,546))
+        val fullWidth=listOf(CropRect(30,280,2890,344),
+            CropRect(30,345,2890,402),CropRect(30,403,2890,465),
+            CropRect(30,467,2890,523))
+        val out=OcrLegacyReviewBridgeV196.inspect(
+            mapOf("H11" to tartey,"H1" to fullWidth),lines,words,
+            expected+"H11"+"H14",3000,2433)
+        assertTrue(out.previews.isEmpty())
+    }
+
+    @Test fun incompleteH5OneRowIsReviewRequiredEvenWithoutPrinted8WordBox(){
+        val r=OcrClueCompletenessV196.review(
+            mapOf("H5" to listOf(CropRect(2100,339,2553,405))),
+            lines,words,expected,3000,2433)
+        assertTrue(r["H5"].orEmpty().contains("INCOMPLETE_SINGLE_ROW"))
+    }
+
+    @Test fun completeSingleRowAndUnanchoredWideCluesRemainUntouched(){
+        val rows=listOf(row(4,"5. הלבינו את פניהם (5)",2203,345,2884),
+            row(7,"8. הגדרה עצמאית",2166,405,2903))
+        val r=OcrClueCompletenessV196.review(mapOf(
+            "H5" to listOf(CropRect(2100,339,2553,405)),
+            "H1" to listOf(CropRect(30,285,2903,350))),
+            rows,words,expected,3000,2433)
+        assertTrue(r.isEmpty())
+    }
+
+    @Test fun noBridgeWithoutMixedNextPrintedLineOrNextWordAnchor(){
+        val noMixed=listOf(row(3,"1. הגדרה ראשונה",2125,290,2900),
+            row(4,"5. הגדרה חדשה בשורה",2203,345,2884))
+        val r=OcrLegacyReviewBridgeV196.inspect(mapOf("H1" to legacyH1),
+            noMixed,words,expected,3000,2433)
+        assertFalse(r.previews.containsKey("H1"))
+        val noWord=OcrLegacyReviewBridgeV196.inspect(mapOf("H1" to legacyH1),
+            lines,listOf(words.first()),expected,3000,2433)
+        assertFalse(noWord.previews.containsKey("H1"))
+    }
+}
