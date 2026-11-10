@@ -46,12 +46,12 @@ object OcrIndependentBoundaryV195 {
             return Review(updated, diagnostics)
 
         val narrowLines = lines.filter { row ->
-            row.rect.valid && row.confidence >= 40 &&
-                row.rect.left >= width * 60 / 100 &&
-                row.rect.right >= width * 78 / 100 &&
-                row.rect.right <= width &&
-                row.rect.bottom <= height &&
-                row.rect.bottom - row.rect.top in 18..max(105, height/16)
+            row.box.valid && row.confidence >= 40 &&
+                row.box.left >= width * 60 / 100 &&
+                row.box.right >= width * 78 / 100 &&
+                row.box.right <= width &&
+                row.box.bottom <= height &&
+                row.box.bottom - row.box.top in 18..max(105, height/16)
         }.sortedWith(compareBy<OcrRawLineV166> { it.rect.top }.thenByDescending { it.rect.right })
         val printedWords = words.filter { word ->
             word.box.valid && word.confidence >= 60 &&
@@ -60,9 +60,9 @@ object OcrIndependentBoundaryV195 {
         }
         fun containingLine(word: OcrSharedRowSplitterV161.Word): OcrRawLineV166? =
             narrowLines.filter { row ->
-                overlapsY(row.rect, word.box) >= max(8, (word.box.bottom - word.box.top)/2) &&
-                    centerX(word.box) in (row.rect.left-8)..(row.rect.right+8)
-            }.maxByOrNull { row -> overlapsY(row.rect, word.box) }
+                overlapsY(row.box, word.box) >= max(8, (word.box.bottom - word.box.top)/2) &&
+                    centerX(word.box) in (row.box.left-8)..(row.box.right+8)
+            }.maxByOrNull { row -> overlapsY(row.box, word.box) }
 
         for ((label, old) in proposals) {
             if (label !in expected || !labelPattern.matches(label) ||
@@ -110,8 +110,8 @@ object OcrIndependentBoundaryV195 {
             }
             val stop = following.single()
             val stopLine = containingLine(stop)
-            if (stopLine == null || stopLine.rect.top < startLine.rect.top ||
-                stopLine.rect.top-startLine.rect.top > height/9) {
+            if (stopLine == null || stopLine.box.top < startLine.box.top ||
+                stopLine.box.top-startLine.box.top > height/9) {
                 diagnostics[label] = "V195_NEXT_ROW_UNSAFE:$next; manual review"
                 continue
             }
@@ -129,9 +129,9 @@ object OcrIndependentBoundaryV195 {
                 continue
             }
             val chosenLines = narrowLines.filter { row ->
-                row.rect.top >= startLine.rect.top-anchorRange &&
-                    row.rect.top <= stopLine.rect.top+anchorRange &&
-                    row.rect.right >= min(startLine.rect.right,stopLine.rect.right)-width/10
+                row.box.top >= startLine.box.top-anchorRange &&
+                    row.box.top <= stopLine.box.top+anchorRange &&
+                    row.box.right >= min(startLine.box.right,stopLine.box.right)-width/10
             }.distinctBy { it.id }
                 .sortedWith(compareBy<OcrRawLineV166>{it.rect.top}.thenByDescending{it.rect.right})
             val startIndex=chosenLines.indexOfFirst { it.id == startLine.id }
@@ -148,11 +148,11 @@ object OcrIndependentBoundaryV195 {
                 // At a shared physical line, previous clue text is RIGHT of
                 // the next printed number (Hebrew RTL). Never include that number.
                 val left = if (i == stopIndex)
-                    max(row.rect.left,stop.box.right+margin) else row.rect.left
-                val right = row.rect.right
-                val top = if (segments.isEmpty()) row.rect.top else
-                    max(row.rect.top, segments.last().bottom)
-                val bottom = row.rect.bottom
+                    max(row.box.left,stop.box.right+margin) else row.box.left
+                val right = row.box.right
+                val top = if (segments.isEmpty()) row.box.top else
+                    max(row.box.top, segments.last().bottom)
+                val bottom = row.box.bottom
                 if (right-left <= 22 || bottom-top <= 9) {
                     // Next clue starts a new line: zero remaining ink for the
                     // current clue on it. Do not include the new clue's row.
