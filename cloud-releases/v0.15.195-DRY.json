@@ -3,6 +3,5 @@
   "version": "0.15.195",
   "versionCode": 345,
   "patchFile": "cloud-patches/v0.15.195-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "ceab90e273767634315d3f782ce90797cfec7e0c842b30ebaeada7e82ed4d2f7",
-  "notes": "V195 corrected: source Tesseract line/word geometry, adjacent printed-number boundaries, admin preview only; no added OCR or canonical write"
+  "patchSha256": "5e6cbb14fc06a8a5eb143c848eb3afc1d43cc56a08afc1f6c54abfd822a1a0e3"
 }
