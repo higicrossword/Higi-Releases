@@ -11,13 +11,13 @@ class OcrIndependentBoundaryV195Test {
 
     @Test fun splitBeforeNextPrintedNumberEvenWhenSemicolonLooksLikeSix() {
         val lines=listOf(
-            OcrRawLineV166(3,"1. נוצרי שהיה שותף למסע בעיר יכול לברך",
+            OcrTextLocatorV033.Line(3,"1. נוצרי שהיה שותף למסע בעיר יכול לברך",
                 CropRect(2125,290,2900,344),93),
-            OcrRawLineV166(4,"הגומל? (מ) (3,4); 5. הלבינו את פניהם",
+            OcrTextLocatorV033.Line(4,"הגומל? (מ) (3,4); 5. הלבינו את פניהם",
                 CropRect(2203,345,2884,396),91),
-            OcrRawLineV166(7,"בשביל שיהיה ריח נעים? (מ) (5); 8. אולי",
+            OcrTextLocatorV033.Line(7,"בשביל שיהיה ריח נעים? (מ) (5); 8. אולי",
                 CropRect(2166,405,2903,459),93),
-            OcrRawLineV166(8,"הכניסו לקלפי צעיף מאיר (5); 9. שחיין עבר",
+            OcrTextLocatorV033.Line(8,"הכניסו לקלפי צעיף מאיר (5); 9. שחיין עבר",
                 CropRect(2131,467,2903,523),92)
         )
         val words=listOf(
@@ -47,7 +47,7 @@ class OcrIndependentBoundaryV195Test {
     }
 
     @Test fun absenceOfFollowingNumberRetainsEarlierPreviewForReview(){
-        val rows=listOf(OcrRawLineV166(3,"1. First line",
+        val rows=listOf(OcrTextLocatorV033.Line(3,"1. First line",
             CropRect(2125,290,2900,344),93))
         val result=OcrIndependentBoundaryV195.inspect(
             mapOf("H1" to listOf(CropRect(2125,290,2900,344),
