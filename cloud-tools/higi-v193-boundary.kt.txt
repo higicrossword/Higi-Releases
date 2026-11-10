@@ -1,0 +1,120 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * V193 - ADMIN DRY only. A conservative printed-number boundary pass for
+ * legacy multi-piece RTL previews. Works even when word OCR did not recognize
+ * the parenthesized answer length. Never changes accepted/canonical geometry.
+ */
+object OcrMultiPieceBoundaryV193 {
+    data class Review(
+        val previews:Map<String,List<CropRect>>,
+        val withheld:Map<String,String>,
+        val diagnostics:Map<String,String>
+    )
+    private val printed=Regex("^([0-9]{1,2})[.,:]$")
+    private fun printedNumber(s:String):Int?=printed.matchEntire(
+        s.trim().replace('．','.'))?.groupValues?.get(1)?.toIntOrNull()
+    private fun cx(w:OcrSharedRowSplitterV161.Word)=(w.box.left+w.box.right)/2
+    private fun cy(w:OcrSharedRowSplitterV161.Word)=(w.box.top+w.box.bottom)/2
+
+    fun inspect(
+        proposals:Map<String,List<CropRect>>,
+        words:List<OcrSharedRowSplitterV161.Word>,
+        expected:Set<String>,
+        width:Int,height:Int
+    ):Review {
+        val revised=linkedMapOf<String,List<CropRect>>()
+        val withheld=linkedMapOf<String,String>()
+        val diagnostics=linkedMapOf<String,String>()
+        if(width<=500 || height<=500)return Review(revised,withheld,diagnostics)
+        for((key,parts) in proposals) {
+            if(key !in expected || !key.matches(Regex("^[HV][0-9]{1,2}$")) ||
+                parts.size !in 2..8 || parts.any{!it.valid})continue
+            val columnLeft=width*58/100
+            if(parts.any{it.left<columnLeft || it.right-it.left>width*44/100})continue
+            val region=CropRect(parts.minOf{it.left},parts.minOf{it.top},
+                parts.maxOf{it.right},parts.maxOf{it.bottom})
+            val validNumbers=expected.filter{it.startsWith(key.first())}
+                .mapNotNull{it.drop(1).toIntOrNull()}.toSet()
+            val own=key.drop(1).toInt()
+            val anchors=words.filter{w->
+                w.box.valid && w.confidence>=65 &&
+                    printedNumber(w.text) in validNumbers &&
+                    cx(w) in (region.left-6)..(region.right+6) &&
+                    cy(w) in (region.top-6)..(region.bottom+6)
+            }
+            val ownAnchors=anchors.filter{printedNumber(it.text)==own}
+            val foreign=anchors.filter{printedNumber(it.text)!=own}
+            if(ownAnchors.size!=1){
+                val why="V193_"+(if(ownAnchors.isEmpty())"OWN_NUMBER_NOT_FOUND" else
+                    "AMBIGUOUS_OWN_NUMBER")+"; foreignStarts="+foreign.size+
+                    "; previewPieces="+parts.size+"; manual review; NO canonical write"
+                diagnostics[key]=why
+                if(foreign.isNotEmpty())withheld[key]=why
+                continue
+            }
+            val start=ownAnchors.single()
+            val next=foreign.filter{w->
+                // Printed reading order: top-to-bottom, then right-to-left.
+                w.box.top>=start.box.top+max(10,height/200) ||
+                    (abs(w.box.top-start.box.top)<=max(10,height/200) &&
+                        w.box.right<start.box.left)
+            }.minWithOrNull(compareBy<OcrSharedRowSplitterV161.Word>{
+                it.box.top}.thenByDescending{it.box.right})
+            if(next==null){
+                diagnostics[key]="V193_NO_PROVEN_NEXT_NUMBER; "+
+                    "previewPieces="+parts.size+"; require manual review"
+                continue
+            }
+            // Include the row containing the NEXT number, but only the part
+            // on its RTL/right side, excluding the next clue's printed number.
+            val sorted=parts.sortedWith(compareBy<CropRect>{it.top}.thenByDescending{it.right})
+            val rowIndex=sorted.indexOfFirst{r->
+                cy(next) in (r.top-3)..(r.bottom+3) &&
+                    cx(next) in (r.left-3)..(r.right+3)
+            }
+            if(rowIndex<0 || rowIndex>3){
+                diagnostics[key]="V193_NEXT_NUMBER_NOT_IN_PREVIEW_ROW; "+
+                    "foreign="+printedNumber(next.text)+"; manual review"
+                continue
+            }
+            val cropParts=mutableListOf<CropRect>()
+            for(i in 0..rowIndex){
+                val r=sorted[i]
+                val boundary=if(i==rowIndex)
+                    max(r.left,next.box.right+max(4,width/600)) else r.left
+                val top=if(cropParts.isEmpty())r.top else max(r.top,cropParts.last().bottom)
+                if(boundary>=r.right-20 || top>=r.bottom-10)break
+                cropParts+=CropRect(boundary,top,r.right,r.bottom)
+            }
+            // Never display a crop containing any other exact printed clue
+            // number, including one on the same physical printed line.
+            val foreignIncluded=cropParts.any{r->foreign.any{w->
+                cx(w) in r.left..r.right && cy(w) in r.top..r.bottom
+            }}
+            val ownIncluded=cropParts.any{r->
+                cx(start) in r.left..r.right && cy(start) in r.top..r.bottom
+            }
+            if(cropParts.size!=rowIndex+1 || !ownIncluded || foreignIncluded ||
+                cropParts.size>4){
+                val why="V193_UNSAFE_PARTITION: ownIncluded=$ownIncluded "+
+                    "foreignIncluded=$foreignIncluded rows="+cropParts.size+
+                    "; manual review; NO canonical write"
+                diagnostics[key]=why
+                withheld[key]=why
+                continue
+            }
+            revised[key]=cropParts
+            diagnostics[key]="V193_PREVIEW_ONLY: exact own="+own+
+                " and next="+printedNumber(next.text)+" printed anchors; "+
+                "source-pixel RTL boundary; pieces="+cropParts.size+
+                "; length marker NOT REQUIRED; manual review; "+
+                "NO AI re-decode / NO canonical write"
+        }
+        return Review(revised,withheld,diagnostics)
+    }
+}
