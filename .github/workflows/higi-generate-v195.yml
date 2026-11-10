@@ -1,5 +1,5 @@
 name: Higi 0.15.195 - independent OCR boundary source generator
-# Corrected Kotlin OCR Line comparator and row types; administrator DRY only
+# Corrected line box accessor integration; administrator DRY only
 on:
   push:
     branches: [main]
