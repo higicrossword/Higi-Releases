@@ -1,0 +1,52 @@
+package com.example.hebrewcrossword
+
+/**
+ * V196 administrator DRY diagnostic only. Revisit long V178 proposals with
+ * existing word-number anchors, even if an unrelated earlier stage holds an
+ * internal 'accepted' crop. Results must never enter trusted/canonical data.
+ */
+object OcrLegacyReviewBridgeV196 {
+    data class Review(val previews: Map<String,List<CropRect>>,
+                      val diagnostics: Map<String,String>)
+
+    fun inspect(
+        legacy: Map<String,List<CropRect>>,
+        lines: List<OcrTextLocatorV033.Line>,
+        words: List<OcrSharedRowSplitterV161.Word>,
+        expected: Set<String>, width: Int, height: Int
+    ): Review {
+        val result=linkedMapOf<String,List<CropRect>>()
+        val diagnostics=linkedMapOf<String,String>()
+        if(width<800 || height<800 || words.isEmpty())return Review(result,diagnostics)
+        for((label,old) in legacy){
+            if(label !in expected || !label.matches(Regex("^[HV][0-9]{1,2}$")) ||
+                old.size<4 || old.size>8 || old.any { !it.valid ||
+                    it.left < width*64/100 || it.right > width ||
+                    it.right-it.left > width*36/100 })continue
+            val current=label.drop(1).toInt()
+            val next=expected.asSequence().filter{it.startsWith(label[0])}
+                .mapNotNull{it.drop(1).toIntOrNull()}.filter{it>current}.minOrNull()
+                ?:continue
+            // OCR text is only a *layout gate*; actual clipping still requires
+            // exact source-pixel printed-number WORD anchors in V193.
+            val marker=Regex("(?:^|[\\s;])"+next+"[.,:](?=\\s|$)")
+            val mixedLine=lines.any{row->
+                row.box.valid && row.box.left>=width*58/100 &&
+                    row.box.right<=width &&
+                    row.box.top>=old.first().top-20 &&
+                    row.box.top<=old.last().bottom+20 &&
+                    marker.find(row.text)?.let{m->m.range.first>=12}==true
+            }
+            if(!mixedLine)continue
+            val refined=OcrMultiPieceBoundaryV193.inspect(
+                mapOf(label to old),words,expected,width,height)
+            val clipped=refined.previews[label]?:continue
+            if(clipped.size>=old.size || clipped.size>3 || clipped.isEmpty())continue
+            result[label]=clipped
+            diagnostics[label]="V196_PREVIEW_ONLY: independent V178-to-V193 bridge; "+
+                "source OCR text and printed word anchors; pieces=${clipped.size}; "+
+                "admin manual review required; NO AI re-decode / NO canonical write"
+        }
+        return Review(result,diagnostics)
+    }
+}
