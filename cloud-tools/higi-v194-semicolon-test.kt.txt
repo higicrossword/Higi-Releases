@@ -1,0 +1,55 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrSemicolonBoundaryV194Test {
+    private fun word(text:String,x:Int,y:Int,x2:Int,c:Int=93)=
+        OcrSharedRowSplitterV161.Word(text,CropRect(x,y,x2,y+26),c)
+    private val expected = setOf("H1","H5","H8","H9","H10","H12","H14")
+    private val h1 = listOf(CropRect(2122,289,2903,348),
+        CropRect(2199,344,2887,400),
+        CropRect(2163,404,2906,463),
+        CropRect(2128,466,2906,528),
+        CropRect(2148,523,2906,585))
+    @Test fun flexibleDelimiterRecognitionWithoutLengthMatching() {
+        assertEquals(4,OcrSemicolonBoundaryV194.delimiterWeight(";(5)"))
+        assertEquals(3,OcrSemicolonBoundaryV194.delimiterWeight(";("))
+        assertEquals(2,OcrSemicolonBoundaryV194.delimiterWeight("(65)"))
+        assertEquals(1,OcrSemicolonBoundaryV194.delimiterWeight("(3,4)"))
+        assertEquals(2,OcrSemicolonBoundaryV194.delimiterWeight("؛"))
+        assertEquals(0,OcrSemicolonBoundaryV194.delimiterWeight("65"))
+    }
+    @Test fun firstClueEndsBeforeFiveWithoutMatchingAnswerLength(){
+        val words=listOf(word("1.",2870,290,2900),word("5.",2520,361,2550),
+            word("(65)",2450,361,2490),word("8.",2860,423,2900))
+        val result=OcrSemicolonBoundaryV194.inspect(
+            mapOf("H1" to h1),words,expected,3000,2433)
+        assertTrue(result.previews.containsKey("H1"))
+        val out=result.previews.getValue("H1")
+        assertEquals(2,out.size)
+        assertTrue(out[1].left>2550)
+        assertTrue(out.none{ it.left<=2535 && it.right>=2535 &&
+            it.top<=370 && it.bottom>=370 })
+        assertTrue(result.diagnostics.getValue("H1").contains("V194_PREVIEW_ONLY"))
+    }
+    @Test fun noAutomaticCropWithoutUniquePrintedAnchors(){
+        val r=OcrSemicolonBoundaryV194.inspect(
+            mapOf("H1" to h1),
+            listOf(word("1.",2870,290,2900),word("(65)",2450,361,2490)),
+            expected,3000,2433)
+        assertFalse(r.previews.containsKey("H1"))
+        assertTrue(r.diagnostics.getValue("H1").contains("UNPROVEN_NUMBER_ANCHORS"))
+    }
+    @Test fun wideLayoutAndSinglePieceUntouched(){
+        val r=OcrSemicolonBoundaryV194.inspect(mapOf(
+            "H1" to listOf(CropRect(2122,289,2903,348)),
+            "H5" to listOf(CropRect(20,290,2890,348),
+                CropRect(22,348,2888,410))),
+            listOf(word("1.",2870,290,2900),word("5.",2520,361,2550)),
+            expected,3000,2433)
+        assertTrue(r.previews.isEmpty())
+    }
+}
