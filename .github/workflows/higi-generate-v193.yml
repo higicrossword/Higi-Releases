@@ -1,4 +1,5 @@
 name: Higi 0.15.193 - pinned source patch generator
+# Regenerate following Kotlin type-safe audit fix
 on:
   push:
     branches: [main]
