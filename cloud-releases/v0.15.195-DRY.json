@@ -3,5 +3,6 @@
   "version": "0.15.195",
   "versionCode": 345,
   "patchFile": "cloud-patches/v0.15.195-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "5e6cbb14fc06a8a5eb143c848eb3afc1d43cc56a08afc1f6c54abfd822a1a0e3"
+  "patchSha256": "5e6cbb14fc06a8a5eb143c848eb3afc1d43cc56a08afc1f6c54abfd822a1a0e3",
+  "notes": "V195 revalidated OCR Line types (compile retry 3), independent pixel-line anchors, admin review only, existing Tesseract, canonical untouched"
 }
