@@ -52,7 +52,7 @@ object OcrIndependentBoundaryV195 {
                 row.box.right <= width &&
                 row.box.bottom <= height &&
                 row.box.bottom - row.box.top in 18..max(105, height/16)
-        }.sortedWith(compareBy<OcrTextLocatorV033.Line> { it.rect.top }.thenByDescending { it.rect.right })
+        }.sortedWith(compareBy<OcrTextLocatorV033.Line> { it.box.top }.thenByDescending { it.box.right })
         val printedWords = words.filter { word ->
             word.box.valid && word.confidence >= 60 &&
                 word.box.left >= width * 60 / 100 &&
@@ -133,7 +133,7 @@ object OcrIndependentBoundaryV195 {
                     row.box.top <= stopLine.box.top+anchorRange &&
                     row.box.right >= min(startLine.box.right,stopLine.box.right)-width/10
             }.distinctBy { it.id }
-                .sortedWith(compareBy<OcrTextLocatorV033.Line>{it.rect.top}.thenByDescending{it.rect.right})
+                .sortedWith(compareBy<OcrTextLocatorV033.Line>{it.box.top}.thenByDescending{it.box.right})
             val startIndex=chosenLines.indexOfFirst { it.id == startLine.id }
             val stopIndex=chosenLines.indexOfFirst { it.id == stopLine.id }
             if (startIndex < 0 || stopIndex < startIndex ||
