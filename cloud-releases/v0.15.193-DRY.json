@@ -3,5 +3,6 @@
   "version": "0.15.193",
   "versionCode": 343,
   "patchFile": "cloud-patches/v0.15.193-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "8630054fa6173717f91f34280c857c7fc77dfda19b30e44a00c63f3957cc0fa2"
+  "patchSha256": "8630054fa6173717f91f34280c857c7fc77dfda19b30e44a00c63f3957cc0fa2",
+  "notes": "DRY-only OCR: fix H1 five-piece bleed into H5; exact next printed number boundaries, explicit failure diagnostics; preserve verified/canonical crops"
 }
