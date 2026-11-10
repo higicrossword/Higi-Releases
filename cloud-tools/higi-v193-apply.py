@@ -46,8 +46,8 @@ block=r'''        // V193 - final administrator-only pass. The V192 word-based
             }
             audit193.diagnostics.forEach{(label,why)->
                 val k=key(label)
-                if(k !in accepted && k !in audit193.previews &&
-                    k !in audit193.withheld) {
+                if(k !in accepted && label !in audit193.previews &&
+                    label !in audit193.withheld) {
                     // Make failure visible instead of retaining stale V178
                     // diagnostics. A single inconclusive pass is not enough
                     // evidence to overwrite a preview.
