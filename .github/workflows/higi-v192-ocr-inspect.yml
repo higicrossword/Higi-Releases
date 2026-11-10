@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-v192-ocr-inspect.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
