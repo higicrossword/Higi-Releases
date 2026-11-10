@@ -56,7 +56,7 @@ jobs:
           python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.193-from-v0.15.175.patch.xz.b64" "$BASE/193.patch" "$PATCH_SHA" <<'PY'
           import base64,hashlib,lzma,pathlib,sys
           raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
-          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v190 source SHA mismatch"
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3],"v193 source SHA mismatch"
           pathlib.Path(sys.argv[2]).write_bytes(raw)
           PY
           git -C "$ROOT" apply --check "$BASE/193.patch"
@@ -96,6 +96,6 @@ jobs:
           set -euo pipefail
           git config user.name higicrossword
           git config user.email higicrossword@users.noreply.github.com
-          git add cloud-patches/v0.15.193-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.194-DRY.json
+          git add cloud-patches/v0.15.194-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.194-DRY.json
           git commit -m 'Build Higi 0.15.194 DRY from pinned source and semicolon evidence'
           git push origin HEAD:main
