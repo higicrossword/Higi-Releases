@@ -1,0 +1,59 @@
+package com.example.hebrewcrossword
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrIndependentBoundaryV195Test {
+    private fun word(text:String,x:Int,y:Int,right:Int,confidence:Int=93)=
+        OcrSharedRowSplitterV161.Word(text,CropRect(x,y,right,y+31),confidence)
+
+    @Test fun splitBeforeNextPrintedNumberEvenWhenSemicolonLooksLikeSix() {
+        val lines=listOf(
+            OcrRawLineV166(3,"1. נוצרי שהיה שותף למסע בעיר יכול לברך",
+                CropRect(2125,290,2900,344),93),
+            OcrRawLineV166(4,"הגומל? (מ) (3,4); 5. הלבינו את פניהם",
+                CropRect(2203,345,2884,396),91),
+            OcrRawLineV166(7,"בשביל שיהיה ריח נעים? (מ) (5); 8. אולי",
+                CropRect(2166,405,2903,459),93),
+            OcrRawLineV166(8,"הכניסו לקלפי צעיף מאיר (5); 9. שחיין עבר",
+                CropRect(2131,467,2903,523),92)
+        )
+        val words=listOf(
+            word("1.",2870,290,2900),
+            word("(3,4)",2430,348,2490),
+            word("5.",2520,361,2550),
+            word("(65)",2420,409,2480),
+            word("8.",2860,420,2899),
+            word("9.",2800,470,2845)
+        )
+        val prior=listOf(
+            CropRect(2122,289,2903,348),
+            CropRect(2199,344,2887,400),
+            CropRect(2163,404,2906,463),
+            CropRect(2128,466,2906,528)
+        )
+        val result=OcrIndependentBoundaryV195.inspect(
+            mapOf("H1" to prior),lines,words,
+            setOf("H1","H5","H8","H9"),3000,2433)
+        assertTrue(result.diagnostics.toString(),result.previews.containsKey("H1"))
+        val parts=result.previews.getValue("H1")
+        assertEquals(2,parts.size)
+        assertTrue(parts[1].left>2550)
+        assertFalse(parts.any{it.left<=2535 && it.right>=2535 &&
+            it.top<=375 && it.bottom>=375})
+        assertTrue(result.diagnostics.getValue("H1").contains("V195_PREVIEW_ONLY"))
+    }
+
+    @Test fun absenceOfFollowingNumberRetainsEarlierPreviewForReview(){
+        val rows=listOf(OcrRawLineV166(3,"1. First line",
+            CropRect(2125,290,2900,344),93))
+        val result=OcrIndependentBoundaryV195.inspect(
+            mapOf("H1" to listOf(CropRect(2125,290,2900,344),
+                CropRect(2200,345,2900,400))),rows,
+            listOf(word("1.",2870,290,2900)),
+            setOf("H1","H5"),3000,2433)
+        assertTrue(result.previews.isEmpty())
+    }
+}
