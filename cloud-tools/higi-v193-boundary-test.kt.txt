@@ -1,0 +1,54 @@
+package com.example.hebrewcrossword
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class OcrMultiPieceBoundaryV193Test {
+    private fun word(t:String,x:Int,y:Int,x2:Int,c:Int=93)=
+        OcrSharedRowSplitterV161.Word(t,CropRect(x,y,x2,y+28),c)
+    private val expected=setOf("H1","H5","H8","H9","H10","H12","H14")
+    private val h1=listOf(CropRect(2122,289,2903,348),
+        CropRect(2199,344,2887,400),
+        CropRect(2163,404,2906,463),
+        CropRect(2128,466,2906,528),
+        CropRect(2148,523,2906,585))
+    @Test fun removesThreeForeignContinuationRowsAndClipsNextStart(){
+        val words=listOf(
+            word("1.",2870,290,2900),word("5.",2520,361,2550),
+            word("10.",2396,541,2451))
+        val result=OcrMultiPieceBoundaryV193.inspect(
+            mapOf("H1" to h1),words,expected,3000,2440)
+        val parts=result.previews.getValue("H1")
+        assertEquals(2,parts.size)
+        assertTrue(parts[1].left>2550)
+        assertTrue(parts[0].right>=2900)
+        assertTrue(parts[1].top>=parts[0].bottom)
+        assertTrue(parts.none{r->r.left<=2535 && 2535<=r.right &&
+            r.top<=375 && 375<=r.bottom})
+        assertTrue(result.diagnostics.getValue("H1").startsWith("V193_PREVIEW_ONLY"))
+    }
+    @Test fun leavesSafeSinglePieceAndWideNewspaperUnchanged(){
+        val r=OcrMultiPieceBoundaryV193.inspect(mapOf(
+            "H1" to listOf(CropRect(2100,289,2903,348)),
+            "H5" to listOf(CropRect(0,340,2900,400),
+                CropRect(0,400,2900,460))),
+            listOf(word("1.",2870,290,2900)),expected,3000,2440)
+        assertTrue(r.previews.isEmpty())
+        assertTrue(r.withheld.isEmpty())
+    }
+    @Test fun withholdsForeignNumberWhenOwnNumberMissing(){
+        val r=OcrMultiPieceBoundaryV193.inspect(
+            mapOf("H1" to h1),listOf(word("5.",2520,361,2550)),
+            expected,3000,2440)
+        assertFalse("H1" in r.previews)
+        assertTrue(r.withheld.getValue("H1").contains("OWN_NUMBER_NOT_FOUND"))
+    }
+    @Test fun doesNotTrustAnUnprovenNextNumber(){
+        val r=OcrMultiPieceBoundaryV193.inspect(
+            mapOf("H1" to h1),listOf(word("1.",2870,290,2900)),
+            expected,3000,2440)
+        assertFalse("H1" in r.previews)
+        assertTrue(r.diagnostics.getValue("H1").contains("NO_PROVEN_NEXT_NUMBER"))
+    }
+}
