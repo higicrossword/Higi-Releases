@@ -1,0 +1,302 @@
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminClueRegionsActivity.kt b/app/src/main/java/com/example/hebrewcrossword/AdminClueRegionsActivity.kt
+index 4a38ce5..2bd1c90 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminClueRegionsActivity.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminClueRegionsActivity.kt
+@@ -414,6 +414,10 @@ internal class ClueRegionInspectorView(context:android.content.Context):View(con
+     private var lastY=0f
+     private var pinchStart=0f
+     private var pinchZoom=1f
++    var onHorizontalSwipe:((Int)->Unit)?=null
++    private var swipeStartX=0f
++    private var swipeStartY=0f
++    private var hadMultiTouch=false
+     private val imagePaint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+     private val unionOk=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.rgb(30,150,70);style=Paint.Style.STROKE;strokeWidth=dp(1.8f)}
+     private val unionBad=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.rgb(210,45,45);style=Paint.Style.STROKE;strokeWidth=dp(1.8f)}
+@@ -452,14 +456,19 @@ internal class ClueRegionInspectorView(context:android.content.Context):View(con
+     override fun onTouchEvent(e:MotionEvent):Boolean{
+         if(bitmap==null)return false
+         when(e.actionMasked){
+-            MotionEvent.ACTION_DOWN->{lastX=e.x;lastY=e.y;parent?.requestDisallowInterceptTouchEvent(true)}
+-            MotionEvent.ACTION_POINTER_DOWN->{if(e.pointerCount>=2){pinchStart=distance(e);pinchZoom=zoom}}
++            MotionEvent.ACTION_DOWN->{lastX=e.x;lastY=e.y;swipeStartX=e.x;swipeStartY=e.y;hadMultiTouch=false;parent?.requestDisallowInterceptTouchEvent(true)}
++            MotionEvent.ACTION_POINTER_DOWN->{if(e.pointerCount>=2){pinchStart=distance(e);pinchZoom=zoom;hadMultiTouch=true}}
+             MotionEvent.ACTION_MOVE->{
+                 if(e.pointerCount>=2&&pinchStart>0f){zoom=(pinchZoom*(distance(e)/pinchStart)).coerceIn(1f,12f)}
+                 else {panX+=e.x-lastX;panY+=e.y-lastY;lastX=e.x;lastY=e.y}
+                 invalidate()
+             }
+-            MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{pinchStart=0f;parent?.requestDisallowInterceptTouchEvent(false)}
++            MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL->{
++                if(e.actionMasked==MotionEvent.ACTION_UP && !hadMultiTouch && zoom<=1.02f &&
++                    kotlin.math.abs(e.x-swipeStartX)>dp(76f) && kotlin.math.abs(e.y-swipeStartY)<dp(54f))
++                    onHorizontalSwipe?.invoke(if(e.x>swipeStartX)-1 else 1)
++                pinchStart=0f;parent?.requestDisallowInterceptTouchEvent(false)
++            }
+             MotionEvent.ACTION_POINTER_UP->{pinchStart=0f;if(e.pointerCount>1){lastX=e.getX(0);lastY=e.getY(0)}}
+         }
+         return true
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminOcrRecropActivity.kt b/app/src/main/java/com/example/hebrewcrossword/AdminOcrRecropActivity.kt
+index 39fb95f..c3ac462 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminOcrRecropActivity.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminOcrRecropActivity.kt
+@@ -58,6 +58,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+     private var record:SavedPuzzle?=null
+     private var baseline:CanonicalPuzzleCloud.CachedPuzzle?=null
+     private var sourceUrl=""
++    private var layoutProfile=OcrSeriesProfilesV197.GENERIC
+     private var gridPoints:List<PointF> = emptyList()
+     private var keys:List<ClueEditorModel.Key> = emptyList()
+     private val candidates=linkedMapOf<ClueEditorModel.Key,ClueGeometry>()
+@@ -105,48 +106,50 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+             ellipsize=android.text.TextUtils.TruncateAt.END
+         }
+         diagnosticRow.addView(status,LinearLayout.LayoutParams(0,dp(36),1f))
+-        val diagnosticsButton=button("פרטי אבחון ▾") {
++        val diagnosticsButton=button("אבחון ▾") {
+             diagnosticsExpanded=!diagnosticsExpanded
+             status.maxLines=if(diagnosticsExpanded)7 else 1
+             status.layoutParams=LinearLayout.LayoutParams(0,if(diagnosticsExpanded)
+                 ViewGroup.LayoutParams.WRAP_CONTENT else dp(36),1f)
+             status.requestLayout()
+         }
+-        diagnosticsButton.textSize=11f
+-        diagnosticRow.addView(diagnosticsButton,LinearLayout.LayoutParams(dp(110),dp(36)))
++        diagnosticsButton.textSize=10f
++        diagnosticRow.addView(diagnosticsButton,LinearLayout.LayoutParams(dp(78),dp(32)))
+         root.addView(diagnosticRow)
+         spinner=Spinner(this)
+-        root.addView(spinner,LinearLayout.LayoutParams(-1,dp(44)))
++        root.addView(spinner,LinearLayout.LayoutParams(-1,dp(38)))
+ 
+         val zoom=LinearLayout(this).apply {
+             layoutDirection=View.LAYOUT_DIRECTION_LTR
+             gravity=Gravity.CENTER_VERTICAL
+         }
+         zoom.addView(button("−") { if(sourceMode)preview.zoomBy(.82f) else selectedCrop.zoomBy(.82f) },
+-            LinearLayout.LayoutParams(0,dp(42),.8f))
++            LinearLayout.LayoutParams(0,dp(34),.8f))
+         zoom.addView(button("+") { if(sourceMode)preview.zoomBy(1.22f) else selectedCrop.zoomBy(1.22f) },
+-            LinearLayout.LayoutParams(0,dp(42),.8f))
+-        zoom.addView(button("מקור מלא") { showSource(true) },
+-            LinearLayout.LayoutParams(0,dp(42),1.35f))
+-        zoom.addView(button("חיתוך מוגדל") { showSource(false);selectedCrop.fitReadable() },
+-            LinearLayout.LayoutParams(0,dp(42),1.6f))
+-        zoom.addView(button("רוחב מלא") { showSource(false);selectedCrop.fitWidth() },
+-            LinearLayout.LayoutParams(0,dp(42),1.35f))
++            LinearLayout.LayoutParams(0,dp(34),.8f))
++        zoom.addView(button("תמונה מלאה") { showSource(true) },
++            LinearLayout.LayoutParams(0,dp(34),1.35f))
++        zoom.addView(button("חיתוך קריא") { showSource(false);selectedCrop.fitReadable() },
++            LinearLayout.LayoutParams(0,dp(34),1.6f))
++        zoom.addView(button("התאם לרוחב") { showSource(false);selectedCrop.fitWidth() },
++            LinearLayout.LayoutParams(0,dp(34),1.35f))
+         root.addView(zoom)
+-        viewButton=button("הצג חיתוך קיים") {
++        viewButton=button("השווה לקיים") {
+             candidateMode=!candidateMode
+             renderSelection()
+         }
+         val viewRow=LinearLayout(this).apply { layoutDirection=View.LAYOUT_DIRECTION_RTL }
+-        viewRow.addView(viewButton,LinearLayout.LayoutParams(0,dp(40),1f))
+-        rawOcrButton=button("הצג פענוח OCR") { showRawOcr() }
+-        viewRow.addView(rawOcrButton,LinearLayout.LayoutParams(0,dp(40),1f))
+-        root.addView(viewRow,LinearLayout.LayoutParams(-1,dp(40)))
++        viewRow.addView(viewButton,LinearLayout.LayoutParams(0,dp(34),1f))
++        rawOcrButton=button("טקסט OCR") { showRawOcr() }
++        viewRow.addView(rawOcrButton,LinearLayout.LayoutParams(0,dp(34),1f))
++        root.addView(viewRow,LinearLayout.LayoutParams(-1,dp(34)))
+ 
+         // Reserve the remaining screen area for pixels, not for verbose diagnostics.
+         val viewer=FrameLayout(this)
+         preview=ClueRegionInspectorView(this).apply { visibility=View.GONE }
+         selectedCrop=AdminOcrSelectedCropView(this)
++        preview.onHorizontalSwipe={delta->moveBySwipe(delta)}
++        selectedCrop.onHorizontalSwipe={delta->moveBySwipe(delta)}
+         viewer.addView(preview,FrameLayout.LayoutParams(-1,-1))
+         viewer.addView(selectedCrop,FrameLayout.LayoutParams(-1,-1))
+         root.addView(viewer,LinearLayout.LayoutParams(-1,0,1f).apply {
+@@ -177,28 +180,29 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+         }
+         lowerPanel.addView(details,LinearLayout.LayoutParams(-1,ViewGroup.LayoutParams.WRAP_CONTENT))
+         val editRow=LinearLayout(this).apply { layoutDirection=View.LAYOUT_DIRECTION_RTL }
+-        editRow.addView(button("ערוך מקטע"){editExistingPiece()},LinearLayout.LayoutParams(0,dp(46),1f))
+-        editRow.addView(button("הוסף מקטע"){editPiece(-1)},LinearLayout.LayoutParams(0,dp(46),1f))
+-        editRow.addView(button("הסר מקטע"){removePiece()},LinearLayout.LayoutParams(0,dp(46),1f))
++        editRow.addView(button("ערוך"){editExistingPiece()},LinearLayout.LayoutParams(0,dp(36),1f))
++        editRow.addView(button("הוסף"){editPiece(-1)},LinearLayout.LayoutParams(0,dp(36),1f))
++        editRow.addView(button("הסר"){removePiece()},LinearLayout.LayoutParams(0,dp(36),1f))
+         lowerPanel.addView(editRow)
+         val approvalRow=LinearLayout(this).apply{layoutDirection=View.LAYOUT_DIRECTION_RTL}
+-        approveButton=button("אשר הגדרה זו"){toggleApproval()}
+-        approvalRow.addView(approveButton,LinearLayout.LayoutParams(0,dp(46),2f))
+-        approvalRow.addView(button("העתק דוח"){copyReport()},LinearLayout.LayoutParams(0,dp(46),1f))
++        approveButton=button("סמן לאישור"){toggleApproval()}
++        approvalRow.addView(approveButton,LinearLayout.LayoutParams(0,dp(36),2f))
++        approvalRow.addView(button("העתק דוח"){copyReport()},LinearLayout.LayoutParams(0,dp(36),1f))
+         lowerPanel.addView(approvalRow)
+         val actions=LinearLayout(this).apply { layoutDirection=View.LAYOUT_DIRECTION_RTL }
+-        saveButton=button("שמור נבחרים כקנוניים"){confirmCommit()}
+-        actions.addView(saveButton,LinearLayout.LayoutParams(0,dp(48),2f))
+-        actions.addView(button("ביטול"){finish()},LinearLayout.LayoutParams(0,dp(48),1f))
++        saveButton=button("שמור מאושרים"){confirmCommit()}
++        actions.addView(saveButton,LinearLayout.LayoutParams(0,dp(38),2f))
++        actions.addView(button("ביטול"){finish()},LinearLayout.LayoutParams(0,dp(38),1f))
+         lowerPanel.addView(actions)
+         lowerScroll.addView(lowerPanel,FrameLayout.LayoutParams(-1,ViewGroup.LayoutParams.WRAP_CONTENT))
+-        root.addView(lowerScroll,LinearLayout.LayoutParams(-1,dp(178)))
++        root.addView(lowerScroll,LinearLayout.LayoutParams(-1,dp(142)))
+         setContentView(root)
+         ScreenUi.insets(window,root,true)
+         spinner.onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
+             override fun onItemSelected(parent:AdapterView<*>?,v:View?,position:Int,id:Long)=renderSelection()
+             override fun onNothingSelected(parent:AdapterView<*>?)=Unit
+         }
++        // Navigation is a single-finger horizontal swipe over a fitted image; pinch/zoom remains unchanged.
+         refreshButtons()
+         AdminAccess(this).loadRole { role -> runOnUiThread {
+             if (isDestroyed || isFinishing)return@runOnUiThread
+@@ -234,14 +238,16 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+             val local=if(downloaded==null && found!=null)
+                 library.sourceFiles(found.id).firstOrNull() else null
+             val bitmap=(downloaded?:local)?.let{BitmapFactory.decodeFile(it.absolutePath)}
++            val series=OcrSeriesProfilesV197.resolve(intent.getStringExtra(EXTRA_TITLE).orEmpty(),key)
+             val result=if(bitmap!=null && crossword!=null)LocalOcrCropPass.run(
+                 this,bitmap,crossword,corners,
+                 stage={ stage ->runOnUiThread{if(!isDestroyed)status.text=stage} },
+-                refineSharedRows=true
++                refineSharedRows=true,layoutSeriesId=series.id
+             ) else null
+             runOnUiThread {
+                 if(isDestroyed || isFinishing){bitmap?.recycle();return@runOnUiThread}
+                 original=bitmap;record=found;baseline=canonical;sourceUrl=if(downloaded!=null)imageUrl else ""
++                layoutProfile=series
+                 gridPoints=corners
+                 keys=crossword?.let { cw -> Direction.values().flatMap { d ->
+                     cw.startNumbers(d).sorted().map{ClueEditorModel.Key(it,d)}
+@@ -292,6 +298,13 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+         }
+     }
+ 
++    private fun moveBySwipe(delta:Int){
++        if(loading||saving||keys.isEmpty())return
++        val index=spinner.selectedItemPosition
++        val next=(index+delta).coerceIn(0,keys.lastIndex)
++        if(next!=index)spinner.setSelection(next)
++    }
++
+     private fun updateSpinnerLabels(){
+         val previous=spinner.selectedItemPosition
+         spinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
+@@ -345,7 +358,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+                 }
+             }
+         }
+-        viewButton.text=if(candidateMode)"הצג חיתוך קיים" else "הצג חיתוך מוצע"
++        viewButton.text=if(candidateMode)"השווה לקיים" else "חזור למוצע"
+         details.text=if(key==null)"לא נמצאו הגדרות לתשבץ" else buildString {
+             append(keyLabel(key)).append(" — ")
+             append(if(candidateMode)"OCR מוצע" else "חיתוך קנוני קודם").append('\n')
+@@ -434,7 +447,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+         rawOcrButton.isEnabled=!loading && rawOcrLines.isNotEmpty()
+         val ready=!loading && !saving && !BuildConfig.HIGI_DRY_BUILD &&
+             original!=null && baseline!=null && sourceUrl.startsWith("https://")
+-        saveButton.text=if(BuildConfig.HIGI_DRY_BUILD)"DRY: שמירה קנונית חסומה" else "שמור נבחרים כקנוניים"
++        saveButton.text=if(BuildConfig.HIGI_DRY_BUILD)"DRY: אין שמירה" else "שמור מאושרים"
+         saveButton.isEnabled=ready && approved.isNotEmpty()
+         val selected=selectedKey()
+         val edited=candidates[selected]?.evidence==ClueGeometryEvidence.MANUAL
+@@ -442,7 +455,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+             (selected !in geometryNeedsReview || (edited &&
+                 geometryStates[selected]==OcrCandidateBoundaryReviewV165.State.UNCERTAIN))
+         val key=selectedKey()
+-        approveButton.text=if(key in approved)"בטל אישור הגדרה זו" else "אשר הגדרה זו"
++        approveButton.text=if(key in approved)"בטל סימון" else "סמן לאישור"
+     }
+     private fun toggleApproval() {
+         val key=selectedKey()?:return
+@@ -601,6 +614,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+         }?:"-"
+         val result=buildString {
+             append("Higi ").append(BuildConfig.VERSION_NAME).append(" DRY - OCR review\n")
++            append("layout profile = ").append(layoutProfile.id).append(" (v1, DRY only)\n")
+             append(intent.getStringExtra(EXTRA_TITLE).orEmpty()).append('\n')
+             append("source = ").append(sourceUrl.ifBlank{"local-unverified"}).append('\n')
+             append("candidate/expected = ").append(candidates.size).append('/').append(keys.size).append('\n')
+@@ -671,7 +685,7 @@ class AdminOcrRecropActivity : AppCompatActivity() {
+     }
+ 
+     private fun button(title:String, action:()->Unit):Button=
+-        UiKit.button(this,title,action=action).apply{textSize=13f;maxLines=2}
++        UiKit.button(this,title,action=action).apply{textSize=10.5f;maxLines=1;isAllCaps=false}
+     private fun toast(value:String)=Toast.makeText(this,value,Toast.LENGTH_LONG).show()
+     private fun dp(n:Int)=UiKit.dp(this,n)
+     override fun onDestroy() {
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminOcrSelectedCropView.kt b/app/src/main/java/com/example/hebrewcrossword/AdminOcrSelectedCropView.kt
+index f7346b4..6e24a12 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminOcrSelectedCropView.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminOcrSelectedCropView.kt
+@@ -39,6 +39,10 @@ internal class AdminOcrSelectedCropView(context:android.content.Context):View(co
+     private var lastY=0f
+     private var pinchDistance=0f
+     private var pinchZoom=1f
++    var onHorizontalSwipe:((Int)->Unit)?=null
++    private var swipeStartX=0f
++    private var swipeStartY=0f
++    private var hadMultiTouch=false
+ 
+     init { setBackgroundColor(Color.WHITE) }
+ 
+@@ -112,10 +116,11 @@ internal class AdminOcrSelectedCropView(context:android.content.Context):View(co
+         when(event.actionMasked) {
+             MotionEvent.ACTION_DOWN -> {
+                 lastX=event.x;lastY=event.y
++                swipeStartX=event.x;swipeStartY=event.y;hadMultiTouch=false
+                 parent?.requestDisallowInterceptTouchEvent(true)
+             }
+             MotionEvent.ACTION_POINTER_DOWN -> if(event.pointerCount>=2) {
+-                pinchDistance=distance(event);pinchZoom=zoom
++                pinchDistance=distance(event);pinchZoom=zoom;hadMultiTouch=true
+             }
+             MotionEvent.ACTION_MOVE -> {
+                 if(event.pointerCount>=2 && pinchDistance>0f) {
+@@ -124,6 +129,7 @@ internal class AdminOcrSelectedCropView(context:android.content.Context):View(co
+                     panX+=event.x-lastX
+                     panY+=event.y-lastY
+                     lastX=event.x;lastY=event.y
++                swipeStartX=event.x;swipeStartY=event.y;hadMultiTouch=false
+                 }
+                 invalidate()
+             }
+@@ -132,6 +138,11 @@ internal class AdminOcrSelectedCropView(context:android.content.Context):View(co
+                 lastX=event.getX(0);lastY=event.getY(0)
+             }
+             MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL -> {
++                if(event.actionMasked==MotionEvent.ACTION_UP && !hadMultiTouch &&
++                    zoom in .99f..1.01f && kotlin.math.abs(event.x-swipeStartX)>dp(76f) &&
++                    kotlin.math.abs(event.y-swipeStartY)<dp(54f)) {
++                    onHorizontalSwipe?.invoke(if(event.x>swipeStartX)-1 else 1)
++                }
+                 pinchDistance=0f
+                 parent?.requestDisallowInterceptTouchEvent(false)
+                 performClick()
+diff --git a/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt b/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt
+index 4abdec6..7758fb2 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt
+@@ -36,12 +36,13 @@ object LocalOcrCropPass {
+         crossword:Crossword,
+         gridPoints:List<PointF>,
+         stage:(String)->Unit = {},
+-        refineSharedRows:Boolean=false
++        refineSharedRows:Boolean=false,
++        layoutSeriesId:String?=null
+     ):Result {
+         stage("OCR מקומי: איתור מיקומי ההגדרות בתמונה")
+         val began=SystemClock.elapsedRealtime()
+         val detected=runCatching {
+-            HigiLocalOcrCropEngine.locate(context,source,crossword,gridPoints,refineSharedRows)
++            HigiLocalOcrCropEngine.locate(context,source,crossword,gridPoints,refineSharedRows,layoutSeriesId)
+         }.onFailure { t ->
+             DebugLog.w("LOCAL_OCR_CROP","OCR unavailable: ${t.javaClass.simpleName}: ${DebugLog.sanitize(t.message.orEmpty())}")
+         }.getOrNull()
