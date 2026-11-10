@@ -52,13 +52,13 @@ object OcrIndependentBoundaryV195 {
                 row.box.right <= width &&
                 row.box.bottom <= height &&
                 row.box.bottom - row.box.top in 18..max(105, height/16)
-        }.sortedWith(compareBy<OcrRawLineV166> { it.rect.top }.thenByDescending { it.rect.right })
+        }.sortedWith(compareBy<OcrTextLocatorV033.Line> { it.rect.top }.thenByDescending { it.rect.right })
         val printedWords = words.filter { word ->
             word.box.valid && word.confidence >= 60 &&
                 word.box.left >= width * 60 / 100 &&
                 word.box.right <= width && number(word.text) != null
         }
-        fun containingLine(word: OcrSharedRowSplitterV161.Word): OcrRawLineV166? =
+        fun containingLine(word: OcrSharedRowSplitterV161.Word): OcrTextLocatorV033.Line? =
             narrowLines.filter { row ->
                 overlapsY(row.box, word.box) >= max(8, (word.box.bottom - word.box.top)/2) &&
                     centerX(word.box) in (row.box.left-8)..(row.box.right+8)
@@ -133,7 +133,7 @@ object OcrIndependentBoundaryV195 {
                     row.box.top <= stopLine.box.top+anchorRange &&
                     row.box.right >= min(startLine.box.right,stopLine.box.right)-width/10
             }.distinctBy { it.id }
-                .sortedWith(compareBy<OcrRawLineV166>{it.rect.top}.thenByDescending{it.rect.right})
+                .sortedWith(compareBy<OcrTextLocatorV033.Line>{it.rect.top}.thenByDescending{it.rect.right})
             val startIndex=chosenLines.indexOfFirst { it.id == startLine.id }
             val stopIndex=chosenLines.indexOfFirst { it.id == stopLine.id }
             if (startIndex < 0 || stopIndex < startIndex ||
