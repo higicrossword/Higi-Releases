@@ -95,3 +95,5 @@ jobs:
           git add cloud-patches/v0.15.197-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.197-DRY.json
           git commit -m 'Stage Higi v0.15.197 DRY series OCR and swipe UI'
           git push origin HEAD:main
+
+# Retry after restoring patch EOF newline.
