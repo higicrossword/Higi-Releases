@@ -1,0 +1,64 @@
+name: Higi v192 focused OCR pipeline inspection
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-v192-ocr-inspect.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE_SHA: ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7
+      PATCH_SHA: 8b222055ac0fd3aa4accc6a9179eb8809d4625e478d801d466593f6ef5a1d984
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore pinned source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ocrinspect"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$RUNNER_TEMP/ocrinspect/base.zip" \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo "$BASE_SHA  $RUNNER_TEMP/ocrinspect/base.zip" | sha256sum --check --status
+          unzip -q "$RUNNER_TEMP/ocrinspect/base.zip" -d "$RUNNER_TEMP/ocrinspect/source"
+          ROOT="$RUNNER_TEMP/ocrinspect/source/HebrewCrosswordApp_v0.15.175"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Build' -c user.email='build@example.invalid' commit -qm baseline
+          python - "$GITHUB_WORKSPACE/cloud-patches/v0.15.192-from-v0.15.175.patch.xz.b64" "$RUNNER_TEMP/ocrinspect/patch" "$PATCH_SHA" <<'PY'
+          import base64,lzma,hashlib,pathlib,sys
+          data=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(data).hexdigest()==sys.argv[3]
+          pathlib.Path(sys.argv[2]).write_bytes(data)
+          PY
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/ocrinspect/patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/ocrinspect/patch"
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+      - name: Inspect exact review pipeline and V192 eligibility conditions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os,pathlib,re
+          root=pathlib.Path(os.environ["ROOT"])
+          base=root/'app/src/main/java/com/example/hebrewcrossword'
+          paths=[base/'HigiLocalOcrCropEngine.kt',base/'OcrInlineClueRecoveryV180.kt']
+          patterns=[r'refineSharedRows',r'auditWords',r'expectedWires',r'newPreviews',r'V192',r'V190',r'V191',r'wire\(',r'fun\s+key\(',r'fun\s+geometry\(',r'\bdebugLines\b',r'OCR_WORD']
+          for path in paths:
+              if not path.exists():continue
+              lines=path.read_text().splitlines()
+              print("=== Focused inspect:",path.name,"lines",len(lines))
+              hit=[i for i,l in enumerate(lines) if any(re.search(p,l) for p in patterns)]
+              windows=set()
+              for i in hit:
+                  for k in range(max(0,i-6),min(len(lines),i+10)):windows.add(k)
+              for i in sorted(windows):
+                  print(f"{i+1}: {lines[i][:250]}")
+          PY
