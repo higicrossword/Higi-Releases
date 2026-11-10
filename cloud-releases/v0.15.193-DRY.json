@@ -3,5 +3,6 @@
   "version": "0.15.193",
   "versionCode": 343,
   "patchFile": "cloud-patches/v0.15.193-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "6b38424177888d3a13ace2a5e19cb8f1c96512575da6d3fd10e642e27620eea1"
+  "patchSha256": "6b38424177888d3a13ace2a5e19cb8f1c96512575da6d3fd10e642e27620eea1",
+  "notes": "V193 corrected Kotlin compile; DRY-only printed-next-number clipping for multi-piece OCR previews; explicit diagnostics; preserve canonical/verified crops"
 }
