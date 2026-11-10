@@ -1,0 +1,70 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Flags a one-line internal OCR crop only when the immediately following
+ * physical OCR row clearly contains the end of that same clue followed by
+ * the NEXT expected printed clue number. Conservative: uncertainty remains
+ * admin-review-only; neither crop boxes nor Canonical are modified here.
+ */
+object OcrClueCompletenessV196 {
+    private val printed=Regex("^([0-9]{1,2})[.,:]$")
+    private fun number(raw:String)=printed.matchEntire(raw.trim())
+        ?.groupValues?.get(1)?.toIntOrNull()
+    private fun overlap(a:CropRect,b:CropRect)=
+        min(a.bottom,b.bottom)-max(a.top,b.top)
+    private fun centerX(r:CropRect)=(r.left+r.right)/2
+    private fun centerY(r:CropRect)=(r.top+r.bottom)/2
+
+    fun review(
+        accepted:Map<String,List<CropRect>>,
+        lines:List<OcrTextLocatorV033.Line>,
+        words:List<OcrSharedRowSplitterV161.Word>,
+        expected:Set<String>, width:Int,height:Int
+    ):Map<String,String>{
+        val needsReview=linkedMapOf<String,String>()
+        if(width<800 || height<800)return needsReview
+        val starts=words.filter{it.box.valid && it.confidence>=65 &&
+            number(it.text)!=null}
+        for((label,parts) in accepted){
+            if(parts.size!=1 || label !in expected ||
+                !label.matches(Regex("^[HV][0-9]{1,2}$")))continue
+            val area=parts.single()
+            if(!area.valid || area.left<width*60/100 ||
+                area.right-area.left>width*38/100)continue
+            val current=label.drop(1).toInt()
+            val next=expected.asSequence().filter{it.startsWith(label[0])}
+                .mapNotNull{it.drop(1).toIntOrNull()}.filter{it>current}.minOrNull()
+                ?:continue
+            val own=starts.filter{ number(it.text)==current &&
+                centerX(it.box) in area.left..area.right &&
+                centerY(it.box) in area.top..area.bottom }
+            if(own.size!=1)continue
+            val ownBox=own.single().box
+            val ownLine=lines.filter{ it.box.valid && it.confidence>=40 &&
+                overlap(it.box,ownBox)>=max(8,(ownBox.bottom-ownBox.top)/2) &&
+                centerX(ownBox) in (it.box.left-8)..(it.box.right+8)}
+                .maxByOrNull{overlap(it.box,ownBox)}?:continue
+            val marker=Regex("(?:^|[\\s;])"+next+"[.,:](?=\\s|$)")
+            val continuation=lines.firstOrNull{ row->
+                if(!row.box.valid || row.box.left<width*58/100 ||
+                    row.box.right>width || row.confidence<40 ||
+                    row.box.top<=ownLine.box.top+12 ||
+                    row.box.top>ownLine.box.bottom+max(35,height/32))false
+                else marker.find(row.text)?.let{match->
+                    val prefix=row.text.substring(0,match.range.first)
+                    prefix.length>=16 && prefix.any{it==';' || it=='؛'} &&
+                        prefix.count{it.isLetter()}>=8
+                }==true
+            }
+            if(continuation!=null){
+                needsReview[label]="V196_INCOMPLETE_SINGLE_ROW: next OCR line "+
+                    "contains continuation before printed $next; "+
+                    "one-row crop NOT complete; verify manually; NO canonical write"
+            }
+        }
+        return needsReview
+    }
+}
