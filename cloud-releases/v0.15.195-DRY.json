@@ -3,5 +3,6 @@
   "version": "0.15.195",
   "versionCode": 345,
   "patchFile": "cloud-patches/v0.15.195-from-v0.15.175.patch.xz.b64",
-  "patchSha256": "93f367897b46f44a674f722739d23e3d0c683dbcf8f449a098aed59e8ab5819e"
+  "patchSha256": "93f367897b46f44a674f722739d23e3d0c683dbcf8f449a098aed59e8ab5819e",
+  "notes": "V195 verification retry: complete OCR Line.box accessor fixes; independent current Tesseract pixel anchors; admin preview only"
 }
