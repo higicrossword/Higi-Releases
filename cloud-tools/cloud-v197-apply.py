@@ -6,8 +6,8 @@ root=Path(sys.argv[1]); assets=Path(__file__).parent
 app=root/'app/src/main/java/com/example/hebrewcrossword'
 source=assets/'v197-ui.patch'
 import subprocess
-subprocess.run(['git','-C',str(root),'apply','--check',str(source)],check=True)
-subprocess.run(['git','-C',str(root),'apply',str(source)],check=True)
+subprocess.run(['git','-C',str(root),'apply','--3way','--check',str(source)],check=True)
+subprocess.run(['git','-C',str(root),'apply','--3way',str(source)],check=True)
 # New preview logic is specifically scoped to the administrator-only OCR review lane.
 p=app/'HigiLocalOcrCropEngine.kt'
 s=p.read_text(encoding='utf-8')
