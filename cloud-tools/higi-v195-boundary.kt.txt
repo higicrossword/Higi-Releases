@@ -1,0 +1,195 @@
+package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * V195 ADMIN DRY only: independently reconstruct a compact RTL clue boundary
+ * from existing Tesseract LINE and WORD pixel boxes. In particular a clue
+ * continuing onto the next line must end to the RIGHT of the next printed
+ * number, not after the next clue. The OCR of ;(5) may be (65), and the
+ * answer length is NOT used for geometry or automatically trusted.
+ *
+ * Do not put any result into trusted/canonical geometry; this is review only.
+ */
+object OcrIndependentBoundaryV195 {
+    data class Review(
+        val previews: Map<String, List<CropRect>>,
+        val diagnostics: Map<String, String>
+    )
+
+    private val printed = Regex("^([0-9]{1,2})[.,:]$")
+    private val labelPattern = Regex("^[HV][0-9]{1,2}$")
+    private fun number(raw: String): Int? = printed.matchEntire(
+        raw.trim().replace('．', '.').replace('，', ',')
+    )?.groupValues?.get(1)?.toIntOrNull()
+    private fun centerX(r: CropRect) = (r.left + r.right) / 2
+    private fun centerY(r: CropRect) = (r.top + r.bottom) / 2
+    private fun area(rects: List<CropRect>): Long = rects.sumOf {
+        (it.right-it.left).toLong() * (it.bottom-it.top).toLong()
+    }
+    private fun overlapsY(a: CropRect, b: CropRect): Int =
+        min(a.bottom, b.bottom) - max(a.top, b.top)
+
+    fun inspect(
+        proposals: Map<String, List<CropRect>>,
+        lines: List<OcrRawLineV166>,
+        words: List<OcrSharedRowSplitterV161.Word>,
+        expected: Set<String>,
+        width: Int,
+        height: Int
+    ): Review {
+        val updated = linkedMapOf<String, List<CropRect>>()
+        val diagnostics = linkedMapOf<String, String>()
+        if (width < 800 || height < 800 || lines.isEmpty() || words.isEmpty())
+            return Review(updated, diagnostics)
+
+        val narrowLines = lines.filter { row ->
+            row.rect.valid && row.confidence >= 40 &&
+                row.rect.left >= width * 60 / 100 &&
+                row.rect.right >= width * 78 / 100 &&
+                row.rect.right <= width &&
+                row.rect.bottom <= height &&
+                row.rect.bottom - row.rect.top in 18..max(105, height/16)
+        }.sortedWith(compareBy<OcrRawLineV166> { it.rect.top }.thenByDescending { it.rect.right })
+        val printedWords = words.filter { word ->
+            word.box.valid && word.confidence >= 60 &&
+                word.box.left >= width * 60 / 100 &&
+                word.box.right <= width && number(word.text) != null
+        }
+        fun containingLine(word: OcrSharedRowSplitterV161.Word): OcrRawLineV166? =
+            narrowLines.filter { row ->
+                overlapsY(row.rect, word.box) >= max(8, (word.box.bottom - word.box.top)/2) &&
+                    centerX(word.box) in (row.rect.left-8)..(row.rect.right+8)
+            }.maxByOrNull { row -> overlapsY(row.rect, word.box) }
+
+        for ((label, old) in proposals) {
+            if (label !in expected || !labelPattern.matches(label) ||
+                old.isEmpty() || old.any { !it.valid }) continue
+            // Do not alter already tight one-piece source-word proposals.
+            if (old.size == 1 && area(old) < width.toLong()*height/500) continue
+            if (old.any { it.left < width*60/100 || it.right > width ||
+                    it.right-it.left > width*40/100 }) continue
+            val current = label.substring(1).toInt()
+            val next = expected.asSequence().filter { it.startsWith(label[0]) }
+                .mapNotNull { it.substring(1).toIntOrNull() }
+                .filter { it > current }.minOrNull() ?: continue
+            val currentBounds = CropRect(old.minOf{it.left},old.minOf{it.top},
+                old.maxOf{it.right},old.maxOf{it.bottom})
+            val anchorRange = max(13, height/130)
+            val own = printedWords.filter { word ->
+                number(word.text) == current &&
+                    centerX(word.box) in (currentBounds.left-anchorRange)..(currentBounds.right+anchorRange) &&
+                    centerY(word.box) in (currentBounds.top-anchorRange)..(currentBounds.bottom+anchorRange)
+            }
+            if (own.size != 1) {
+                diagnostics[label] = "V195_ANCHOR_AMBIGUOUS:own=${own.size} next=$next; " +
+                    "legacy multi-piece candidate retained for manual review"
+                continue
+            }
+            val start = own.single()
+            val startLine = containingLine(start)
+            if (startLine == null) {
+                diagnostics[label] = "V195_OWN_ROW_NOT_FOUND; manual review"
+                continue
+            }
+            val following = printedWords.filter { word ->
+                number(word.text) == next &&
+                    centerX(word.box) in (currentBounds.left-anchorRange)..(currentBounds.right+anchorRange) &&
+                    word.box.top >= start.box.top - anchorRange &&
+                    word.box.top <= currentBounds.bottom + anchorRange
+            }.filter { word ->
+                word.box.top > start.box.top + anchorRange ||
+                    (abs(word.box.top-start.box.top) <= anchorRange && word.box.right < start.box.left)
+            }
+            if (following.size != 1) {
+                diagnostics[label] = "V195_NEXT_PRINTED_NUMBER_UNPROVEN:$next count=${following.size}; " +
+                    "manual review, not canonical"
+                continue
+            }
+            val stop = following.single()
+            val stopLine = containingLine(stop)
+            if (stopLine == null || stopLine.rect.top < startLine.rect.top ||
+                stopLine.rect.top-startLine.rect.top > height/9) {
+                diagnostics[label] = "V195_NEXT_ROW_UNSAFE:$next; manual review"
+                continue
+            }
+            // No intermediate printed start of ANY number in the same lane.
+            // That would indicate that the chosen stop is not the immediate
+            // following physical clue, even if OCR missed its sequence number.
+            val intervening = printedWords.any { other ->
+                other !== start && other !== stop &&
+                    other.box.top >= start.box.top-anchorRange &&
+                    other.box.top < stop.box.top-anchorRange &&
+                    centerX(other.box) in (currentBounds.left-anchorRange)..(currentBounds.right+anchorRange)
+            }
+            if (intervening) {
+                diagnostics[label] = "V195_INTERMEDIATE_PRINTED_NUMBER; manual review"
+                continue
+            }
+            val chosenLines = narrowLines.filter { row ->
+                row.rect.top >= startLine.rect.top-anchorRange &&
+                    row.rect.top <= stopLine.rect.top+anchorRange &&
+                    row.rect.right >= min(startLine.rect.right,stopLine.rect.right)-width/10
+            }.distinctBy { it.id }
+                .sortedWith(compareBy<OcrRawLineV166>{it.rect.top}.thenByDescending{it.rect.right})
+            val startIndex=chosenLines.indexOfFirst { it.id == startLine.id }
+            val stopIndex=chosenLines.indexOfFirst { it.id == stopLine.id }
+            if (startIndex < 0 || stopIndex < startIndex ||
+                stopIndex-startIndex > 3) {
+                diagnostics[label] = "V195_LINE_PATH_UNPROVEN; manual review"
+                continue
+            }
+            val segments = mutableListOf<CropRect>()
+            val margin = max(5,width/500)
+            for (i in startIndex..stopIndex) {
+                val row=chosenLines[i]
+                // At a shared physical line, previous clue text is RIGHT of
+                // the next printed number (Hebrew RTL). Never include that number.
+                val left = if (i == stopIndex)
+                    max(row.rect.left,stop.box.right+margin) else row.rect.left
+                val right = row.rect.right
+                val top = if (segments.isEmpty()) row.rect.top else
+                    max(row.rect.top, segments.last().bottom)
+                val bottom = row.rect.bottom
+                if (right-left <= 22 || bottom-top <= 9) {
+                    // Next clue starts a new line: zero remaining ink for the
+                    // current clue on it. Do not include the new clue's row.
+                    if (i == stopIndex && segments.isNotEmpty()) break
+                    segments.clear()
+                    break
+                }
+                segments += CropRect(left,top,right,bottom)
+            }
+            val ownInside = segments.any { r ->
+                centerX(start.box) in r.left..r.right && centerY(start.box) in r.top..r.bottom
+            }
+            val nextInside = segments.any { r ->
+                centerX(stop.box) in r.left..r.right && centerY(stop.box) in r.top..r.bottom
+            }
+            val foreign = printedWords.any { word ->
+                word !== start && segments.any { r ->
+                    centerX(word.box) in r.left..r.right && centerY(word.box) in r.top..r.bottom
+                }
+            }
+            if (segments.isEmpty() || !ownInside || nextInside || foreign ||
+                area(segments) >= area(old)) {
+                diagnostics[label] = "V195_PARTITION_REJECTED:pieces=${segments.size} " +
+                    "own=$ownInside next=$nextInside foreign=$foreign " +
+                    "smaller=${area(segments)<area(old)}; manual review"
+                continue
+            }
+            val probableSemicolon=lines.any { row ->
+                row.id == stopLine.id && (';' in row.text || '؛' in row.text)
+            }
+            updated[label]=segments
+            diagnostics[label] = "V195_PREVIEW_ONLY: OCR start=$current next=$next " +
+                "source-line segments=${segments.size}; " +
+                "semicolon=${if(probableSemicolon)\"SEEN\" else \"NOT_REQUIRED\"}; " +
+                "parenthesized length not required; admin review only; " +
+                "NO AI re-decode / NO canonical write"
+        }
+        return Review(updated, diagnostics)
+    }
+}
