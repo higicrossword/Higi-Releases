@@ -34,7 +34,7 @@ object OcrIndependentBoundaryV195 {
 
     fun inspect(
         proposals: Map<String, List<CropRect>>,
-        lines: List<OcrRawLineV166>,
+        lines: List<OcrTextLocatorV033.Line>,
         words: List<OcrSharedRowSplitterV161.Word>,
         expected: Set<String>,
         width: Int,
@@ -186,7 +186,7 @@ object OcrIndependentBoundaryV195 {
             updated[label]=segments
             diagnostics[label] = "V195_PREVIEW_ONLY: OCR start=$current next=$next " +
                 "source-line segments=${segments.size}; " +
-                "semicolon=${if(probableSemicolon)\"SEEN\" else \"NOT_REQUIRED\"}; " +
+                "semicolon=${if(probableSemicolon)"SEEN" else "NOT_REQUIRED"}; " +
                 "parenthesized length not required; admin review only; " +
                 "NO AI re-decode / NO canonical write"
         }
