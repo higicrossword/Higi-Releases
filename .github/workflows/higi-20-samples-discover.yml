@@ -1,0 +1,37 @@
+name: Higi 20 image fixtures connectivity check
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-samples-discover.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Test public source archive connectivity
+        run: |
+          python3 - <<'PY'
+          import urllib.request
+          samples=[
+            "https://groups.google.com/g/tartey_mashma/c/2X2gS_w0Ou0",
+            "https://groups.google.com/g/tartey_mashma/c/QhIDFe58f8w",
+            "https://groups.google.com/group/tartey_mashma/attach/c0a2b3a7a617/%D7%99%D7%93%D7%99%D7%A2%D7%95%D7%AA%20%D7%90%D7%97%D7%A8%D7%95%D7%A0%D7%95%D7%AA%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%209-11-26.jpg?part=0.1",
+            "https://groups.google.com/g/tartey_mashma"
+          ]
+          for url in samples:
+            try:
+              req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 Chrome/131.0.0.0"})
+              with urllib.request.urlopen(req,timeout=12) as r:
+                data=r.read(240000)
+                print("URL",url[:140],"STATUS",r.status,"CTYPE",r.headers.get("Content-Type"),"BYTES",len(data))
+                if "text" in r.headers.get("Content-Type",""):
+                  from html import unescape
+                  import re
+                  for fragment in re.findall(r".{0,100}(?:/attach/|\.jpg|\.jpeg|data-attachment|2026|20260420).{0,120}",data.decode("utf-8","ignore"))[:16]:
+                    print("SNIP",unescape(fragment[:240]))
+            except Exception as ex:
+              print("ERROR",url[:120],str(ex)[:250])
+          PY
