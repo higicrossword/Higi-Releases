@@ -1,0 +1,61 @@
+name: Higi 20 Yedioth images - exact grid layout fingerprint
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-grid-fingerprint.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Yedioth-Dekel-20-originals-and-layout-audit
+          run-id: 43105690198
+          github-token: ${{ github.token }}
+          path: .
+      - run: python -m pip install --quiet pillow numpy
+      - name: Verify 9x9 black-cell layout signature in all sources
+        run: |
+          python - <<'PY'
+          import json,collections
+          from pathlib import Path
+          from sys import path
+          path.insert(0,'cloud-tools')
+          import importlib.util
+          spec=importlib.util.spec_from_file_location('higi_grid_pattern_check','cloud-tools/higi-grid-pattern-check.py')
+          mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+          grid_signature=mod.grid_signature
+          root=Path('yedioth-20-fixtures')
+          data=json.loads((root/'manifest.json').read_text())
+          results=[]
+          for r in data:
+            if r['status']!='downloaded':continue
+            out=grid_signature(root/r['file'])
+            results.append({'date':r['date'],'weekday':r['weekday'],**out})
+            print('GRID_CHECK',r['date'],r['weekday'],out,flush=True)
+          counts=collections.Counter(x.get('grid','ERROR') for x in results)
+          common,major=counts.most_common(1)[0]
+          summary={'total':len(results),'matching_most_common':major,'distinct_signatures':len(counts),'signatures':dict(counts),
+            'note':'9x9 black-cell signature is structural; does not establish correctness of clue crops'}
+          (root/'grid_fingerprint_results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
+          (root/'grid_fingerprint_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print('GRID_FINGERPRINT_SUMMARY',json.dumps(summary,ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Yedioth-Dekel-20-Grid-Fingerprints
+          path: |
+            yedioth-20-fixtures/grid_fingerprint_results.json
+            yedioth-20-fixtures/grid_fingerprint_summary.json
+          retention-days: 30
+          if-no-files-found: warn
