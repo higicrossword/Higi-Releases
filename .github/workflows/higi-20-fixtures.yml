@@ -1,0 +1,31 @@
+name: Higi - audit 20 Yedioth Dekel weekly source images
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-fixtures.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install image audit dependencies
+        run: python -m pip install --quiet pillow numpy
+      - name: Retrieve twenty Monday/Wednesday sources and evaluate V197 routing/layout
+        run: python cloud-tools/higi-20-yedioth-download-test.py
+      - name: Upload originals, manifest, audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yedioth-Dekel-20-originals-and-layout-audit
+          path: |
+            Yedioth-Dekel-20-fixtures.zip
+            yedioth-20-fixtures/
+          retention-days: 30
+          if-no-files-found: warn
