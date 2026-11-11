@@ -1,0 +1,39 @@
+name: Higi Wednesday Monday archive index
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-samples-index.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Extract page links, searches, feeds and attachment references
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request, urllib.parse, re, html, xml.etree.ElementTree as ET
+          base='https://groups.google.com/g/tartey_mashma'
+          urls=[base,base+'/search?q='+urllib.parse.quote('ידיעות אחרונות דקל בנו'),base+'/search?q='+urllib.parse.quote('דקל בנו 2026'),base+'?page=2',base+'/feed/rss_v2_0_msgs.xml',base+'/c/QhIDFe58f8w']
+          for url in urls:
+            print('\n===== FETCH',url)
+            try:
+              req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=15) as r:
+                body=r.read(6000000)
+                print('STATUS',r.status,'SIZE',len(body),'CONTENT',r.headers.get('Content-Type'))
+              text=html.unescape(body.decode('utf-8','replace'))
+              print('PLAIN MATCHES',len(re.findall('ידיעות אחרונות דקל בנו',text)),len(re.findall('דקל בנו',text)))
+              print('THREAD URL COUNT',len(set(re.findall(r'(?:/g/tartey_mashma/c/|/tartey_mashma/c/)[A-Za-z0-9_-]+',text))))
+              for m in list(re.finditer('ידיעות אחרונות דקל בנו',text))[:15]:
+                print('TARGET',repr(text[max(0,m.start()-180):m.end()+180])[:450])
+              hrefs=re.findall(r'(?:href|src)=["\']([^"\'<>]+)',text)
+              for h in hrefs:
+                if any(x in h for x in ['/attach/','/c/','Screenshot_2026','/feed/']):print('HREF',h[:300])
+              for s in list(re.finditer(r'/attach/',text))[:8]:
+                print('ATTACH',repr(text[max(0,s.start()-120):s.start()+450])[:600])
+            except Exception as e:print('ERROR',type(e).__name__,str(e)[:250])
+          PY
