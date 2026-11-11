@@ -9,8 +9,8 @@ import kotlin.math.min
  */
 object OcrSeriesPreviewV197 {
     data class Review(val previews:Map<String,List<CropRect>>,val reasons:Map<String,String>)
-    private val printed=Regex("^([0-9]{1,2})[.,:]$")
-    private fun n(text:String):Int?=printed.matchEntire(text.trim())?.groupValues?.get(1)?.toIntOrNull()
+    private val printed=Regex("^(?:([0-9]{1,2})[.,:]|[.,:]([0-9]{1,2}))$")
+    private fun n(text:String):Int?=printed.matchEntire(text.trim())?.let{ (it.groupValues[1].ifBlank { it.groupValues[2] }).toIntOrNull() }
     private fun overlap(a:CropRect,b:CropRect)=min(a.bottom,b.bottom)-max(a.top,b.top)
     private fun cx(a:CropRect)=(a.left+a.right)/2
     private fun cy(a:CropRect)=(a.top+a.bottom)/2
@@ -27,7 +27,7 @@ object OcrSeriesPreviewV197 {
             if(!key.matches(Regex("^[HV][0-9]{1,2}$")) || key !in expected ||
                 parts.isEmpty() || parts.any{!it.valid})continue
             // Already narrow one-row boundaries must not be replaced.
-            if(parts.size==1 && parts.single().bottom-parts.single().top<height/25)continue
+            // A one-row legacy candidate may still be partial; review it, never auto-publish.
             val num=key.drop(1).toIntOrNull()?:continue
             val next=expected.asSequence().filter{it.startsWith(key.first())}
                 .mapNotNull{it.drop(1).toIntOrNull()}.filter{it>num}.minOrNull()?:continue
@@ -45,8 +45,9 @@ object OcrSeriesPreviewV197 {
                 continue
             }
             val a=start.single().box;val b=stop.single().box
-            if(b.top<=a.top+4 || b.top-a.top>height/9 ||
-                abs(cx(a)-cx(b))>width/4)continue
+            val sameRow=abs(cy(b)-cy(a))<=max(6,height/125)
+            if((sameRow && cx(b)>=cx(a)) || (!sameRow && cy(b)<=cy(a)) ||
+                cy(b)-cy(a)>height/7 || abs(cx(a)-cx(b))>width/3)continue
             fun rowFor(rect:CropRect)=lines.filter{it.box.valid && it.confidence>=40 &&
                 overlap(it.box,rect)>=max(4,(rect.bottom-rect.top)/2) &&
                 cx(rect) in (it.box.left-12)..(it.box.right+12)}
@@ -59,19 +60,22 @@ object OcrSeriesPreviewV197 {
                 it.box.left>=bounds.left-width/25 &&
                 it.box.right<=bounds.right+width/25}
                 .distinctBy{it.id}.sortedBy{it.box.top}
-            if(candidateRows.size !in 2..4 || candidateRows.none{it.id==first.id} ||
+            if(candidateRows.size !in 1..5 || candidateRows.none{it.id==first.id} ||
                 candidateRows.none{it.id==last.id})continue
             val proposed=mutableListOf<CropRect>()
             for(row in candidateRows){
                 if(row.box.top>last.box.top+5)break
-                val startX=if(row.id==last.id)max(row.box.left,b.right+max(3,width/900))
-                    else row.box.left
-                if(row.box.right-startX<14)continue
+                val cutMargin=max(3,width/500)
+                // Source is RTL: after the OWN number starts left of it;
+                // before the NEXT number ends to the right of it.
+                val startX=if(row.id==last.id)max(row.box.left,b.right+cutMargin) else row.box.left
+                val endX=if(row.id==first.id)min(row.box.right,a.right+cutMargin) else row.box.right
+                if(endX-startX<8)continue
                 val top=if(proposed.isEmpty())row.box.top else max(row.box.top,proposed.last().bottom)
                 if(row.box.bottom-top<8)continue
-                proposed+=CropRect(startX,top,row.box.right,row.box.bottom)
+                proposed+=CropRect(startX,top,endX,row.box.bottom)
             }
-            if(proposed.isEmpty() || proposed.size>3)continue
+            if(proposed.isEmpty() || proposed.size>5)continue
             if(proposed.none{cx(a) in it.left..it.right && cy(a) in it.top..it.bottom})continue
             if(proposed.any{cx(b) in it.left..it.right && cy(b) in it.top..it.bottom})continue
             if(anchors.any{it!==start.single() && it!==stop.single() &&
@@ -80,7 +84,7 @@ object OcrSeriesPreviewV197 {
             val areaNew=proposed.sumOf{(it.right-it.left).toLong()*(it.bottom-it.top)}
             if(areaNew>=areaOld)continue
             proposals[key]=proposed
-            reasons[key]="V197_MONDAY_REVIEW_ONLY: printed $num and $next anchored; pieces=${proposed.size}; not verified; NO canonical write"
+            reasons[key]="YEDIOTH_WEEKLY_TWO_BOUNDARY_REVIEW_ONLY: printed $num and $next anchored; pieces=${proposed.size}; sameRow=$sameRow; not verified; NO canonical write"
         }
         return Review(proposals,reasons)
     }
