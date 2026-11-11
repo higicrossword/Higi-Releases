@@ -1,0 +1,41 @@
+name: Higi OCR twenty fixtures search range
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-range-test.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Search archive historical date ranges
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.parse,re,html
+          base="https://groups.google.com/g/tartey_mashma/search?q="
+          tests=[
+            "ידיעות אחרונות דקל בנו",
+            "ידיעות אחרונות דקל בנו before:2026-10-10",
+            "ידיעות אחרונות דקל בנו before:2026-09-01",
+            "ידיעות אחרונות דקל בנו after:2026-08-01 before:2026-10-01",
+            "ידיעות אחרונות דקל בנו 2026",
+            "ידיעות אחרונות דקל בנו 9/2026",
+            "ידיעות אחרונות דקל בנו 10/2026",
+            "ידיעות אחרונות דקל בנו before:2026/10/15",
+          ]
+          for query in tests:
+            try:
+              req=urllib.request.Request(base+urllib.parse.quote(query),headers={"User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req,timeout=15) as r:body=html.unescape(r.read().decode("utf-8","ignore"))
+              match=list(re.finditer(r'<a[^>]+href="\./g/tartey_mashma/c/([A-Za-z0-9_-]+)(?:/m/[^"]+)?"[^>]*><div class="t17a0d"><span class="o1DPKc">([^<]+)</span>',body))
+              unique={}
+              for m in match:
+                title=html.unescape(m.group(2))
+                if "דקל בנו" in title and "ידיעות" in title and "תרתי" not in title:unique[m.group(1)]=title
+              print("QUERY",query,"TOTALMATCH",len(match),"RELEVANT",len(unique))
+              for k,v in list(unique.items())[:22]:print("DATE",k,v)
+            except Exception as e:print("ERROR",query,str(e))
+          PY
