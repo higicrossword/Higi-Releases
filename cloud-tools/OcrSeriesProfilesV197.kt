@@ -4,12 +4,13 @@ package com.example.hebrewcrossword
  * Never select a profile merely because a source image happens to have similar X coordinates.
  */
 object OcrSeriesProfilesV197 {
-    data class Profile(val id:String, val revision:Int=1, val mondayBoundaryReview:Boolean=false)
+    data class Profile(val id:String, val revision:Int=2, val mondayBoundaryReview:Boolean=false)
     val GENERIC=Profile("GENERIC")
     val TARTEY=Profile("TARTEY_DEKEL")
     val HAFUCH=Profile("HAFUCH_DEKEL")
-    val MONDAY=Profile("YEDIOTH_MONDAY_DEKEL",mondayBoundaryReview=true)
-    val WEDNESDAY=Profile("YEDIOTH_WEDNESDAY_DEKEL")
+    val WEEKLY=Profile("YEDIOTH_DEKEL_WEEKLY",mondayBoundaryReview=true)
+    val MONDAY=WEEKLY
+    val WEDNESDAY=WEEKLY
     val MAARIV=Profile("MAARIV_ODED_ROZEN")
     val MAKOR=Profile("MAKOR_RISHON")
     val LAISHA=Profile("LAISHA_DEKEL")
@@ -19,7 +20,8 @@ object OcrSeriesProfilesV197 {
         "BARUCH_LIOR" to Profile("BARUCH_LIOR"),
         "GUEST_AVISHAI" to Profile("GUEST_AVISHAI"))
     private val stable=mapOf(TARTEY.id to TARTEY,HAFUCH.id to HAFUCH,
-        MONDAY.id to MONDAY,WEDNESDAY.id to WEDNESDAY,MAARIV.id to MAARIV,
+        WEEKLY.id to WEEKLY,"YEDIOTH_MONDAY_DEKEL" to WEEKLY,
+        "YEDIOTH_WEDNESDAY_DEKEL" to WEEKLY,MAARIV.id to MAARIV,
         MAKOR.id to MAKOR,LAISHA.id to LAISHA)+OTHERS
 
     fun resolve(title:String,sourceKey:String):Profile {
@@ -30,8 +32,7 @@ object OcrSeriesProfilesV197 {
         val id=when {
             "תרתי משמע" in text -> TARTEY.id
             "הפוך על הפוך" in text -> HAFUCH.id
-            "דקל בנו שני" in text -> MONDAY.id
-            "דקל בנו רביעי" in text -> WEDNESDAY.id
+            "דקל בנו שני" in text || "דקל בנו רביעי" in text -> WEEKLY.id
             "מקור ראשון" in text -> MAKOR.id
             "מעריב" in text && "אורח" !in text -> MAARIV.id
             "לאשה" in text || "לאישה" in text -> LAISHA.id
