@@ -1,0 +1,40 @@
+name: Higi 20 Yedioth images - OCR anchor boundary benchmark
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-20-ocr-benchmark.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Yedioth-Dekel-20-originals-and-layout-audit
+          run-id: 43105690198
+          github-token: ${{ github.token }}
+          path: .
+      - name: Install OCR and analysis dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng > /dev/null
+          python -m pip install --quiet pillow pytesseract
+      - name: Benchmark number-anchor and next-clue geometry gates using independent Tesseract
+        run: python cloud-tools/higi-20-ocr-gates.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Yedioth-Dekel-20-OCR-benchmark-results
+          path: |
+            yedioth-20-fixtures/ocr_gate_benchmark.csv
+            yedioth-20-fixtures/ocr_benchmark_summary.json
+          if-no-files-found: warn
+          retention-days: 30
