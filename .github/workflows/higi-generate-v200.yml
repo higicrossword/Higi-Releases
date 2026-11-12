@@ -112,7 +112,7 @@ jobs:
           name: Yedioth-Dekel-20-originals-and-layout-audit
           run-id: 43105690198
           github-token: ${{ github.token }}
-          path: "$RUNNER_TEMP/higi200/fixtures"
+          path: '${{ runner.temp }}/higi200/fixtures'
       - name: Verify all 20 historical source fixtures, SHA256 and unchanged family layout
         shell: bash
         run: |
