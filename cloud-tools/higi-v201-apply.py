@@ -69,7 +69,7 @@ block=once(block,'parts=${pieces.size}', 'parts=${constrained.size}','debug piec
 # Leave clipping annotated as review, never autoaccepted for Canonical.
 block=once(block,
     'newPreviewReasons[k]=independent.reasons[label].orEmpty() +',
-    'newPreviewReasons[k]=independent.reasons[label].orEmpty() +\n                        (if(constrained!=pieces) " | V201_GRID_CLIPPED_DRy_REVIEW_ONLY" else "") +',
+    'newPreviewReasons[k]=independent.reasons[label].orEmpty() +\n                        (if(constrained!=pieces) " | V201_GRID_CLIPPED_DRY_REVIEW_ONLY" else "") +',
     'clipped review-only status')
 s=s[:a]+block+s[b:]
 
