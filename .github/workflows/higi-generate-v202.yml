@@ -123,7 +123,7 @@ jobs:
           git -C "$ROOT" apply "$RUNNER_TEMP/higi202/v202.patch"
           python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
           echo 'V202_SOURCE_RECONSTRUCTION_OK'
-      - name: Full Android unit tests: library filter, contextual OCR, admin navigation and all existing regressions
+      - name: 'Full Android unit tests: library filter, contextual OCR, admin navigation and all existing regressions'
         shell: bash
         run: |
           set -euo pipefail
