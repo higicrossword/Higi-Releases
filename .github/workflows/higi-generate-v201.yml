@@ -1,0 +1,169 @@
+name: Higi v0.15.201 - final geometry and grid boundary DRY
+
+on:
+  push:
+    branches: ['higi/v201-final-geometry-review']
+    paths: ['.github/workflows/higi-generate-v201.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: higi-v201-source-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASE_SHA: ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7
+      V200_PATCH_SHA: f67ed9f57b018af6eb8aab8aa4fa22b52223f2e02d56633eb945bcfbd4d53d92
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore pinned 0.15.200 and integrate V201 final geometry guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! gh release view v0.15.201-DRY --repo "$REPO" --json tagName >/dev/null 2>&1 || { echo 'V201 release already exists'; exit 1; }
+          ! gh api "repos/$REPO/contents/cloud-releases/v0.15.201-DRY.json" >/dev/null 2>&1 || { echo 'V201 manifest already exists'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/higi201"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$RUNNER_TEMP/higi201/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "$BASE_SHA  $RUNNER_TEMP/higi201/base.zip" | sha256sum --check --status
+          unzip -q "$RUNNER_TEMP/higi201/base.zip" -d "$RUNNER_TEMP/higi201"
+          ROOT="$RUNNER_TEMP/higi201/HebrewCrosswordApp_v0.15.175"
+          test -f "$ROOT/app/build.gradle.kts"
+          echo "HIGI201_ROOT=$ROOT" >> "$GITHUB_ENV"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi-CI' -c user.email='ci@users.noreply.github.com' commit -qm pinned-v175
+          python3 - "$GITHUB_WORKSPACE/cloud-patches/v0.15.200-from-v0.15.175.patch.xz.b64" "$RUNNER_TEMP/higi201/v200.patch" "$V200_PATCH_SHA" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3], 'V200 patch sha mismatch'
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi201/v200.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi201/v200.patch"
+          grep -q 'versionCode = 350' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.200"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi-CI' -c user.email='ci@users.noreply.github.com' commit -qm pinned-v200
+          python3 "$GITHUB_WORKSPACE/cloud-tools/higi-v201-apply.py" "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          grep -q 'versionCode = 351' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.201"' "$ROOT/app/build.gradle.kts"
+          grep -q 'OcrWeeklyFinalGeometryV201.inspect' "$ROOT/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt"
+          grep -q 'V200_NARROW_PRINTED_NUMBER_REVIEW_ONLY' "$ROOT/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt"
+          grep -q 'hasV201FinalGeometryBlock' "$ROOT/app/src/main/java/com/example/hebrewcrossword/AdminOcrRecropActivity.kt"
+          grep -q 'YEDIOTH_DEKEL_WEEKLY' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrSeriesProfilesV197.kt"
+          test -f "$ROOT/app/src/test/java/com/example/hebrewcrossword/OcrWeeklyFinalGeometryV201Test.kt"
+          grep -q 'BuildConfig.HIGI_DRY_BUILD && refineSharedRows' "$ROOT/app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --name-only HEAD > "$RUNNER_TEMP/higi201/changed.txt"
+          python3 - "$RUNNER_TEMP/higi201/changed.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          paths=Path(sys.argv[1]).read_text().splitlines()
+          allowed={'firebase/public/app-version.json','firebase/public/update/index.html'}
+          bad=[p for p in paths if (p.startswith('firebase/') or p.startswith('cloudflare/') or p=='app/google-services.json') and p not in allowed]
+          assert not bad,'Backend or Firebase mutation blocked: '+repr(bad)
+          print('V201_BACKEND_IMMUTABILITY_OK')
+          PY
+          git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi201/v201.patch"
+          test -s "$RUNNER_TEMP/higi201/v201.patch"
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi201/v201.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi201/v201.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          echo 'V201_SOURCE_RECONSTRUCTION_OK'
+      - name: Full Android unit tests including final ownership, self-overlap, grid clipping and other-series routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI201_ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --console plain
+          echo 'V201_ANDROID_REGRESSIONS_OK'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Yedioth-Dekel-20-originals-and-layout-audit
+          run-id: 43105690198
+          github-token: ${{ github.token }}
+          path: '${{ runner.temp }}/higi201/fixtures'
+      - name: Verify all 20 historical source fixtures, SHA256 and unchanged family layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi201/fixtures" <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys
+          target=Path(sys.argv[1])
+          manifests=list(target.rglob('manifest.json'))
+          assert len(manifests)==1,f'expected one manifest, got {len(manifests)}'
+          base=manifests[0].parent
+          items=json.loads(manifests[0].read_text())
+          records=[r for r in items if r.get('status')=='downloaded']
+          assert len(records)==20
+          days=[r.get('weekday') for r in records]
+          assert days.count('Monday')==9 and days.count('Wednesday')==11, days
+          for row in records:
+            file=base/row['file']
+            assert file.exists() and file.stat().st_size==row['bytes'],row['file']
+            assert hashlib.sha256(file.read_bytes()).hexdigest()==row['sha256'],row['file']
+            assert row['same_layout_geometry'] and row['right_grid_detected'],row['file']
+          print('V201_WEEKLY_CORPUS_SHA_20_OF_20_OK (source/layout only; not Android crop accuracy)')
+          PY
+      - name: Generate verified baseline source patch and manifest after tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi201/v201.patch" "$RUNNER_TEMP/higi201" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          dest=pathlib.Path(sys.argv[2])
+          patch='v0.15.201-from-v0.15.175.patch.xz.b64'
+          (dest/patch).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.201','versionCode':351,
+               'patchFile':'cloud-patches/'+patch,'patchSha256':hashlib.sha256(raw).hexdigest(),
+               'notes':'Higi 0.15.201 DRY: final-state OCR ownership audit after geometry validation for Yedioth Dekel weekly only, reject old-invalid evidence as owner, detect internal overlap and measured grid intrusion, clip source-anchored Across previews to measured grid edge, retain review images but demote unsafe trusted candidates. Tartey/Hafuch untouched, no Firebase or Canonical mutations. Gradle unit tests and 20-source fixture integrity checked; mobile OCR visual QA still required.'}
+          (dest/'v0.15.201-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V201_PATCH_SHA256',cfg['patchSha256'])
+          PY
+      - name: Stage verified source patch on main for existing signed DRY APK builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git fetch origin main
+          git checkout -B v200-stage origin/main
+          test ! -e cloud-patches/v0.15.201-from-v0.15.175.patch.xz.b64
+          test ! -e cloud-releases/v0.15.201-DRY.json
+          cp "$RUNNER_TEMP/higi201/v0.15.201-from-v0.15.175.patch.xz.b64" cloud-patches/
+          cp "$RUNNER_TEMP/higi201/v0.15.201-DRY.json" cloud-releases/
+          git add cloud-patches/v0.15.201-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.201-DRY.json
+          git commit -m 'Stage Higi 0.15.201 DRY final-state geometry review after Android regressions'
+          git push origin HEAD:main
