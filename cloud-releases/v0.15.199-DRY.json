@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.199",
+  "versionCode": 349,
+  "patchFile": "cloud-patches/v0.15.199-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "c60c518a9d9685dad9c981f6fd1a37c127b0f6cfcdd6e36735d4e7db2b0973aa",
+  "notes": "Higi 0.15.199 DRY: independently recover Yedioth Mon/Wed missing clue OCR starts including vertical 1; detect and exclude cross-clue shared-pixel proposals; never auto-approve, preserve manual/verified/Canonical; TARTEY and HAFUCH untouched."
+}
