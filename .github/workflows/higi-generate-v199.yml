@@ -1,1 +1,135 @@
-The requested file reference is not currently visible. Use files.search or files.list to rediscover the file, then retry with a returned ref_id or file_id.
+name: Higi v0.15.199 - independent weekly OCR recovery and ownership DRY
+
+on:
+  push:
+    branches: ['higi/v199-independent-anchor-review']
+    paths: ['.github/workflows/higi-generate-v199.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: higi-v199-source-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASE_SHA: ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7
+      V198_PATCH_SHA: 0d31313f7b0d835ba7d9fe1aeab01e1a68bf432cab4b2f10210d9e5a7488729b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore exact v198 on pinned source and integrate v199 DRY changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! gh release view v0.15.199-DRY --repo "$REPO" --json tagName >/dev/null 2>&1 || { echo 'V199 release exists'; exit 1; }
+          ! gh api "repos/$REPO/contents/cloud-releases/v0.15.199-DRY.json" >/dev/null 2>&1 || { echo 'V199 manifest exists'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/higi199"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/octet-stream' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$RUNNER_TEMP/higi199/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "$BASE_SHA  $RUNNER_TEMP/higi199/base.zip" | sha256sum --check --status
+          unzip -q "$RUNNER_TEMP/higi199/base.zip" -d "$RUNNER_TEMP/higi199"
+          ROOT="$RUNNER_TEMP/higi199/HebrewCrosswordApp_v0.15.175"
+          test -f "$ROOT/app/build.gradle.kts"
+          echo "HIGI199_ROOT=$ROOT" >> "$GITHUB_ENV"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi-CI' -c user.email='ci@users.noreply.github.com' commit -qm 'pinned-baseline-175'
+          python3 - "$GITHUB_WORKSPACE/cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64" "$RUNNER_TEMP/higi199/v198.patch" "$V198_PATCH_SHA" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==sys.argv[3], 'V198 patch SHA mismatch'
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi199/v198.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi199/v198.patch"
+          grep -q 'versionCode = 348' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.198"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi-CI' -c user.email='ci@users.noreply.github.com' commit -qm 'pinned-v198'
+          python3 "$GITHUB_WORKSPACE/cloud-tools/higi-v199-apply.py" "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          grep -q 'versionCode = 349' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.199"' "$ROOT/app/build.gradle.kts"
+          grep -q 'OcrWeeklySourceAnchorsV199.inspect' "$ROOT/app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt"
+          grep -q 'V199_CROSS_CLUE_OVERLAP' "$ROOT/app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt"
+          grep -q 'YEDIOTH_DEKEL_WEEKLY' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrSeriesProfilesV197.kt"
+          test -f "$ROOT/app/src/test/java/com/example/hebrewcrossword/OcrWeeklySourceAnchorsV199Test.kt"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --name-only HEAD > "$RUNNER_TEMP/higi199/changed.txt"
+          python3 - "$RUNNER_TEMP/higi199/changed.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          paths=Path(sys.argv[1]).read_text().splitlines()
+          allowed={'firebase/public/app-version.json','firebase/public/update/index.html'}
+          unexpected=[p for p in paths if (p.startswith('firebase/') or p.startswith('cloudflare/') or p=='app/google-services.json') and p not in allowed]
+          assert not unexpected, 'Unexpected backend change: '+repr(unexpected)
+          PY
+          git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi199/v199.patch"
+          test -s "$RUNNER_TEMP/higi199/v199.patch"
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi199/v199.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi199/v199.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          echo 'V199_SOURCE_RECONSTRUCTION_OK'
+      - name: Full Android unit regression tests, including V199 and TARTEY routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI199_ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --console plain
+          echo 'V199_GRADLE_REGRESSIONS_OK'
+      - name: Build cumulative source patch and DRY manifest after tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi199/v199.patch" "$RUNNER_TEMP/higi199" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          out=pathlib.Path(sys.argv[2]);file='v0.15.199-from-v0.15.175.patch.xz.b64'
+          (out/file).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.199','versionCode':349,
+            'patchFile':'cloud-patches/'+file,'patchSha256':hashlib.sha256(raw).hexdigest(),
+            'notes':'Higi 0.15.199 DRY: independently recover Yedioth Mon/Wed missing clue OCR starts including vertical 1; detect and exclude cross-clue shared-pixel proposals; never auto-approve, preserve manual/verified/Canonical; TARTEY and HAFUCH untouched.'}
+          (out/'v0.15.199-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V199_PATCH_SHA256',cfg['patchSha256'])
+          PY
+      - name: Stage verified source patch and manifest on main for existing DRY builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git fetch origin main
+          git checkout -B v199-stage origin/main
+          test ! -e cloud-patches/v0.15.199-from-v0.15.175.patch.xz.b64
+          test ! -e cloud-releases/v0.15.199-DRY.json
+          cp "$RUNNER_TEMP/higi199/v0.15.199-from-v0.15.175.patch.xz.b64" cloud-patches/
+          cp "$RUNNER_TEMP/higi199/v0.15.199-DRY.json" cloud-releases/
+          git add cloud-patches/v0.15.199-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.199-DRY.json
+          git commit -m 'Stage Higi 0.15.199 DRY anchored OCR and overlap review after regression tests'
+          git push origin HEAD:main
