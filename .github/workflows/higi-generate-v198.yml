@@ -93,8 +93,15 @@ jobs:
           git -C "$ROOT" add -N -A
           # Version synchronization legitimately updates two local Firebase Hosting
           # metadata files. Permit only these exact files; never deploy backend.
-          UNEXPECTED="$(git -C "$ROOT" diff --name-only HEAD |
-            grep -E '^firebase/|^cloudflare/|^app/google-services.json
+          git -C "$ROOT" diff --name-only HEAD > "$RUNNER_TEMP/higi198/changed-files.txt"
+          python3 - "$RUNNER_TEMP/higi198/changed-files.txt" <<'PY'
+          from pathlib import Path
+          import sys
+          paths=Path(sys.argv[1]).read_text().splitlines()
+          allowed={'firebase/public/app-version.json','firebase/public/update/index.html'}
+          unexpected=[p for p in paths if (p.startswith('firebase/') or p.startswith('cloudflare/') or p=='app/google-services.json') and p not in allowed]
+          assert not unexpected, 'Unexpected backend files: '+repr(unexpected)
+          PY
           git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi198/v198.patch"
           test -s "$RUNNER_TEMP/higi198/v198.patch"
           git -C "$ROOT" reset --hard -q HEAD~1
