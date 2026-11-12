@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-weekly-swipe-wip-verify.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write # Asset access to the pinned private baseline; workflow performs no writes
 jobs:
   validate:
     runs-on: ubuntu-latest
