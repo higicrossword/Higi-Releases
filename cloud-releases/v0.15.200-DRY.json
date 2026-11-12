@@ -4,5 +4,5 @@
   "versionCode": 350,
   "patchFile": "cloud-patches/v0.15.200-from-v0.15.175.patch.xz.b64",
   "patchSha256": "f67ed9f57b018af6eb8aab8aa4fa22b52223f2e02d56633eb945bcfbd4d53d92",
-  "notes": "Higi 0.15.200 DRY: show rather than hide overlapping weekly Yedioth OCR proposals, distinguish legacy/source-anchored evidence, provide cross-clue warning and block approval, permit independently anchored narrow number-only crop preview without changing geometry publication rules. Tartey/Hafuch unchanged. Canonical and Firebase untouched. Android unit regressions and 20-source fixture SHA checks passed; crop accuracy requires phone review."
+  "notes": "Higi 0.15.200 DRY: show rather than hide overlapping weekly Yedioth OCR proposals, distinguish legacy/source-anchored evidence, provide cross-clue warning and block approval, permit independently anchored narrow number-only crop preview without changing geometry publication rules. Tartey/Hafuch unchanged. Canonical and Firebase untouched. Android unit regressions and 20-source fixture SHA checks passed; crop accuracy requires phone review. Signed DRY cloud build is authorized after validated full source reconstruction, Gradle tests, and 20-source integrity audit."
 }
