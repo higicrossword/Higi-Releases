@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.198",
+  "versionCode": 348,
+  "patchFile": "cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "0d31313f7b0d835ba7d9fe1aeab01e1a68bf432cab4b2f10210d9e5a7488729b",
+  "notes": "Higi 0.15.198 DRY: fixed horizontal swipe between OCR clue crops; single shared Yedioth Dekel weekly layout profile (Mon/Wed) with RTL two-boundary review-only proposals; Tartey Mashma and Hafuch unchanged; no Canonical or Firebase writes."
+}
