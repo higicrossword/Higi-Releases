@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.202",
+  "versionCode": 352,
+  "patchFile": "cloud-patches/v0.15.202-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "0673bcda0ab0105d1dafe826b4a5a7977c0f220ad1c111ef49a5156705040b1f",
+  "notes": "Higi 0.15.202 DRY: administrator-only saved library series filter (Dekel Monday+Wednesday, Tartey, Hafuch, Maariv Oded, Maariv Guest); restore filtered library only after saved OCR review closes; Save report as UTF-8 TXT directly to Android Downloads using MediaStore without storage permissions; bounded contextual source-number recovery for truncated 11/13 in Yedioth Dekel weekly DRY only. No extra OCR calls, no regular solver startup/hot path change, legacy admin clipboard retained for non-DRY; no Firebase, Canonical or Worker writes. Gradle regression + source corpus integrity gates; visual OCR review still required."
+}
