@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.201",
+  "versionCode": 351,
+  "patchFile": "cloud-patches/v0.15.201-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "e5d7b7379321bf3bdb15543a0153edb0cb5f579931251ce7e8599d5e455c33ed",
+  "notes": "Higi 0.15.201 DRY: final-state OCR ownership audit after geometry validation for Yedioth Dekel weekly only, reject old-invalid evidence as owner, detect internal overlap and measured grid intrusion, clip source-anchored Across previews to measured grid edge, retain review images but demote unsafe trusted candidates. Tartey/Hafuch untouched, no Firebase or Canonical mutations. Gradle unit tests and 20-source fixture integrity checked; mobile OCR visual QA still required."
+}
