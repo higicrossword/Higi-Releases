@@ -91,8 +91,110 @@ jobs:
           grep -q 'YEDIOTH_WEEKLY_TWO_BOUNDARY_REVIEW_ONLY' "$ROOT/app/src/main/java/com/example/hebrewcrossword/OcrSeriesPreviewV197.kt"
           test -f "$ROOT/app/src/test/java/com/example/hebrewcrossword/AdminOcrSwipeTrackerTest.kt"
           git -C "$ROOT" add -N -A
-          if git -C "$ROOT" diff --name-only HEAD | grep -E '^firebase/|^cloudflare/|^app/google-services.json$'; then
-            echo "FAIL: unexpected backend or Firebase mutation"; exit 1
+          # Version synchronization legitimately updates two local Firebase Hosting
+          # metadata files. Permit only these exact files; never deploy backend.
+          UNEXPECTED="$(git -C "$ROOT" diff --name-only HEAD |
+            grep -E '^firebase/|^cloudflare/|^app/google-services.json
+          git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi198/v198.patch"
+          test -s "$RUNNER_TEMP/higi198/v198.patch"
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi198/v198.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi198/v198.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          echo "V198_RECONSTRUCTION_OK"
+      - name: Run Android Gradle regression tests on exact v198 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI198_ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --console plain
+          echo "V198_REGRESSIONS_OK"
+      - name: Generate complete and re-applicable baseline patch (no release yet)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi198/v198.patch" "$RUNNER_TEMP/higi198" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          dest=pathlib.Path(sys.argv[2])
+          patch='v0.15.198-from-v0.15.175.patch.xz.b64'
+          (dest/patch).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.198','versionCode':348,
+               'patchFile':'cloud-patches/'+patch,
+               'patchSha256':hashlib.sha256(raw).hexdigest(),
+               'notes':'Higi 0.15.198 DRY: fixed horizontal swipe between OCR clue crops; single shared Yedioth Dekel weekly layout profile (Mon/Wed) with RTL two-boundary review-only proposals; Tartey Mashma and Hafuch unchanged; no Canonical or Firebase writes.'}
+          (dest/'v0.15.198-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V198_PATCH_SHA256',cfg['patchSha256'])
+          PY
+      - name: Publish pinned source patch and manifest to main (cloud builder gates release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git fetch origin main
+          git checkout -B v198-publish origin/main
+          test ! -e cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64
+          test ! -e cloud-releases/v0.15.198-DRY.json
+          cp "$RUNNER_TEMP/higi198/v0.15.198-from-v0.15.175.patch.xz.b64" cloud-patches/
+          cp "$RUNNER_TEMP/higi198/v0.15.198-DRY.json" cloud-releases/
+          git add cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.198-DRY.json
+          git commit -m 'Stage Higi 0.15.198 DRY pinned OCR weekly and swipe fixes'
+          git push origin HEAD:main
+ |
+            grep -Ev '^firebase/public/(app-version.json|update/index.html)
+          git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi198/v198.patch"
+          test -s "$RUNNER_TEMP/higi198/v198.patch"
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$RUNNER_TEMP/higi198/v198.patch"
+          git -C "$ROOT" apply "$RUNNER_TEMP/higi198/v198.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          echo "V198_RECONSTRUCTION_OK"
+      - name: Run Android Gradle regression tests on exact v198 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI198_ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --console plain
+          echo "V198_REGRESSIONS_OK"
+      - name: Generate complete and re-applicable baseline patch (no release yet)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi198/v198.patch" "$RUNNER_TEMP/higi198" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          dest=pathlib.Path(sys.argv[2])
+          patch='v0.15.198-from-v0.15.175.patch.xz.b64'
+          (dest/patch).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.198','versionCode':348,
+               'patchFile':'cloud-patches/'+patch,
+               'patchSha256':hashlib.sha256(raw).hexdigest(),
+               'notes':'Higi 0.15.198 DRY: fixed horizontal swipe between OCR clue crops; single shared Yedioth Dekel weekly layout profile (Mon/Wed) with RTL two-boundary review-only proposals; Tartey Mashma and Hafuch unchanged; no Canonical or Firebase writes.'}
+          (dest/'v0.15.198-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V198_PATCH_SHA256',cfg['patchSha256'])
+          PY
+      - name: Publish pinned source patch and manifest to main (cloud builder gates release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git fetch origin main
+          git checkout -B v198-publish origin/main
+          test ! -e cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64
+          test ! -e cloud-releases/v0.15.198-DRY.json
+          cp "$RUNNER_TEMP/higi198/v0.15.198-from-v0.15.175.patch.xz.b64" cloud-patches/
+          cp "$RUNNER_TEMP/higi198/v0.15.198-DRY.json" cloud-releases/
+          git add cloud-patches/v0.15.198-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.198-DRY.json
+          git commit -m 'Stage Higi 0.15.198 DRY pinned OCR weekly and swipe fixes'
+          git push origin HEAD:main
+ || true)"
+          if [ -n "$UNEXPECTED" ]; then
+            printf 'FAIL: unexpected backend or Firebase mutation\\n%s\\n' "$UNEXPECTED"
+            exit 1
           fi
           git -C "$ROOT" diff HEAD~1 --binary > "$RUNNER_TEMP/higi198/v198.patch"
           test -s "$RUNNER_TEMP/higi198/v198.patch"
