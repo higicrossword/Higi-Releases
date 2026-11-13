@@ -73,6 +73,11 @@ jobs:
                 if total>360:break
               if total>360:break
           PY
+      - name: Inspect detailed source windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cloud-tools/v203-source-detail.py "$RUNNER_TEMP/higi-v203-audit/source/HebrewCrosswordApp_v0.15.175" > cloud-tools/v203-source-detail.txt
       - name: Commit scoped audit findings
         shell: bash
         run: |
@@ -80,6 +85,6 @@ jobs:
           test -s cloud-tools/v203-source-audit.txt
           git config user.name higicrossword
           git config user.email higicrossword@users.noreply.github.com
-          git add cloud-tools/v203-source-audit.txt
+          git add cloud-tools/v203-source-audit.txt cloud-tools/v203-source-detail.txt
           git commit -m 'Capture bounded Higi v203 source audit'
           git push origin HEAD:main
