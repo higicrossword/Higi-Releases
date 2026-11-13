@@ -88,6 +88,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 cloud-tools/v203-clue-write-audit.py "$RUNNER_TEMP/higi-v203-audit/source/HebrewCrosswordApp_v0.15.175" > cloud-tools/v203-clue-write-audit.txt
+      - name: Inspect exact clue editor save code
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cloud-tools/v203-clue-save-details.py "$RUNNER_TEMP/higi-v203-audit/source/HebrewCrosswordApp_v0.15.175" > cloud-tools/v203-clue-save-details.txt
       - name: Commit scoped audit findings
         shell: bash
         run: |
@@ -95,6 +100,6 @@ jobs:
           test -s cloud-tools/v203-source-audit.txt
           git config user.name higicrossword
           git config user.email higicrossword@users.noreply.github.com
-          git add cloud-tools/v203-source-audit.txt cloud-tools/v203-source-detail.txt cloud-tools/v203-image-display-audit.txt cloud-tools/v203-clue-write-audit.txt
+          git add cloud-tools/v203-source-audit.txt cloud-tools/v203-source-detail.txt cloud-tools/v203-image-display-audit.txt cloud-tools/v203-clue-write-audit.txt cloud-tools/v203-clue-save-details.txt
           git commit -m 'Capture bounded Higi v203 source audit'
           git push origin HEAD:main
