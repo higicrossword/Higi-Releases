@@ -88,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 cloud-tools/v203-clue-write-audit.py "$RUNNER_TEMP/higi-v203-audit/source/HebrewCrosswordApp_v0.15.175" > cloud-tools/v203-clue-write-audit.txt
-      - name: Inspect exact clue editor save code
+      - name: Inspect exact clue editor save code (region transaction)
         shell: bash
         run: |
           set -euo pipefail
