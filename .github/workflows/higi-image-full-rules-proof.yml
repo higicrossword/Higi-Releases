@@ -1,0 +1,61 @@
+name: Higi - image-only child rules against full baseline (review)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-image-full-rules-proof.yml'
+      - 'cloud-tools/higi-image-child-rules-patch.py'
+      - 'cloud-tools/higi-image-full-rules-proof.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Load pinned reference rules and prepare child-only candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$RUNNER_TEMP/pinned-source.zip" \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $RUNNER_TEMP/pinned-source.zip" | sha256sum --check
+          unzip -p "$RUNNER_TEMP/pinned-source.zip" 'HebrewCrosswordApp_v0.15.175/firebase/database.rules.json' > "$RUNNER_TEMP/baseline-rules.json"
+          python3 cloud-tools/higi-image-child-rules-patch.py "$RUNNER_TEMP/baseline-rules.json" "$RUNNER_TEMP/candidate.json"
+          python3 - "$RUNNER_TEMP/baseline-rules.json" "$RUNNER_TEMP/candidate.json" <<'PY'
+          import json,sys
+          old=json.load(open(sys.argv[1]))
+          new=json.load(open(sys.argv[2]))
+          o=old['rules']['canonicalPuzzles']['$puzzleKey']
+          n=new['rules']['canonicalPuzzles']['$puzzleKey']
+          assert n['.write']==o['.write']
+          for k in old['rules']:
+            if k!='canonicalPuzzles':assert old['rules'][k]==new['rules'][k]
+          for k,v in o.items():
+            if isinstance(v,dict):
+              for key,value in v.items():assert n[k][key]==value
+            else:assert n[k]==v
+          print('PASS existing rules completely preserved; child-only additions')
+          PY
+      - name: Install emulator test dependencies
+        run: npm install --no-save --no-package-lock firebase-tools@14 firebase@11 @firebase/rules-unit-testing@4
+      - name: Emulator test all rules, no deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '{"emulators":{"database":{"port":9000,"host":"127.0.0.1"},"ui":{"enabled":false}}}' > firebase.json
+          RULES_JSON="$RUNNER_TEMP/candidate.json" npx firebase emulators:exec --only database --project demo-higi-image-rules-scoped 'node cloud-tools/higi-image-full-rules-proof.cjs'
