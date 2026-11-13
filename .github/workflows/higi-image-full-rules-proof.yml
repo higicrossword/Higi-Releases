@@ -8,7 +8,7 @@ on:
       - 'cloud-tools/higi-image-full-rules-proof.cjs'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   emulator:
     runs-on: ubuntu-latest
