@@ -1,115 +1,245 @@
-=== MainActivity 4550 4660 ===
-04550                         else {
-04551                             ClueEditorModel.apply(cw,changed)
-04552                             lastReview=null; board.refresh(); rebuildCluesBelowIfNeeded(); if(save()) publishCanonicalClueChanges(cw,changed)
-04553                         }
-04554                     }.setNegativeButton("ביטול",null).show()
-04555                 return@withSource
-04556             }
-04557 
-04558             val snappedRows=if(clueRegionStore.hasManualOverride(cw.puzzleId,key))emptyMap()
-04559                 else snappedCachedClueRows(cw,bitmap)
-04560             fun effectivePhysicalRows():List<BoxF> = snappedRows[key] ?: cachedCluePhysicalRows(cw,bitmap,key)
-04561 
-04562             fun showAssistFor(exactPixels:BoxF,usePhysicalRows:Boolean=true,initialSelection:BoxF?=null){
-04563                 val physicalRows=if(usePhysicalRows)effectivePhysicalRows() else emptyList()
-04564                 val exactPlan=if(physicalRows.isEmpty()) runCatching{
-04565                     ClueImageFocus.exactPlan(exactPixels,bitmap.width.toFloat(),bitmap.height.toFloat())
-04566                 }.getOrElse{
-04567                     DebugLog.w("CLUE_REGION","rejected oversized/invalid verified box number=${key.number} dir=${key.direction}")
-04568                     toast("אזור ההגדרה שנמצא אינו תקין; יש לסמן אותו מחדש.")
-04569                     return
-04570                 } else null
-04571                 val selection=exactPlan?.selection?:exactPixels
-04572                 val focus=exactPlan?.focus?:exactPixels
-04573                 DebugLog.i("CLUE_REGION","open number=${key.number} dir=${key.direction} source=${if(physicalRows.isNotEmpty())"verified-physical-rows" else if(focus.width>=bitmap.width*.90f)"verified-clue-span" else "verified-tight"} focus=${focus.left},${focus.top},${focus.right},${focus.bottom} rows=${physicalRows.size}")
-04574                 val topPaddingCap=if(physicalRows.isNotEmpty()){
-04575                     val allKeys=Direction.values().flatMap { d -> cw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
-04576                     val persistedRows=allKeys.asSequence().filter{it!=key}
-04577                         .flatMap{clueRegionStore.getVerifiedRows(cw.puzzleId,it).asSequence()}
-04578                         .map{ClueRegionStore.toPixels(it,bitmap.width,bitmap.height)}.toList()
-04579                     val otherVerifiedRows=if(persistedRows.isNotEmpty())persistedRows else
-04580                         clueGeometryDebugStore.getSnapshot(cw.puzzleId)?.items.orEmpty()
-04581                             .filter{it.key!=key && it.evidence==ClueGeometryEvidence.PIXEL_ALIGNED.wire && it.lines.isNotEmpty()}
-04582                             .flatMap{it.lines}
-04583                             .map{ClueRegionStore.toPixels(it,bitmap.width,bitmap.height)}
-04584                     PhysicalRowDisplayPadding.capForPreviousRows(physicalRows,otherVerifiedRows)
-04585                 }else null
-04586                 val baseline=clueEditBaseline(cw,key,row.text)
-04587                 val dlg=ClueAssistDialog(this,bitmap,selection,focus,row,row.text,
-04588                     { points,done -> done(validateManualClueRegion(bitmap,points)) },
-04589                     { draft,selected,done -> saveSingleClueCanonical(cw,key,draft,selected,baseline,done) },
-04590                     physicalRows,topPaddingCap,initialSelection,
-04591                     localOcrAnchoredRows=physicalRows.isNotEmpty() &&
-04592                         locallyOcrAnchoredForDisplay(cw,bitmap,key,clueGeometryDebugStore.getSnapshot(cw.puzzleId)))
-04593                 show(dlg)
-04594             }
-04595 
-04596             fun manualFallback(reason:String){
-04597                 DebugLog.w("CLUE_LOCATOR","number=${key.number} dir=${key.direction} failed=${DebugLog.sanitize(reason)}")
-04598                 AlertDialog.Builder(this)
-04599                     .setTitle("לא אותרה ההגדרה במקור")
-04600                     .setMessage("האפליקציה לא תציג אזור משוער או הגדרה אחרת. אפשר לסמן ידנית את ההגדרה המדויקת בתמונה.")
-04601                     .setNegativeButton("ביטול",null)
-04602                     .setPositiveButton("סמן ידנית"){_,_->
-04603                         val full=BoxF(0f,0f,bitmap.width.toFloat(),bitmap.height.toFloat())
-04604                         // The area of all known printed clues is a VIEW/EDIT hint only.
-04605                         // This must never become a trusted crop without manual validation.
-04606                         val focused=clueSourceArea(bitmap,cw).takeIf { proposed ->
-04607                             proposed.width >= 8f && proposed.height >= 8f &&
-04608                             (proposed.width < full.width*.98f || proposed.height < full.height*.98f)
-04609                         } ?: full
-04610                         val crop=CropDialog(this,bitmap,focused,"סמן רק את ההגדרה ${key.number} ${ClueEditorDialog.label(key.direction)}",null,
-04611                             onConfirm={points->
-04612                                 val normalized=ClueRegionStore.fromPoints(points,bitmap.width,bitmap.height)
-04613                                     ?.takeIf{ClueRegionValidation.usableNormalized(it,bitmap.width,bitmap.height,sourceCorners)}
-04614                                 if(normalized==null)toast("הסימון אינו מתאים לאזור של הגדרה אחת. סמן רק את טקסט ההגדרה.")
-04615                                 else {
-04616                                     // This path merely opens the editor at the manually
-04617                                     // chosen region. Nothing is committed until its Save.
-04618                                     showAssistFor(ClueRegionStore.toPixels(normalized,bitmap.width,bitmap.height),false,normalized)
-04619                                 }
-04620                             })
-04621                         show(crop)
-04622                     }.show()
-04623             }
-04624 
-04625             fun validateConflictAndShow(exact:BoxF,usePhysicalRows:Boolean){
-04626                 // Verified physical-row membership is more precise than the old
-04627                 // guessed Across/Down half-page regions. Never reject it because a
-04628                 // newspaper places both directions in the same physical column.
-04629                 if(clueRegionStore.hasManualOverride(cw.puzzleId,key) || usePhysicalRows || !directionRegionConflict(key,exact)){
-04630                     showAssistFor(exact,usePhysicalRows)
-04631                     return
-04632                 }
-04633                 // A clue is never sent to Gemini/OpenAI again after the single full-puzzle decode.
-04634                 // A conflicting saved region is handled locally so opening/editing a clue cannot
-04635                 // silently spend another AI request.
-04636                 DebugLog.w("CLUE_LOCATOR","number=${key.number} dir=${key.direction} batch-region-conflict ai=false; manual-repair")
-04637                 manualFallback("הקואורדינטות השמורות מתנגשות עם אזור הכיוון")
-04638             }
-04639 
-04640             val storedRows=effectivePhysicalRows()
-04641             if(storedRows.isNotEmpty()){
-04642                 val union=BoxF(storedRows.minOf{it.left},storedRows.minOf{it.top},storedRows.maxOf{it.right},storedRows.maxOf{it.bottom})
-04643                 showAssistFor(union,true)
-04644             }else locateVerifiedClueRegion(cw,bitmap,key,row.text){result->
-04645                 result.fold(onSuccess={validateConflictAndShow(it,false)},onFailure={manualFallback(it.message.orEmpty())})
-04646             }
-04647         }
-04648     }
-04649 
-04650     /** Validation only. Selecting a source rectangle must NOT save it locally or canonically. */
-04651     private fun validateManualClueRegion(bitmap:Bitmap,points:List<PointF>):Result<BoxF>{
-04652         val normalized=ClueRegionStore.fromPoints(points,bitmap.width,bitmap.height)
-04653             ?:return Result.failure(IllegalArgumentException("הסימון אינו מלבן תקין. לא בוצעה שמירה."))
-04654         val verdict=ClueRegionValidation.validateNormalized(normalized,bitmap.width,bitmap.height,sourceCorners)
-04655         if(!verdict.usable){
-04656             DebugLog.w("CLUE_MANUAL_REGION","rejected reason=${verdict.reason} width=${"%.3f".format(java.util.Locale.US,normalized.width)} height=${"%.3f".format(java.util.Locale.US,normalized.height)}")
-04657             return Result.failure(IllegalArgumentException(ClueManualRegionPolicy.message(verdict.reason)))
-04658         }
-04659         return Result.success(normalized)
+=== MainActivity 4660 4900 ===
 04660     }
+04661 
+04662     /**
+04663      * Editing must target the authoritative physical canonical (including legacy
+04664      * node keys), not publish an older local 4x4 under a new sourceKey.
+04665      */
+04666     private fun structuredDisplayKey(puzzleId:String):String {
+04667         return StructuredOriginalClueStore(this).sourceKey(puzzleId)
+04668             ?: canonicalIndex.issueKey(puzzleId).orEmpty()
+04669     }
+04670 
+04671     private fun isLocalStructuredSource(puzzleId:String):Boolean {
+04672         val key=structuredDisplayKey(puzzleId)
+04673         return key.startsWith("INTEL:") || key.startsWith("HIGAYON:") || key.startsWith("ISRAEL_HAYOM:") || key.startsWith("ACROSS14:")
+04674     }
+04675 
+04676     private fun canonicalForLocalEdit(
+04677         issue:String,
+04678         record:SavedPuzzle,
+04679         callback:(Result<CanonicalPuzzleCloud.CachedPuzzle>)->Unit
+04680     ) {
+04681         if(isLocalStructuredSource(record.id)){
+04682             DebugLog.i("CANONICAL","local-structured-edit-blocked issue=${DebugLog.compactId(issue)}")
+04683             callback(Result.failure(IllegalStateException("מקור מובנה מקומי אינו מפרסם Canonical")))
+04684             return
+04685         }
+04686         val signature=AnswerChecking.signature(record.crossword)
+04687         val thread=canonicalIndex.sourceThreadUrl(record.id)
+04688         val image=canonicalIndex.sourceImageUrl(record.id)
+04689         canonicalCloud.fetchCompatible(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),thread,image){looked->
+04690             if(looked.isFailure){
+04691                 callback(Result.failure(looked.exceptionOrNull()?:IllegalStateException("לא ניתן לקרוא את הרשומה הקנונית")))
+04692                 return@fetchCompatible
+04693             }
+04694             val existing=looked.getOrNull()
+04695             if(existing!=null){
+04696                 if(existing.gridSignature!=signature){
+04697                     callback(Result.failure(IllegalStateException("הרשת עודכנה על ידי מנהל. אין לשמור שינויים מהרשת הישנה; יש לייבא מחדש")))
+04698                 }else callback(Result.success(existing))
+04699                 return@fetchCompatible
+04700             }
+04701             // Only a confirmed absence permits publication; its transaction may
+04702             // still lose to a concurrent writer, in which case use server output.
+04703             canonicalCloud.publishIfAbsent(issue,record,thread,image,settings.displayName){published->
+04704                 published.fold(
+04705                     onSuccess={remote->
+04706                         if(remote.gridSignature==signature)callback(Result.success(remote))
+04707                         else callback(Result.failure(IllegalStateException("הרשת השתנתה בזמן השמירה; יש לייבא מחדש")))
+04708                     },
+04709                     onFailure={callback(Result.failure(it))}
+04710                 )
+04711             }
+04712         }
+04713     }
+04714 
+04715     /**
+04716      * The Save button in a single clue editor is the only commit point for its text
+04717      * and source rectangle. A Firebase transaction combines both changes atomically.
+04718      * The enclosing all-clues screen contains no second Save action.
+04719      */
+04720     private data class ClueEditBaseline(
+04721         val text: String,
+04722         val clueRevision: Long?,
+04723         val regionRevision: Long?,
+04724         val physicalNodeKey: String?
+04725     )
+04726 
+04727     /** Capture ON editor opening, before remote changes can update the board. */
+04728     private fun clueEditBaseline(cw:Crossword,key:ClueEditorModel.Key,shownText:String):ClueEditBaseline {
+04729         val latest=canonicalForEditor?.takeIf{it.first==cw.puzzleId &&
+04730             it.second.gridSignature==AnswerChecking.signature(cw)}?.second
+04731         return ClueEditBaseline(CanonicalPuzzleCloud.canonicalText(shownText),
+04732             latest?.clueEditRevisions?.get(key) ?: if(latest!=null)0L else null,
+04733             latest?.clueRegionEditRevisions?.get(key) ?: if(latest!=null)0L else null,
+04734             latest?.storageNodeKey?.takeIf{it.isNotBlank()})
+04735     }
+04736 
+04737     private fun saveSingleClueCanonical(
+04738         cw:Crossword,key:ClueEditorModel.Key,draft:String,selected:BoxF?,
+04739         baseline:ClueEditBaseline,done:(Result<Unit>)->Unit
+04740     ) {
+04741         if(board.crossword!==cw){done(Result.failure(IllegalStateException("התשבץ השתנה במהלך העריכה")));return}
+04742         val text=CanonicalPuzzleCloud.canonicalText(ClueParser.cleanClueText(draft))
+04743         if(text.isBlank()){done(Result.failure(IllegalArgumentException("ההגדרה אינה יכולה להיות ריקה")));return}
+04744         if(getSharedPreferences("higi_local_review",MODE_PRIVATE).getBoolean(cw.puzzleId,false)){
+04745             // Administrative recovery of a partial grid must never change the
+04746             // authoritative Canonical. Edit and repair the local review copy.
+04747             val original=cw.clues.firstOrNull{it.number==key.number&&it.direction==key.direction}?.text.orEmpty()
+04748             ClueEditorModel.apply(cw,mapOf(key to text))
+04749             if(!save()){
+04750                 ClueEditorModel.apply(cw,mapOf(key to original))
+04751                 done(Result.failure(IllegalStateException("שמירת תיקון מקומי נכשלה")))
+04752                 return
+04753             }
+04754             if(selected!=null&&!clueRegionStore.putManualVerified(cw.puzzleId,key,selected)){
+04755                 // Text was saved, but don't falsely claim that the crop was saved.
+04756                 done(Result.failure(IllegalStateException("הטקסט נשמר, אך שמירת חיתוך המקור נכשלה")))
+04757                 return
+04758             }
+04759             lastReview=null;board.refresh();rebuildCluesBelowIfNeeded()
+04760             DebugLog.i("LOCAL_PARTIAL_REVIEW","saved-local-only number=${key.number} dir=${key.direction}; canonical-retry=queued")
+04761             // The UI must not claim a canonical save before Firebase confirms it.
+04762             recoverLocalReviewCanonical(cw.puzzleId)
+04763             done(Result.success(Unit))
+04764             return
+04765         }
+04766         val record=runCatching{library.load(cw.puzzleId)}.getOrNull()
+04767         if(record==null){done(Result.failure(IllegalStateException("לא ניתן לקרוא את התשבץ לשמירה")));return}
+04768         val issue=canonicalIndex.issueKeyFor(record)
+04769         // A crop selected in a previous release was only local. The first explicit
+04770         // Save from this editor also promotes that existing manual crop to Canonical.
+04771         val canonicalRegion=selected ?: clueRegionStore.getManualVerified(cw.puzzleId,key)
+04772         val oldText=cw.clues.firstOrNull{it.number==key.number&&it.direction==key.direction}?.text.orEmpty()
+04773         if(canonicalRegion==null && text==CanonicalPuzzleCloud.canonicalText(oldText) && text==baseline.text){
+04774             done(Result.success(Unit));return // No edit: never increment a shared revision.
+04775         }
+04776         // Puzzles without a stable publication key are strictly local. Preserve
+04777         // editing for them, but clearly distinguish it from canonical persistence.
+04778         if(issue.isNullOrBlank()){
+04779             if(selected!=null && !clueRegionStore.putManualVerified(cw.puzzleId,key,selected)){
+04780                 done(Result.failure(IllegalArgumentException("לא ניתן לשמור את האזור המקומי")));return
+04781             }
+04782             ClueEditorModel.apply(cw,mapOf(key to text))
+04783             lastReview=null;board.refresh();rebuildCluesBelowIfNeeded()
+04784             if(save()){
+04785                 toast("אין מקור משותף לתשבץ הזה — השינויים נשמרו במכשיר בלבד")
+04786                 done(Result.success(Unit))
+04787             }else done(Result.failure(IllegalStateException("השמירה במכשיר נכשלה")))
+04788             return
+04789         }
+04790         // For a shared puzzle, never save against an editor whose canonical
+04791         // per-clue stamps were unavailable when it opened.  Otherwise a concurrent
+04792         // source-rectangle edit (unchanged text) could escape conflict detection.
+04793         if(baseline.clueRevision==null || baseline.regionRevision==null){
+04794             done(Result.failure(IllegalStateException(
+04795                 "נתוני ההגדרה המשותפים עדיין לא נטענו. התיקון שלך נשאר בחלון; לאחר שהסנכרון יושלם, פתח את ההגדרה מחדש כדי לשמור."
+04796             )))
+04797             return
+04798         }
+04799         canonicalForLocalEdit(issue,record){ published ->
+04800             val canonical=published.getOrElse{error->
+04801                 runOnUiThread {done(Result.failure(error))}
+04802                 return@canonicalForLocalEdit
+04803             }
+04804             if(canonical.gridSignature!=AnswerChecking.signature(record.crossword)){
+04805                 runOnUiThread {done(Result.failure(IllegalStateException("הרשת עודכנה על ידי מנהל. אין לשמור הגדרה מהרשת הישנה; יש לייבא מחדש")))}
+04806                 return@canonicalForLocalEdit
+04807             }
+04808             // A historical alias can point at more than one physical Canonical.
+04809             // Never redirect an editor opened on one record to a different child.
+04810             if(baseline.physicalNodeKey!=null && canonical.storageNodeKey!=baseline.physicalNodeKey){
+04811                 runOnUiThread{done(Result.failure(IllegalStateException(
+04812                     "רשומת התשבץ השתנתה בזמן העריכה. השמירה לא בוצעה; פתח את ההגדרה מחדש."
+04813                 )))}
+04814                 return@canonicalForLocalEdit
+04815             }
+04816             // A source crop is canonical only for the exact source attachment.
+04817             // Never publish coordinates from an alternate scan on another device.
+04818             if(canonicalRegion!=null){
+04819                 val localImage=canonicalIndex.sourceImageUrl(record.id)
+04820                 val remoteImage=canonical.sourceImageUrl
+04821                 val localIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(localImage)
+04822                 val remoteIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(remoteImage)
+04823                 if(localIdentity.isNotBlank()&&remoteIdentity.isNotBlank()&&localIdentity!=remoteIdentity){
+04824                     runOnUiThread{done(Result.failure(IllegalStateException("תמונת המקור אינה תואמת לעותק הקנוני; אין לשמור חיתוך של תמונה אחרת")))}
+04825                     return@canonicalForLocalEdit
+04826                 }
+04827             }
+04828             canonicalCloud.updateClueAndRegion(
+04829                 canonical.issueKey,key,text,canonicalRegion,settings.displayName,canonical.storageNodeKey,
+04830                 expectedGridSignature=AnswerChecking.signature(record.crossword),
+04831                 expectedOriginalText=baseline.text,
+04832                 expectedClueEditRevision=baseline.clueRevision,
+04833                 expectedRegionEditRevision=baseline.regionRevision
+04834             ){result->runOnUiThread{
+04835                 if(board.crossword!==cw){
+04836                     done(Result.failure(IllegalStateException("התשבץ השתנה בזמן השמירה")))
+04837                     return@runOnUiThread
+04838                 }
+04839                 val commit=result.getOrElse{error->done(Result.failure(error));return@runOnUiThread}
+04840                 ClueEditorModel.apply(cw,mapOf(key to text))
+04841                 canonicalForEditor?.takeIf{it.first==cw.puzzleId && it.second.revision<=commit.revision}?.let{pair->
+04842                     val prev=pair.second
+04843                     canonicalForEditor=cw.puzzleId to prev.copy(
+04844                         revision=commit.revision,
+04845                         clues=prev.clues+(key to text),
+04846                         clueEditRevisions=prev.clueEditRevisions+(key to commit.revision),
+04847                         clueEditActors=prev.clueEditActors+(key to SharedClueUpdateAlerts.Actor(
+04848                             sharing.currentUid().orEmpty(),settings.displayName,commit.revision)),
+04849                         clueRegionEditRevisions=if(canonicalRegion==null)prev.clueRegionEditRevisions
+04850                             else prev.clueRegionEditRevisions+(key to commit.revision),
+04851                         clueRegionsRevision=maxOf(prev.clueRegionsRevision,commit.regionRevision)
+04852                     )
+04853                 }
+04854                 if(canonicalRegion!=null)clueRegionStore.putManualVerified(cw.puzzleId,key,canonicalRegion)
+04855                 lastReview=null;board.refresh();rebuildCluesBelowIfNeeded()
+04856                 if(save()){
+04857                     canonicalIndex.setRevision(cw.puzzleId,commit.revision)
+04858                     done(Result.success(Unit))
+04859                 }else{
+04860                     done(Result.failure(IllegalStateException("השינוי נשמר בענן, אך שמירת העותק במכשיר נכשלה")))
+04861                 }
+04862             }}
+04863         }
+04864     }
+04865 
+04866     private fun approveClueAndCrop(cw:Crossword,key:ClueEditorModel.Key,approved:Boolean,
+04867                                    done:(Result<Boolean>)->Unit){
+04868         if(board.crossword!==cw){done(Result.failure(IllegalStateException("התשבץ השתנה")));return}
+04869         val record=runCatching{library.load(cw.puzzleId)}.getOrNull()
+04870         val issue=record?.let{canonicalIndex.issueKeyFor(it)}.orEmpty()
+04871         if(record==null || issue.isBlank() ||
+04872             getSharedPreferences("higi_local_review",MODE_PRIVATE).getBoolean(cw.puzzleId,false)){
+04873             done(Result.failure(IllegalStateException("יש להמתין לאישור הפרסום הקנוני של התשבץ")))
+04874             return
+04875         }
+04876         val clue=cw.clues.firstOrNull{it.number==key.number && it.direction==key.direction}
+04877         if(clue==null || GalleryRecoveryPolicy.isPlaceholder(clue.text)){
+04878             done(Result.failure(IllegalArgumentException("אין טקסט הגדרה תקין לאישור")));return
+04879         }
+04880         val thread=canonicalIndex.sourceThreadUrl(cw.puzzleId)
+04881         val imageUrl=canonicalIndex.sourceImageUrl(cw.puzzleId)
+04882         canonicalCloud.fetchCompatible(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),thread,imageUrl){fetched->
+04883             fetched.fold(onSuccess={canonical->
+04884                 if(canonical==null || canonical.gridSignature!=AnswerChecking.signature(cw)){
+04885                     done(Result.failure(IllegalStateException("הקנוני עדיין אינו זמין או הרשת השתנתה")))
+04886                     return@fold
+04887                 }
+04888                 canonicalCloud.setClueAndCropApproval(canonical.issueKey,key,approved,settings.displayName,
+04889                     canonical.gridSignature,clue.text,canonical.sourceImageUrl,canonical.storageNodeKey){result->
+04890                     result.onSuccess { state ->
+04891                         canonicalForEditor?.takeIf{it.first==cw.puzzleId}?.let{pair ->
+04892                             canonicalForEditor=cw.puzzleId to pair.second.copy(
+04893                                 approvedClueKeys=if(state)pair.second.approvedClueKeys+key else pair.second.approvedClueKeys-key)
+04894                         }
+04895                     }
+04896                     done(result)
+04897                 }
+04898             },onFailure={done(Result.failure(it))})
+04899         }
+04900     }
 === MainActivity 5460 5730 ===
 05460                     discoveredNodeKey=cached.storageNodeKey){updated->
 05461                     updated.onSuccess{rev->if(rev>0L)canonicalIndex.setRevision(record.id,rev)}
