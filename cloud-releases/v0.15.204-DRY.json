@@ -4,5 +4,5 @@
   "versionCode": 354,
   "patchFile": "cloud-patches/v0.15.204-from-v0.15.175.patch.xz.b64",
   "patchSha256": "612a58c2db110c44510a8076783e254888b3e450c722d80a0d9a980f8e5288db",
-  "notes": "Higi 0.15.204 DRY: server-verified Canonical source image viewer; explicit administrator-only image-only Canonical replacement from puzzle image screen; preserves canonical grid, clue text, answers and user progress; invalidates old image-specific crops and approvals, keeps other DRY isolation; no AI calls. Cloud Gradle regression and original signer gate."
+  "notes": "Higi 0.15.204 DRY: server-verified Canonical source image viewer; explicit administrator-only image-only Canonical replacement from puzzle image screen; preserves canonical grid, clue text, answers and user progress; invalidates old image-specific crops and approvals, keeps other DRY isolation; no AI calls. Cloud Gradle regression and original signer gate. Canonical image replacement is explicit and limited to administrator DRY viewer; automated crop publication remains disabled."
 }
