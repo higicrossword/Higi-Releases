@@ -1,0 +1,24 @@
+name: Higi RTDB child-only image swap security proof
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-image-child-proof.yml','cloud-tools/higi-image-child-proof.cjs']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21'}
+      - name: Install local emulator test dependencies
+        run: npm install --no-save --no-package-lock firebase-tools@14 firebase@11 @firebase/rules-unit-testing@4
+      - name: Run rules emulator without production credentials
+        run: |
+          echo '{"emulators":{"database":{"port":9000,"host":"127.0.0.1"},"ui":{"enabled":false}}}' > firebase.json
+          npx firebase emulators:exec --only database --project demo-higi-child-rules-204 'node cloud-tools/higi-image-child-proof.cjs'
