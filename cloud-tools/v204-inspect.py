@@ -3,9 +3,9 @@ from pathlib import Path
 import sys,re
 p=Path(sys.argv[1])/"app/src/main/java/com/example/hebrewcrossword"
 tasks={
-"MainActivity.kt":[("HEAD",r"\\A",85),("withSource",r"fun withSource\b|private fun withSource\b",95),("showSourceImage",r"private fun showSourceImage\b",38),("admin picker",r"private val picker=|registerForActivityResult\(ActivityResultContracts.GetContent",32),("canonical watch image",r"val previousSourceUrl=canonicalIndex.sourceImageUrl",65),("image change",r"handleSourceReplacementOnly",26)],
+"MainActivity.kt":[("HEAD",r"\A",85),("withSource",r"fun withSource\b|private fun withSource\b",95),("showSourceImage",r"private fun showSourceImage\b",38),("admin picker",r"private val picker=|registerForActivityResult\(ActivityResultContracts.GetContent",32),("canonical watch image",r"val previousSourceUrl=canonicalIndex.sourceImageUrl",65),("image change",r"handleSourceReplacementOnly",26)],
 "SourceImageDialog.kt":[("ALL",r".",200)],
-"CanonicalPuzzleCloud.kt":[("auth internals",r"fun authenticated\\(",80),("admin update",r"private fun updateDecodedForAdminAtNode|fun updateDecodedForAdminAtNode",200),("CachedPuzzle",r"data class CachedPuzzle",110),("update clue region",r"fun updateClueAndRegion\(",105),("refresh admin",r"fun refreshDecodedForAdmin\(",82)],
+"CanonicalPuzzleCloud.kt":[("auth internals",r"fun authenticated\(",80),("admin update",r"private fun updateDecodedForAdminAtNode|fun updateDecodedForAdminAtNode",200),("CachedPuzzle",r"data class CachedPuzzle",110),("update clue region",r"fun updateClueAndRegion\(",105),("refresh admin",r"fun refreshDecodedForAdmin\(",82)],
 "CanonicalSourceImageStorage.kt":[("ALL",r".",150)],
 "RecentCrosswordsActivity.kt":[("source select",r"fun chooseAdminSource|fun replaceSource|source.*Replacement|source.*Picker|ADMIN_SOURCE",125),("image action",r"private fun runAdminMenuAction",100),("public",r"private fun confirmSavedDryCanonicalPublication",112)],
 "PuzzleLibrary.kt":[("source files",r"fun sourceFiles|fun writeSource|fun clearSource",65)],
