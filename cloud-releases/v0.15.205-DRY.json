@@ -4,5 +4,5 @@
   "versionCode": 355,
   "patchFile": "cloud-patches/v0.15.205-from-v0.15.175.patch.xz.b64",
   "patchSha256": "ba397128f9b9af68e27aea838e3297339b75631be1fa5c87894bd8bf0fa15098",
-  "notes": "Higi 0.15.205 DRY: secure child-scoped Canonical source image replacement through updateChildren, server-side revision checks and old-image crop invalidation. Retains viewer, grid, clues, solutions, progress, editing, admin-only DRY behavior. Requires complementary Firebase Database Rules deployment. No AI re-decode."
+  "notes": "Higi 0.15.205 DRY: secure child-scoped Canonical source image replacement through updateChildren, server-side revision checks and old-image crop invalidation. Retains viewer, grid, clues, solutions, progress, editing, admin-only DRY behavior. Requires complementary Firebase Database Rules deployment. No AI re-decode. Installation of this APK does not deploy Firebase Database Rules; image replacement requires matching reviewed rules in project higi-8b169."
 }
