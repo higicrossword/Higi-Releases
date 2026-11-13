@@ -83,7 +83,7 @@ new='''    /**
                             // Do not mark success based solely on local cache.
                             ref.get().addOnSuccessListener { confirmed ->
                                 if(confirmed.child("sourceImageUrl").value!=replacementUrl ||
-                                    (confirmed.child("revision").value as? Number)?.toLong()?:0L < newRevision){
+                                    ((confirmed.child("revision").value as? Number)?.toLong() ?: 0L) < newRevision){
                                     callback(Result.failure(IllegalStateException("האימות מול שרת Firebase נכשל")))
                                 }else{
                                     DebugLog.i("CANONICAL_IMAGE_REPLACE",
