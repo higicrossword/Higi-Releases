@@ -1,0 +1,129 @@
+name: Higi - Firebase RTDB Rules v205 (guarded)
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'First run audit; publish only after reviewing the audit'
+        type: choice
+        required: true
+        default: audit
+        options: [audit, publish]
+      confirmation:
+        description: 'For publish enter exactly PUBLISH-0.15.205'
+        type: string
+        required: false
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: higi-firebase-rtdb-rules-v205
+  cancel-in-progress: false
+jobs:
+  guarded-rules:
+    name: Audit and optionally publish image-only RTDB rules
+    if: github.repository == 'higicrossword/Higi-Releases' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: higi-firebase-rules
+    timeout-minutes: 35
+    env:
+      HIGI_RULES_OUT: /tmp/higi-rtdb-v205
+      HIGI_RTDB_URL: https://higi-8b169-default-rtdb.europe-west1.firebasedatabase.app
+    steps:
+      - name: Validate requested operation
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$OPERATION" = 'audit' || "$OPERATION" = 'publish' ]]
+          if [[ "$OPERATION" = 'publish' ]]; then
+            [[ "$CONFIRMATION" = 'PUBLISH-0.15.205' ]] || { echo 'BLOCKED: explicit confirmation required'; exit 1; }
+          fi
+          echo "Requested $OPERATION for higi-8b169"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Authenticate with short-lived Google token (no service account keys)
+        uses: google-github-actions/auth@v3
+        id: google_auth
+        with:
+          workload_identity_provider: projects/568171802572/locations/global/workloadIdentityPools/github-higi/providers/rtdb-rules
+          service_account: higi-rtdb-deployer@higi-8b169.iam.gserviceaccount.com
+          project_id: higi-8b169
+          token_format: access_token
+          access_token_scopes: |
+            https://www.googleapis.com/auth/firebase.database
+            https://www.googleapis.com/auth/userinfo.email
+          create_credentials_file: false
+      - name: Read LIVE rules, preserve snapshot, prepare narrow patch (read-only)
+        shell: bash
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          python3 cloud-tools/higi-rtdb-v205-deploy.py prepare
+      - name: Install emulator dependencies
+        run: npm install --no-save --no-package-lock firebase-tools@14 firebase@11 @firebase/rules-unit-testing@4
+      - name: Verify patch against complete live rules with Firebase Emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '{"emulators":{"database":{"port":9000,"host":"127.0.0.1"},"ui":{"enabled":false}}}' > firebase.json
+          export RULES_JSON="$HIGI_RULES_OUT/candidate.json"
+          npx firebase emulators:exec --only database --project demo-higi-image-rules-scoped 'node cloud-tools/higi-image-full-rules-proof.cjs'
+      - name: Create encrypted backup (mandatory before publishing)
+        if: inputs.operation == 'publish'
+        shell: bash
+        env:
+          BACKUP_PASSWORD: ${{ secrets.HIGI_RULES_BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ ${#BACKUP_PASSWORD} -lt 32 ]]; then echo 'BLOCKED: 32+ character backup password required'; exit 1; fi
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 250000 \
+            -in "$HIGI_RULES_OUT/live-original.json" \
+            -out "$HIGI_RULES_OUT/live-original.json.enc" \
+            -pass env:BACKUP_PASSWORD
+          test -s "$HIGI_RULES_OUT/live-original.json.enc"
+      - name: Store encrypted backup in GitHub Actions artifact
+        if: inputs.operation == 'publish'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Higi-RTDB-rules-before-v205-${{ github.run_id }}
+          path: /tmp/higi-rtdb-v205/live-original.json.enc
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish after backup, emulator and live version check
+        if: inputs.operation == 'publish'
+        shell: bash
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+          HIGI_PUBLISH_CONFIRM: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          python3 cloud-tools/higi-rtdb-v205-deploy.py publish
+      - name: Record final result
+        if: success()
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          {
+            echo "### Higi RTDB Rules v205: $OPERATION"
+            echo '11 child-only rules under canonicalPuzzles/$puzzleKey'
+            if [[ "$OPERATION" = 'audit' ]]; then
+              echo 'Read-only audit completed. No rules published.'
+            else
+              echo 'Encrypted backup uploaded, rules published and verified via server readback.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
