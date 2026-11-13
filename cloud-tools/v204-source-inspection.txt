@@ -1,4 +1,96 @@
 ======== MainActivity.kt lines 6006 ========
+==== HEAD range 1 85
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.graphics.Bitmap
+00004 import android.graphics.Color
+00005 import android.graphics.PointF
+00006 import android.net.Uri
+00007 import android.content.Intent
+00008 import android.content.BroadcastReceiver
+00009 import android.content.Context
+00010 import android.content.IntentFilter
+00011 import android.os.Bundle
+00012 import android.text.InputType
+00013 import android.text.TextUtils
+00014 import android.text.SpannableStringBuilder
+00015 import android.text.Spanned
+00016 import android.text.TextPaint
+00017 import android.text.method.LinkMovementMethod
+00018 import android.text.style.BackgroundColorSpan
+00019 import android.text.style.ClickableSpan
+00020 import android.text.style.ForegroundColorSpan
+00021 import android.text.style.StyleSpan
+00022 import android.text.style.RelativeSizeSpan
+00023 import android.graphics.Typeface
+00024 import android.content.res.ColorStateList
+00025 import android.view.*
+00026 import android.widget.*
+00027 import androidx.activity.OnBackPressedCallback
+00028 import androidx.activity.result.contract.ActivityResultContracts
+00029 import androidx.appcompat.app.AlertDialog
+00030 import androidx.appcompat.app.AppCompatActivity
+00031 import androidx.core.content.ContextCompat
+00032 import androidx.core.view.WindowCompat
+00033 import androidx.core.widget.TextViewCompat
+00034 import com.google.android.material.button.MaterialButton
+00035 import java.io.File
+00036 import java.util.concurrent.Executors
+00037 import java.util.concurrent.Future
+00038 import kotlinx.coroutines.runBlocking
+00039 import kotlinx.coroutines.CancellationException
+00040 import org.json.JSONArray
+00041 
+00042 class MainActivity : AppCompatActivity() {
+00043     private data class FullAutoPrepared(
+00044         val points: List<PointF>,
+00045         val crossword: Crossword,
+00046         val parsed: ClueParser.Parsed,
+00047         val title: String,
+00048         val horizontalRegion: List<PointF>?,
+00049         val verticalRegion: List<PointF>?,
+00050         val gridVariant: String,
+00051         val clueBoxes: Map<ClueEditorModel.Key,BoxF> = emptyMap(),
+00052         val providerUsed: String = "Gemini",
+00053         val modelUsed: String = "",
+00054         val fallbackUsed: Boolean = false,
+00055         val forcedRedecode: Boolean = false,
+00056         val aiMode: AiDecodeMode = AiDecodeMode.AUTO,
+00057         val reasoningPath: String = "",
+00058         val aiElapsedMs: Long = 0L,
+00059         val clueGeometries: Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+00060         val geometryProviderUsed:String = "",
+00061         val geometryModelUsed:String = "",
+00062         val geometryElapsedMs:Long = 0L,
+00063         val geometryAttempted:Boolean = false,
+00064         val geometryStatus:String = "",
+00065         val aiUsage:AiDecodeUsage?=null
+00066     )
+00067 
+00068     private data class FullAutoChoice(
+00069         val prepared: FullAutoPrepared,
+00070         val selected: WeeklyImageSelector.Candidate,
+00071         val selectionReason: String
+00072     )
+00073 
+00074     private data class FavoriteImported(
+00075         val record: SavedPuzzle,
+00076         val seriesId: String,
+00077         val expectedCount: Int,
+00078         val needsSolutions: Boolean
+00079     )
+00080 
+00081 
+00082     /** Enough source context to offer an explicit administrator retry after a failed forced re-import. */
+00083     private data class ForcedRedecodeRetryContext(
+00084         val weeklyItem: WeeklyCrosswordsFetcher.Item? = null,
+00085         val localFile: File? = null,
+==== HEAD range 1 86
+00086         val suggestedTitle: String? = null,
+==== HEAD range 1 87
+00087         val issueKey: String? = null,
+==== HEAD range 1 88
+00088         val sourceImageUrl: String = "",
 ==== withSource range 4960 5060
 04960             isApproved={key->canonicalForEditor?.takeIf{it.first==cw.puzzleId}?.second?.approvedClueKeys?.contains(key)==true},
 04961             setApproval=if(digital)null else {key,approved,done->approveClueAndCrop(cw,key,approved,done)}))
@@ -392,6 +484,93 @@
 00049     private fun dp(n:Int)=(n*context.resources.displayMetrics.density+.5f).toInt()
 00050 }
 ======== CanonicalPuzzleCloud.kt lines 1901 ========
+==== auth internals range 220 305
+00220         val d = runCatching { FirebaseDatabase.getInstance(a, DATABASE_URL) }.getOrNull() ?: return null
+00221         if (!prepared) { runCatching { d.setPersistenceEnabled(true) }; prepared = true }
+00222         db = d
+00223         return d
+00224     }
+00225 
+00226     private fun authenticated(ready: (String, FirebaseDatabase) -> Unit, failed: (Throwable) -> Unit) {
+00227         val a = authOrNull(); val d = dbOrNull()
+00228         if (a == null || d == null) { failed(IllegalStateException(CONFIG_ERROR)); return }
+00229         a.currentUser?.uid?.takeIf { it.isNotBlank() }?.let { ready(it, d); return }
+00230         a.signInAnonymously().addOnSuccessListener { result ->
+00231             val uid = result.user?.uid.orEmpty()
+00232             if (uid.isBlank()) failed(IllegalStateException("Firebase authentication returned no user")) else ready(uid, d)
+00233         }.addOnFailureListener(failed)
+00234     }
+00235 
+00236     private fun nodeKey(issueKey: String): String = CanonicalNodeRoute.hash(issueKey)
+00237 
+00238     data class DecodeClaim(val owned:Boolean, val ownerUid:String, val claimedAt:Long)
+00239     data class AiAttemptClaim(val owned:Boolean, val ownerUid:String, val attemptedAt:Long)
+00240 
+00241     /**
+00242      * Permanent write-once cost guard for normal first decode. Unlike the short
+00243      * processing lock, this record is intentionally NOT removed after success/failure.
+00244      * Therefore a normal user can never start a second AI request for the same stable
+00245      * crossword key. Administrator re-decode uses its explicit admin-only path.
+00246      */
+00247     fun claimFirstAiAttempt(issueKey:String,callback:(Result<AiAttemptClaim>)->Unit){
+00248         if(issueKey.isBlank()){callback(Result.failure(IllegalArgumentException("מזהה תשבץ חסר")));return}
+00249         authenticated({uid,d->
+00250             val ref=d.getReference("canonicalAiAttempts/${nodeKey(issueKey)}")
+00251             val now=System.currentTimeMillis()
+00252             ref.runTransaction(object:Transaction.Handler{
+00253                 override fun doTransaction(data:MutableData):Transaction.Result{
+00254                     if(data.value!=null)return Transaction.abort()
+00255                     data.value=mapOf(
+00256                         "issueKey" to issueKey.take(120),
+00257                         "uid" to uid,
+00258                         "at" to now,
+00259                         "versionCode" to BuildConfig.VERSION_CODE,
+00260                         "versionName" to BuildConfig.VERSION_NAME
+00261                     )
+00262                     return Transaction.success(data)
+00263                 }
+00264                 override fun onComplete(error:DatabaseError?,committed:Boolean,snapshot:DataSnapshot?){
+00265                     if(error!=null){callback(Result.failure(error.toException()));return}
+00266                     val owner=snapshot?.child("uid")?.getValue(String::class.java).orEmpty()
+00267                     val at=snapshot?.child("at")?.getValue(Long::class.java)?:0L
+00268                     callback(Result.success(AiAttemptClaim(committed&&owner==uid,owner,at)))
+00269                 }
+00270             })
+00271         },{callback(Result.failure(it))})
+00272     }
+00273 
+00274     fun claimFirstAiAttemptBlocking(issueKey:String,timeoutMs:Long=5_000L):AiAttemptClaim?{
+00275         val latch=CountDownLatch(1);var result:Result<AiAttemptClaim>?=null
+00276         claimFirstAiAttempt(issueKey){result=it;latch.countDown()}
+00277         if(!latch.await(timeoutMs,TimeUnit.MILLISECONDS))return null
+00278         return result?.getOrNull()
+00279     }
+00280 
+00281     /**
+00282      * Atomically reserves the expensive first decode. Only one device may own a live
+00283      * reservation for an issue. Stale reservations can be recovered after two minutes.
+00284      */
+00285     fun claimDecode(issueKey:String,callback:(Result<DecodeClaim>)->Unit){
+00286         if(issueKey.isBlank()){callback(Result.failure(IllegalArgumentException("מזהה תשבץ חסר")));return}
+00287         authenticated({uid,d->
+00288             val ref=d.getReference("canonicalProcessing/${nodeKey(issueKey)}")
+00289             val now=System.currentTimeMillis(); val staleBefore=now-120_000L
+00290             ref.runTransaction(object:Transaction.Handler{
+00291                 override fun doTransaction(data:MutableData):Transaction.Result{
+00292                     val owner=data.child("uid").value as? String
+00293                     val at=(data.child("at").value as? Number)?.toLong()?:0L
+00294                     if(owner.isNullOrBlank()||owner==uid||at<staleBefore){
+00295                         data.value=mapOf("issueKey" to issueKey,"uid" to uid,"at" to now)
+00296                         return Transaction.success(data)
+00297                     }
+00298                     return Transaction.abort()
+00299                 }
+00300                 override fun onComplete(error:DatabaseError?,committed:Boolean,snapshot:DataSnapshot?){
+00301                     if(error!=null){callback(Result.failure(error.toException()));return}
+00302                     val owner=snapshot?.child("uid")?.getValue(String::class.java).orEmpty()
+00303                     val at=snapshot?.child("at")?.getValue(Long::class.java)?:0L
+00304                     callback(Result.success(DecodeClaim(committed&&owner==uid,owner,at)))
+00305                 }
 ==== admin update range 1320 1525
 01320         clueRegions:Map<ClueEditorModel.Key,BoxF>,
 01321         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
