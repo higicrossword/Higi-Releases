@@ -145,7 +145,18 @@ def publish(token, endpoint, target_dir):
     if digest(current) != m['live_sha256'] or (m['etag'] and m['etag'] != tag):
         raise RuntimeError('Firebase rules changed after backup; publish aborted')
     if not tag:
-        raise RuntimeError('Rules endpoint did not return a usable ETag; refusing non-conditional publish')
+        # The Firebase RTDB rules settings endpoint may not supply ETags, unlike
+        # ordinary database data paths. There is no atomic CAS for rules in this
+        # case. Require a separately typed opt-in, re-read immediately before
+        # PUT and refuse if anything changed. A narrow TOCTOU race remains.
+        if m['etag']:
+            raise RuntimeError('Rules ETag unexpectedly disappeared; refusing downgrade')
+        if os.environ.get('HIGI_PUBLISH_CONFIRM') != 'PUBLISH-NONATOMIC-0.15.205':
+            raise RuntimeError('Rules endpoint has no ETag; non-atomic deployment requires separate explicit confirmation')
+        latest, latest_tag = get_rules(token, endpoint)
+        if digest(latest) != m['live_sha256'] or latest_tag:
+            raise RuntimeError('Rules changed (or ETag appeared) before last-minute check; publish aborted')
+        print('NOTICE: rules REST endpoint lacks ETag; explicitly approved non-atomic PUT after two live checks')
     result = put_rules(token, endpoint, candidate, tag)
     print('Firebase REST publish returned status:', result)
     actual, _ = get_rules(token, endpoint)
@@ -171,7 +182,9 @@ def main():
     if sys.argv[1] == 'prepare':
         prepare(token, endpoint, target_dir)
     else:
-        if os.environ.get('HIGI_PUBLISH_CONFIRM') != 'PUBLISH-0.15.205':
+        if os.environ.get('HIGI_PUBLISH_CONFIRM') not in (
+            'PUBLISH-0.15.205', 'PUBLISH-NONATOMIC-0.15.205'
+        ):
             raise ValueError('Missing explicit publish confirmation')
         publish(token, endpoint, target_dir)
 
