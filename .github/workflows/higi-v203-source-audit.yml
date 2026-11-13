@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/higi-v203-source-audit.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -37,7 +37,7 @@ jobs:
           PY
           git -C "$ROOT" apply --check "$WORK/v202.patch"
           git -C "$ROOT" apply "$WORK/v202.patch"
-          python3 - "$ROOT" <<'PY'
+          python3 - "$ROOT" <<'PY' | tee "$GITHUB_WORKSPACE/cloud-tools/v203-source-audit.txt"
           from pathlib import Path
           import sys,re
           root=Path(sys.argv[1])/'app/src/main/java/com/example/hebrewcrossword'
@@ -73,3 +73,13 @@ jobs:
                 if total>360:break
               if total>360:break
           PY
+      - name: Commit scoped audit findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s cloud-tools/v203-source-audit.txt
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-tools/v203-source-audit.txt
+          git commit -m 'Capture bounded Higi v203 source audit'
+          git push origin HEAD:main
