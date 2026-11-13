@@ -1,0 +1,690 @@
+==== FILE AdminPuzzleMenu.kt total=18 ====
+00001 package com.example.hebrewcrossword
+00002 
+00003 /** The same per-puzzle administrator commands in the weekly and saved-puzzle menus. */
+00004 object AdminPuzzleMenu {
+00005     data class Action(val id:Int, val title:String)
+00006     val actions = listOf(
+00007         Action(1,"הסר מהרשימה לכולם"),
+00008         Action(2,"החלף תמונה מהטלפון"),
+00009         Action(3,"החלף תמונה מהאתר"),
+00010         Action(4,"הוסף פתרונות"),
+00011         Action(5,"פענח מחדש מהמקור (Debug)"),
+00012         Action(6,"הצג תמונת פענוח"),
+00013         Action(7,"בדיקת AI: מודלים / קריאה נוכחית-חדשה"),
+00014         Action(8,"ניסוי: תמלול הגדרות בלבד (Gemini)"),
+00015         Action(9,"יצירת חיתוכי OCR מחדש (בדיקת מנהל)")
+00016     )
+00017     fun has(id:Int):Boolean = actions.any{it.id==id}
+00018 }
+==== FILE RecentCrosswordsActivity.kt total=2284 ====
+--- 109-146 ---
+00109     private var adminAiTestRunning=false
+00110     // A saved puzzle may no longer be in the rolling weekly feed. Keep its UUID authoritative.
+00111     private val savedAdminId:String by lazy { intent.getStringExtra(EXTRA_SAVED_ADMIN_PUZZLE_ID).orEmpty() }
+00112     private val savedAdminAction:Int by lazy { intent.getIntExtra(EXTRA_SAVED_ADMIN_ACTION,-1) }
+00113     private var savedActionLaunched=false
+00114     private data class SavedAdminTarget(
+00115         val entry:PuzzleLibrary.Entry,
+00116         val record:SavedPuzzle,
+00117         val raw:WeeklyCrosswordsFetcher.Item,
+00118         val effective:WeeklyCrosswordsFetcher.Item,
+00119         val remoteVerified:Boolean,
+00120         val storedKey:String?
+00121     )
+00122     private var activeSavedTarget:SavedAdminTarget?=null
+00123     private val selectedBatchKeys=linkedSetOf<String>()
+00124     private val batchStatus=linkedMapOf<String,String>()
+00125     private var pendingAdminItem:WeeklyCrosswordsFetcher.Item?=null
+00126     private val localOverridePrefs by lazy { getSharedPreferences("weekly-admin-local-image-v1", MODE_PRIVATE) }
+00127     private var canonicalWait:CanonicalPuzzleCloud.WatchHandle?=null
+00128     private var libraryListing=PuzzleLibrary.Listing(emptyList())
+00129     private val downloadedRowCache=linkedMapOf<String,Boolean>()
+00130     private val structuredStatusCache=linkedMapOf<String,StructuredLocalStatus>()
+00131     private var importedFourteenKeysCache:Set<String>?=null
+00132     private var generation=0
+00133     private var busy=false
+00134     private var refreshing=false
+00135     private var selectedImportKey:String?=null
+00136     private var showingOlder=false
+00137     private var olderScannedDays=0
+00138     private var showAllHistory=false
+00139     private var initialModerationReady=false
+00140     private var initialResumeHandled=false
+00141     private var initialListReady=false
+00142 
+00143     private val savedAdminOcrReviewer=registerForActivityResult(
+00144         ActivityResultContracts.StartActivityForResult()) { _ ->
+00145         if(BuildConfig.HIGI_DRY_BUILD && savedAdminId.isNotBlank() && savedAdminAction==9){
+00146             setResult(Activity.RESULT_OK,Intent().putExtra(EXTRA_ADMIN_OCR_RETURN_TO_LIBRARY,true))
+--- 1294-1331 ---
+01294             setOnMenuItemClickListener{m->runAdminMenuAction(m.itemId,raw,effective);true}
+01295             show()
+01296         }
+01297     }
+01298 
+01299     private fun runAdminMenuAction(
+01300         actionId:Int, raw:WeeklyCrosswordsFetcher.Item, effective:WeeklyCrosswordsFetcher.Item
+01301     ){
+01302         if(!moderationState.admin||!adminMode||!AdminPuzzleMenu.has(actionId))return
+01303         when(actionId){
+01304                     1->{
+01305                         val sourceKey=CrosswordCatalog.sourceKey(raw)
+01306                         if(sourceKey==null)toastAdmin("לא נמצא מזהה לתשבץ") else AlertDialog.Builder(this@RecentCrosswordsActivity)
+01307                             .setTitle("הסרת תשבץ")
+01308                             .setMessage("להסיר את התשבץ מרשימת השבוע? משתמשים אחרים לא יוכלו לייבא אותו יותר.")
+01309                             .setNegativeButton("ביטול",null).setPositiveButton("הסר"){_,_->
+01310                                 moderation.withdraw(raw){ok->runOnUiThread{
+01311                                     if(ok){moderationState=moderationState.copy(withdrawn=moderationState.withdrawn+WeeklyCrosswordModeration.key(sourceKey));refreshDisplayedItems();toastAdmin("התשבץ הוסר מהרשימה לכולם")}
+01312                                     else toastAdmin("ההסרה נכשלה. בדוק הרשאת מנהל ב-Firebase.")
+01313                                 }}
+01314                             }.show()
+01315                     }
+01316                     2->{pendingAdminItem=raw;adminPhoneImagePicker.launch("image/*")}
+01317                     3->{
+01318                         pendingAdminItem=raw
+01319                         runCatching {
+01320                             adminSiteImagePicker.launch(Intent(this@RecentCrosswordsActivity,ManualGroupsActivity::class.java).apply{
+01321                                 putExtra(ManualGroupsActivity.EXTRA_START_URL,effective.threadUrl.ifBlank{raw.threadUrl})
+01322                             })
+01323                         }.onFailure{pendingAdminItem=null;toastAdmin("לא ניתן לפתוח את בוחר תמונת האתר: ${it.message.orEmpty()}")}
+01324                     }
+01325                     4->{
+01326                         pendingAdminItem=raw
+01327                         val o=moderation.solutionOverride(raw,moderationState)
+01328                         adminSolutionsPicker.launch(Intent(this@RecentCrosswordsActivity,SolutionsActivity::class.java).apply{
+01329                             o?.solutionUrl?.takeIf{it.isNotBlank()}?.let{putExtra(SolutionsActivity.EXTRA_URL,it)}
+01330                         })
+01331                     }
+--- 1340-1401 ---
+01340     /** Execute an administrator action against the EXACT UUID selected in "התשבצים שלי".
+01341      * A puzzle need not be present in the rolling weekly cache.  Destructive
+01342      * issue-wide actions are blocked unless its original Canonical source can be
+01343      * matched without guessing; local inspection and diagnostics still work.
+01344      */
+01345     private fun resolveSavedAdminTarget():SavedAdminTarget?{
+01346         if(!PuzzleLibrary.validId(savedAdminId))return null
+01347         val record=library.load(savedAdminId)?:return null
+01348         val entry=PuzzleLibrary.Entry(savedAdminId,record)
+01349         val storedKey=canonicalIndex.issueKey(savedAdminId)
+01350         val thread=canonicalIndex.sourceThreadUrl(savedAdminId)
+01351         val image=canonicalIndex.sourceImageUrl(savedAdminId)
+01352         val date=WeeklyCrosswordsFetcher.titleDateMillis(record.title)?:0L
+01353         val cached=storedKey?.let{key->cache.load(365).items.firstOrNull{CrosswordCatalog.sourceKey(it)==key}}
+01354         val raw=cached?:WeeklyCrosswordsFetcher.Item(record.title,date,thread,image)
+01355         val verified=storedKey!=null && CrosswordCatalog.sourceKey(raw)==storedKey &&
+01356             raw.dateMillis>0 && raw.imageUrl.startsWith("https://") && raw.threadUrl.startsWith("https://")
+01357         val localSource=library.sourceFiles(savedAdminId).firstOrNull{it.isFile&&it.length()>0L}
+01358         val localUri=localSource?.let{"file://${it.absolutePath}"}.orEmpty()
+01359         val effective=if(localUri.isNotBlank())raw.copy(
+01360             imageUrl=localUri,
+01361             attachmentLabel="תמונת המקור השמורה",
+01362             candidateImageUrls=listOf(localUri),
+01363             candidateLabels=listOf("תמונת המקור השמורה"),
+01364             candidateScores=listOf(1000)
+01365         ) else raw
+01366         return SavedAdminTarget(entry,record,raw,effective,verified,storedKey)
+01367     }
+01368 
+01369     private fun executeSavedAdminAction(){
+01370         if(!moderationState.admin || !adminMode || !AdminPuzzleMenu.has(savedAdminAction)){
+01371             toastAdmin("אין הרשאה לפעולה זו");finish();return
+01372         }
+01373         val target=resolveSavedAdminTarget()
+01374         if(target==null){toastAdmin("התשבץ השמור אינו זמין");finish();return}
+01375         activeSavedTarget=target
+01376         message.text="ניהול: ${target.record.title.take(110)}"
+01377         DebugLog.i("ADMIN_LIBRARY_ACTION","selected puzzle=${DebugLog.compactId(target.entry.id)} action=$savedAdminAction " +
+01378             "verifiedRemote=${target.remoteVerified} sourcePresent=${target.effective.imageUrl.isNotBlank()}")
+01379         when(savedAdminAction){
+01380             1,2,3,4->{
+01381                 if(!target.remoteVerified){
+01382                     AlertDialog.Builder(this)
+01383                         .setTitle("חסרים נתוני מקור מאומתים")
+01384                         .setMessage("התשבץ השמור אינו מקושר למקור השבועי המקורי באופן מאומת. " +
+01385                             "לא ניתן לבצע פעולה שמשנה תשבצים של משתמשים אחרים בלי לזהות במדויק את הרשומה. " +
+01386                             "ניתן להשתמש בפענוח מחדש, בבדיקת תמונת הפענוח ובניסויי AI מקומיים.")
+01387                         .setPositiveButton("סגור",null).show()
+01388                 }else runAdminMenuAction(savedAdminAction,target.raw,target.raw)
+01389             }
+01390             5->chooseRedecodeMode{mode,options->runSavedAdminRedecode(target.entry,mode,options)}
+01391             6->openClueRegionInspector(target.raw,target.effective)
+01392             9->openAdminOcrRecrop(target.raw,target.effective)
+01393             7,8->{
+01394                 if(target.effective.imageUrl.isBlank()){
+01395                     toastAdmin("לא נמצאה תמונת מקור לתשבץ הזה")
+01396                 }else if(savedAdminAction==7){
+01397                     confirmAdminAiPromptDiagnostic(target.raw,target.effective)
+01398                 }else confirmAdminVerbatimTranscription(target.raw,target.effective)
+01399             }
+01400         }
+01401     }
+==== FILE CanonicalPuzzleCloud.kt total=1901 ====
+--- 529-566 ---
+00529         sourceKey,legacyIssueKey,sourceThreadUrl,sourceImageUrl,timeoutMs
+00530     )?.getOrNull()
+00531 
+00532 
+00533     /** Publish only a complete puzzle; an existing good canonical copy always wins. */
+00534     fun publishIfAbsent(
+00535         issueKey: String,
+00536         record: SavedPuzzle,
+00537         sourceThreadUrl: String = "",
+00538         sourceImageUrl: String = "",
+00539         editorName: String = "",
+00540         clueRegions: Map<ClueEditorModel.Key,BoxF> = emptyMap(),
+00541         clueGeometries: Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+00542         adminPartialAllowed:Boolean = false,
+00543         recoveredLocalCopy:Boolean = false,
+00544         callback: (Result<CachedPuzzle>) -> Unit = {}
+00545     ) {
+00546         if (issueKey.isBlank() || !(if(adminPartialAllowed)isAdminPublishableRecord(record) else isCompleteRecord(record))) {
+00547             callback(Result.failure(IllegalArgumentException("אין מבנה רשת והגדרות תקין לפרסום קנוני")))
+00548             return
+00549         }
+00550         authenticated({ uid, d ->
+00551             val ref = d.getReference("canonicalPuzzles/${nodeKey(issueKey)}")
+00552             val original=encode(issueKey, record, sourceThreadUrl, sourceImageUrl, uid, editorName, clueRegions, clueGeometries)
+00553             // A local review previously blocked from Canonical already contains
+00554             // human corrections. Treat all usable local clue text as protected
+00555             // provenance on first publication; earlier AI-only text is conservatively
+00556             // protected too because 0.15.172 stored no field-level local edit log.
+00557             val map=if(recoveredLocalCopy){
+00558                 val clues=original["clues"] as? Map<*,*> ?: emptyMap<Any,Any>()
+00559                 val keys=clues.keys.filterIsInstance<String>().filter { key ->
+00560                     val value=clues[key] as? String ?: ""
+00561                     value.isNotBlank() && !GalleryRecoveryPolicy.isPlaceholder(value)
+00562                 }
+00563                 val manualEdits=keys.associateWith{1L}
+00564                 val editActors=keys.associateWith { mapOf("by" to uid,"name" to editorName.trim().take(40),
+00565                     "revision" to 1L,"origin" to "manual-local-recovery") }
+00566                 original+mapOf("clueEdits" to manualEdits,"clueEditActors" to editActors)
+--- 583-660 ---
+00583             })
+00584         }, { callback(Result.failure(it)) })
+00585     }
+00586 
+00587     /** Background-thread canonical publication; retain failures instead of cloning unverified local grids. */
+00588     fun publishIfAbsentBlocking(
+00589         issueKey:String,
+00590         record:SavedPuzzle,
+00591         sourceThreadUrl:String,
+00592         sourceImageUrl:String,
+00593         editorName:String="",
+00594         timeoutMs:Long=8_000L
+00595     ):Result<CachedPuzzle>? {
+00596         val latch=CountDownLatch(1);var result:Result<CachedPuzzle>?=null
+00597         publishIfAbsent(issueKey,record,sourceThreadUrl,sourceImageUrl,editorName){result=it;latch.countDown()}
+00598         if(!latch.await(timeoutMs,TimeUnit.MILLISECONDS))return null
+00599         return result
+00600     }
+00601 
+00602     /**
+00603      * One shared administrator canonical-refresh path for both single and batch
+00604      * re-decode. Resolve the compatible physical record once, then either update
+00605      * exactly that record or publish a new canonical when none exists.
+00606      */
+00607     fun refreshDecodedForAdmin(
+00608         sourceKey:String,
+00609         legacyIssueKey:String?,
+00610         sourceThreadUrl:String,
+00611         sourceImageUrl:String,
+00612         record:SavedPuzzle,
+00613         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+00614         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+00615         editorName:String,
+00616         callback:(Result<CachedPuzzle>)->Unit = {},
+00617         recoverLocalReview:Boolean = false,
+00618         allowSourceReplacement:Boolean = false,
+00619         previousSourceImageUrl:String = ""
+00620     ){
+00621         // A changed source image is never an implicit side effect of re-decoding.
+00622         // The only allowed replacement is an image uploaded by the admin to
+00623         // this app's versioned, content-addressed Firebase Storage namespace.
+00624         if(allowSourceReplacement && !CanonicalSourceImageStorage.isManagedUrl(sourceImageUrl)){
+00625             callback(Result.failure(SecurityException("תמונת המקור לא הועלתה לאחסון מאומת")))
+00626             return
+00627         }
+00628         if(BuildConfig.HIGI_DRY_BUILD){
+00629             callback(Result.failure(IllegalStateException("גרסת DRY אינה מפרסמת פענוחים למאגר הקנוני")))
+00630             return
+00631         }
+00632         if(sourceKey.isBlank()){
+00633             callback(Result.failure(IllegalArgumentException("לא נמצא מזהה Canonical לתשבץ")));return
+00634         }
+00635         if(!isAdminPublishableRecord(record)){
+00636             callback(Result.failure(IllegalArgumentException("אין רשת והגדרות מזוהות לשמירה קנונית")));return
+00637         }
+00638         // Do not let a non-admin invoke the partial-source publication path, even
+00639         // when Firebase would allow an ordinary FIRST canonical publication.
+00640         AdminAccess(context).loadRole { role ->
+00641             if(role==AdminAccess.Role.NONE){
+00642                 callback(Result.failure(SecurityException("פענוח מחדש קנוני למנהל בלבד")))
+00643                 return@loadRole
+00644             }
+00645         // Resolve the EXISTING record against the old image, not against the
+00646         // newly uploaded URL. Legacy physical aliases require this identity.
+00647         val lookupImage=if(allowSourceReplacement)previousSourceImageUrl else sourceImageUrl
+00648         fetchCompatible(sourceKey,legacyIssueKey,sourceThreadUrl,lookupImage){fetched->
+00649             if(fetched.isFailure){callback(Result.failure(fetched.exceptionOrNull()!!));return@fetchCompatible}
+00650             val existing=fetched.getOrNull()
+00651             if(existing==null){
+00652                 if(allowSourceReplacement){
+00653                     callback(Result.failure(IllegalStateException("לא נמצאה רשומת קנוני קיימת להחלפת התמונה. לא נוצר תשבץ נוסף")))
+00654                     return@fetchCompatible
+00655                 }
+00656                 publishIfAbsent(
+00657                     sourceKey,record,sourceThreadUrl,sourceImageUrl,editorName,
+00658                     clueRegions=clueRegions,clueGeometries=clueGeometries,
+00659                     adminPartialAllowed=true,recoveredLocalCopy=recoverLocalReview,callback=callback
+00660                 )
+--- 862-899 ---
+00862         selected: Map<ClueEditorModel.Key, ClueGeometry>,
+00863         callback: (Result<Long>) -> Unit
+00864     ) {
+00865         // The -DRY.zip release path must never mutate shared Canonical, even if
+00866         // an administrator tries to invoke this method outside its UI.
+00867         if (BuildConfig.HIGI_DRY_BUILD) {
+00868             callback(Result.failure(IllegalStateException("בגרסת DRY השמירה הקנונית חסומה")))
+00869             return
+00870         }
+00871         val sourceIdentity = LocalOcrGeometryAuthority.sourceIdentity(expectedSourceUrl)
+00872         if (baseline.issueKey.isBlank() || baseline.revision <= 0L ||
+00873             baseline.gridSignature != expectedGridSignature ||
+00874             !expectedSourceUrl.startsWith("https://") || sourceIdentity.isBlank() ||
+00875             LocalOcrGeometryAuthority.sourceIdentity(baseline.sourceImageUrl) != sourceIdentity ||
+00876             selected.isEmpty() || selected.size > baseline.clues.size ||
+00877             selected.any { (key,geometry) ->
+00878                 key !in baseline.clues || !ClueGeometryEvidencePolicy.canPublish(geometry) ||
+00879                 geometry.evidence !in setOf(ClueGeometryEvidence.MANUAL, ClueGeometryEvidence.LOCAL_OCR_ANCHORED) ||
+00880                 geometry.lines.isEmpty() || geometry.lines.size > AdminOcrRecropPolicy.MAX_PIECES ||
+00881                 geometry.lines.any { ClueManualRegionPolicy.reason(it) != null } ||
+00882                 encodeLines(geometry.lines).isBlank()
+00883             }) {
+00884             callback(Result.failure(IllegalArgumentException("חיתוכים או זהות מקור אינם תקינים; לא נשמר דבר")))
+00885             return
+00886         }
+00887         // Client-side admin checks are not a substitute for the server rules,
+00888         // but prevent a regular user from even initiating the privileged flow.
+00889         AdminAccess(context).loadRole { role ->
+00890             if (role == AdminAccess.Role.NONE) {
+00891                 callback(Result.failure(SecurityException("השמירה הקנונית מותרת למנהל בלבד")))
+00892                 return@loadRole
+00893             }
+00894             authenticated({ uid,d ->
+00895                 val ref=d.getReference("canonicalPuzzles/${CanonicalNodeRoute.resolve(baseline.issueKey,baseline.storageNodeKey)}")
+00896                 ref.get().addOnSuccessListener { preflight ->
+00897                     val expectedRev=baseline.revision
+00898                     if (!preflight.exists() || preflight.child("issueKey").value != baseline.issueKey ||
+00899                         (preflight.child("revision").value as? Number)?.toLong() != expectedRev ||
+--- 1108-1145 ---
+01108         discoveredNodeKey:String?,callback:(Result<Boolean>)->Unit
+01109     ) {
+01110         if(issueKey.isBlank() || expectedGridSignature.isBlank()){
+01111             callback(Result.failure(IllegalArgumentException("מזהה תשבץ חסר")));return
+01112         }
+01113         if(BuildConfig.HIGI_DRY_BUILD){
+01114             callback(Result.failure(SecurityException("גרסת DRY לא משנה אישורי Canonical")));return
+01115         }
+01116         AdminAccess(context).loadRole { role ->
+01117             if(role==AdminAccess.Role.NONE){
+01118                 callback(Result.failure(SecurityException("אישור הגדרה וחיתוך מיועד למנהל בלבד")))
+01119                 return@loadRole
+01120             }
+01121             authenticated({uid,d->
+01122                 val ref=d.getReference("canonicalPuzzles/${CanonicalNodeRoute.resolve(issueKey,discoveredNodeKey)}")
+01123                 ref.get().addOnSuccessListener { snapshot ->
+01124                     if(!snapshot.exists() || snapshot.child("issueKey").value!=issueKey){
+01125                         callback(Result.failure(IllegalStateException("התשבץ הקנוני אינו זמין")))
+01126                         return@addOnSuccessListener
+01127                     }
+01128                     val seed=snapshot.value
+01129                     var tries=0
+01130                     var reason="התשבץ השתנה בזמן אישור ההגדרה"
+01131                     var alreadySatisfied=false
+01132                     val wire=SharingCodec.key(key.number,key.direction)
+01133                     ref.runTransaction(object:Transaction.Handler{
+01134                         override fun doTransaction(data:MutableData):Transaction.Result {
+01135                             tries++
+01136                             // Idempotency is valid only when this exact Firebase
+01137                             // transaction invocation passed the source/text guards.
+01138                             alreadySatisfied=false
+01139                             if(data.value==null){
+01140                                 when(CanonicalTransactionCachePolicy.action(tries,seed!=null)){
+01141                                     CanonicalTransactionCachePolicy.NullAction.BOOTSTRAP_PREFETCH->data.value=seed
+01142                                     CanonicalTransactionCachePolicy.NullAction.ABORT_AS_DELETED->return Transaction.abort()
+01143                                 }
+01144                             }
+01145                             if(data.child("issueKey").value!=issueKey ||
+--- 1321-1358 ---
+01321         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+01322         editorName:String,
+01323         callback:(Result<CachedPuzzle>)->Unit = {}
+01324     ) = updateDecodedForAdminAtNode(issueKey, null, record, clueRegions, clueGeometries, editorName, callback)
+01325 
+01326     private fun updateDecodedForAdminAtNode(
+01327         issueKey:String,
+01328         discoveredNodeKey:String?,
+01329         record:SavedPuzzle,
+01330         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+01331         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry>,
+01332         editorName:String,
+01333         callback:(Result<CachedPuzzle>)->Unit,
+01334         recoverLocalReview:Boolean=false,
+01335         replacementUrl:String?=null,
+01336         expectedSourceUrl:String="",
+01337         previousSourceUrl:String?=null
+01338     ){
+01339         if(issueKey.isBlank()||!isAdminPublishableRecord(record)){
+01340             callback(Result.failure(IllegalArgumentException("לא ניתן לעדכן קנוני בלי רשת והגדרות מזוהות")));return
+01341         }
+01342         val cw=record.crossword
+01343         val newSignature=AnswerChecking.signature(cw)
+01344         val newBlocked=buildString(cw.rows*cw.cols){for(r in 0 until cw.rows)for(c in 0 until cw.cols)append(if(cw.cell(r,c).blocked)'#' else '.')}
+01345         val newClues=linkedMapOf<String,String>()
+01346         cw.clues.forEach{clue->newClues[SharingCodec.key(clue.number,clue.direction)]=canonicalText(clue.text)}
+01347         val newRegions=linkedMapOf<String,String>()
+01348         val trustworthy=clueGeometries.filterValues(ClueGeometryEvidencePolicy::canPublish)
+01349         clueRegions.forEach{(key,box)->
+01350             if(key !in trustworthy)return@forEach
+01351             val left=box.left.coerceIn(0f,1f);val top=box.top.coerceIn(0f,1f)
+01352             val right=box.right.coerceIn(0f,1f);val bottom=box.bottom.coerceIn(0f,1f)
+01353             if(right-left>=.01f&&bottom-top>=.006f)newRegions[SharingCodec.key(key.number,key.direction)]="$left,$top,$right,$bottom"
+01354         }
+01355         val newLines=linkedMapOf<String,String>()
+01356         trustworthy.forEach { (key,geometry) ->
+01357             val encoded=encodeLines(geometry.lines)
+01358             if(encoded.isNotBlank())newLines[SharingCodec.key(key.number,key.direction)]=encoded
+==== FILE MainActivity.kt total=6006 ====
+--- 730-794 ---
+00730         val prefs=getSharedPreferences("higi_local_review",MODE_PRIVATE)
+00731         val candidates=listing.entries.mapNotNull { entry ->
+00732             entry.puzzle?.takeIf{prefs.getBoolean(it.id,false) &&
+00733                 !isLocalStructuredSource(it.id) && CanonicalPuzzleCloud.isAdminPublishableRecord(it)}
+00734         }
+00735         if(candidates.isEmpty())return
+00736         AdminAccess(this).loadRole { role -> runOnUiThread {
+00737             if(isFinishing||isDestroyed||role==AdminAccess.Role.NONE)return@runOnUiThread
+00738             candidates.forEach { record -> recoverLocalReviewCanonical(record.id) }
+00739         }}
+00740     }
+00741 
+00742     private fun recoverLocalReviewCanonical(puzzleId:String){
+00743         if(!localReviewRecovering.add(puzzleId))return
+00744         val prefs=getSharedPreferences("higi_local_review",MODE_PRIVATE)
+00745         if(prefs.getBoolean("source-upload-pending:$puzzleId",false)){
+00746             // The corrected bitmap has not yet been atomically tied to its
+00747             // canonical URL. Never auto-replay this old-URL geometry at startup.
+00748             localReviewRecovering.remove(puzzleId)
+00749             DebugLog.i("LOCAL_REVIEW_RECOVERY","blocked pending corrected-source upload puzzle=${DebugLog.compactId(puzzleId)}")
+00750             return
+00751         }
+00752         if(!prefs.getBoolean(puzzleId,false)) {localReviewRecovering.remove(puzzleId);return}
+00753         val record=runCatching{library.load(puzzleId)}.getOrNull()
+00754         val issue=record?.let{canonicalIndex.issueKeyFor(it)}.orEmpty()
+00755         if(record==null || issue.isBlank() || !CanonicalPuzzleCloud.isAdminPublishableRecord(record)){
+00756             localReviewRecovering.remove(puzzleId)
+00757             DebugLog.w("LOCAL_REVIEW_RECOVERY","skip puzzle=${DebugLog.compactId(puzzleId)} reason=invalid-source-or-record")
+00758             return
+00759         }
+00760         val keys=Direction.values().flatMap{d->record.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+00761         val manuallySelected=keys.mapNotNull { key ->
+00762             clueRegionStore.getManualVerified(puzzleId,key)?.let { key to it }
+00763         }.toMap()
+00764         val geometries=manuallySelected.mapValues { (_, box) ->
+00765             ClueGeometry(box,listOf(box),box,evidence=ClueGeometryEvidence.MANUAL)
+00766         }
+00767         val sourceImage=canonicalIndex.sourceImageUrl(puzzleId)
+00768         val sourceThread=canonicalIndex.sourceThreadUrl(puzzleId)
+00769         DebugLog.i("LOCAL_REVIEW_RECOVERY","begin puzzle=${DebugLog.compactId(puzzleId)} issue=${DebugLog.compactId(issue)} manualRegions=${manuallySelected.size} aiRequests=0")
+00770         canonicalCloud.refreshDecodedForAdmin(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),
+00771             sourceThread,sourceImage,record,manuallySelected,geometries,settings.displayName,
+00772             callback={ result -> runOnUiThread {
+00773                 localReviewRecovering.remove(puzzleId)
+00774                 result.onSuccess { cached ->
+00775                     // Update the issue index only on a server-confirmed transaction.
+00776                     canonicalIndex.bind(puzzleId,cached.issueKey,cached.revision,
+00777                         cached.sourceImageUrl.ifBlank{sourceImage},cached.sourceThreadUrl.ifBlank{sourceThread})
+00778                     prefs.edit().remove(puzzleId).apply()
+00779                     DebugLog.i("LOCAL_REVIEW_RECOVERY","canonical-committed puzzle=${DebugLog.compactId(puzzleId)} revision=${cached.revision} retainedLocal=true")
+00780                     if(board.crossword?.puzzleId==puzzleId){
+00781                         library.load(puzzleId)?.let{syncCanonicalPuzzle(it,cached)}
+00782                         toast("התשבץ המקומי פורסם קנונית בהצלחה")
+00783                     }else if(record.title.contains("תרתי משמע")){
+00784                         toast("תרתי משמע פורסם קנונית בהצלחה")
+00785                     }
+00786                 }.onFailure { error ->
+00787                     DebugLog.w("LOCAL_REVIEW_RECOVERY","canonical-failed puzzle=${DebugLog.compactId(puzzleId)} reason=${DebugLog.sanitize(error.message.orEmpty())}; retry=next-start")
+00788                     if(board.crossword?.puzzleId==puzzleId)toast("שמירה מקומית בלבד; פרסום קנוני נכשל — יבוצע ניסיון נוסף בהפעלה הבאה")
+00789                 }
+00790             }},recoverLocalReview=true)
+00791     }
+00792 
+00793     private fun whenReady(action: () -> Unit) { if(externalReady)action() else pendingExternal=action }
+00794     private fun updateHomeSummary() {
+--- 3979-4015 ---
+03979             // bindPendingCanonical() clears pending import flags. Snapshot source
+03980             // identity BEFORE that call so a selected local bitmap is never
+03981             // mistaken for the existing remote URL.
+03982             val sourceWasLocalBeforeBind=pendingCanonicalLocalBitmap
+03983             val manualSolutionsApplied=bindPendingCanonical(record.id)
+03984             // Admin correction is published only after a successful, source-accurate
+03985             // image upload. A local correction with no cloud image stays local.
+03986             if(forcedCanonicalRefresh){
+03987                 val issueKey=canonicalIssueBeforeBind!!
+03988                 val wasLocalImage=sourceWasLocalBeforeBind
+03989                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single start issue=${DebugLog.compactId(issueKey)} puzzle=${DebugLog.compactId(record.id)} localSource=$wasLocalImage")
+03990                 fun publishWithSource(confirmedUrl:String,uploaded:Boolean){
+03991                     canonicalCloud.refreshDecodedForAdmin(
+03992                         issueKey,CrosswordCatalog.issueKeyFromSourceKey(issueKey),
+03993                         canonicalThreadBeforeBind,confirmedUrl,
+03994                         record,safeClueRegions,safeClueGeometry,settings.displayName,
+03995                         callback = { result -> runOnUiThread {
+03996                             // Release the claim after the complete cloud transaction.
+03997                             canonicalCloud.releaseDecodeClaim(issueKey)
+03998                             result.onSuccess { cached ->
+03999                                 canonicalIndex.bind(record.id,cached.issueKey,cached.revision,
+04000                                     cached.sourceImageUrl.ifBlank{confirmedUrl},
+04001                                     cached.sourceThreadUrl.ifBlank{canonicalThreadBeforeBind})
+04002                                 getSharedPreferences("higi_local_review",MODE_PRIVATE).edit()
+04003                                     .remove(record.id).remove("source-upload-pending:${record.id}").apply()
+04004                                 runCatching {
+04005                                     library.load(record.id)?.let { current ->
+04006                                         current.crossword.clues.forEach { clue ->
+04007                                             cached.clues[ClueEditorModel.Key(clue.number,clue.direction)]?.let { clue.text=it }
+04008                                         }
+04009                                         library.saveSession(current.session)
+04010                                     }
+04011                                 }.onFailure { DebugLog.w("ADMIN_REDECODE_CANONICAL","local-sync-failed reason=${it.javaClass.simpleName}") }
+04012                                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single committed issue=${DebugLog.compactId(issueKey)} revision=${cached.revision} uploaded=$uploaded")
+04013                                 if(board.crossword?.puzzleId==record.id){
+04014                                     library.load(record.id)?.let { syncCanonicalPuzzle(it,cached) }
+04015                                     toast("הפענוח ותמונת המקור פורסמו לכל המשתמשים")
+--- 4017-4067 ---
+04017                             }.onFailure { error ->
+04018                                 DebugLog.w("ADMIN_REDECODE_CANONICAL","single publish-failed issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04019                                 if(board.crossword?.puzzleId==record.id)
+04020                                     toast("הפענוח נשמר מקומית אך לא פורסם: ${error.message.orEmpty().take(120)}")
+04021                             }
+04022                         }},allowSourceReplacement=uploaded,
+04023                         previousSourceImageUrl=if(uploaded)canonicalImageBeforeBind else ""
+04024                     )
+04025                 }
+04026                 if(wasLocalImage){
+04027                     if(BuildConfig.HIGI_DRY_BUILD){
+04028                         canonicalCloud.releaseDecodeClaim(issueKey)
+04029                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","DRY local-only; upload and canonical publication blocked")
+04030                         toast("DRY: התמונה והפענוח נשמרו במכשיר בלבד; הקנוני לא השתנה")
+04031                     }else{
+04032                         // PNG encoding runs on a worker, not on the Android UI thread.
+04033                         executor.execute {
+04034                             CanonicalSourceImageStorage.upload(applicationContext,issueKey,original){ uploaded ->
+04035                                 runOnUiThread {
+04036                                     uploaded.onSuccess { stored ->
+04037                                         // Rebind LOCAL OCR geometry only after upload
+04038                                         // confirms the exact source image hash.
+04039                                         clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,stored.url)
+04040                                         publishWithSource(stored.url,true)
+04041                                     }.onFailure { error ->
+04042                                         canonicalCloud.releaseDecodeClaim(issueKey)
+04043                                         DebugLog.w("CANONICAL_SOURCE_UPLOAD","local-only issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04044                                         if(board.crossword?.puzzleId==record.id)
+04045                                             toast("תמונת המקור לא עלתה לענן; הפענוח נשאר מקומי בלבד. לא בוצע פרסום קנוני")
+04046                                     }
+04047                                 }
+04048                             }
+04049                         }
+04050                     }
+04051                 }else publishWithSource(canonicalImageBeforeBind,false)
+04052             }else if(!forcedCanonicalRefresh && !localReview)publishCanonicalIfComplete(record.id)
+04053             pendingImportedTitle=null
+04054             suppressNextAutoSolutionLookup=true
+04055             activatePuzzle(record)
+04056             source=original
+04057             sourceCorners=prepared.points
+04058             hRegion=prepared.horizontalRegion
+04059             vRegion=prepared.verticalRegion
+04060             lastReview=prepared.parsed
+04061             persistSource(original,prepared.crossword)
+04062             refreshLibrary()
+04063 
+04064             val expected=prepared.crossword.startNumbers(Direction.HORIZONTAL).size+
+04065                 prepared.crossword.startNumbers(Direction.VERTICAL).size
+04066             val foundClues=prepared.crossword.clues.map { it.number to it.direction }.toSet().size
+04067             if(prepared.crossword.clues.any { GalleryRecoveryPolicy.isPlaceholder(it.text) }){
+--- 5378-5414 ---
+05378         }
+05379         clearPendingCanonical()
+05380         return referenceApplied
+05381     }
+05382 
+05383     private fun canonicalClueMap(cw:Crossword):Map<ClueEditorModel.Key,String> =
+05384         cw.clues.associate { ClueEditorModel.Key(it.number,it.direction) to CanonicalPuzzleCloud.canonicalText(it.text) }
+05385 
+05386     /** Only an as-yet unconfirmed local administrator correction must skip live sync. */
+05387     private fun isUnpublishedAdminRedecode(puzzleId:String):Boolean =
+05388         decodeMetadataStore.get(puzzleId)?.forcedRedecode==true && canonicalIndex.revision(puzzleId)<=0L
+05389 
+05390     private fun publishCanonicalIfComplete(puzzleId:String) {
+05391         if(isUnpublishedAdminRedecode(puzzleId)){
+05392             DebugLog.i("REDECODE_LOCAL","canonical-publish-skipped re-decode=${DebugLog.compactId(puzzleId)}")
+05393             return
+05394         }
+05395         if(isLocalStructuredSource(puzzleId)){
+05396             DebugLog.i("CANONICAL","local-structured-publish-blocked puzzle=${DebugLog.compactId(puzzleId)}")
+05397             return
+05398         }
+05399         val record=runCatching{library.load(puzzleId)}.getOrNull()?:return
+05400         if(!CanonicalPuzzleCloud.isCompleteRecord(record))return
+05401         val issue=canonicalIndex.issueKeyFor(record)?:return
+05402         val threadUrl=canonicalIndex.sourceThreadUrl(record.id)
+05403         val imageUrl=canonicalIndex.sourceImageUrl(record.id)
+05404         // A legacy canonical may have been corrected from 4x4/8x11 to 11x11
+05405         // while this device still has the old complete-looking board. Never
+05406         // recreate that bad grid under a newer :v: source key after migration.
+05407         // Both a failed lookup and an unreadable remote record are NOT evidence
+05408         // that it is safe to publish the local grid.
+05409         canonicalCloud.fetchCompatible(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),threadUrl,imageUrl){checked->
+05410             if(checked.isFailure){
+05411                 DebugLog.w("CANONICAL","publish-skipped-unverified issue=${DebugLog.compactId(issue)}")
+05412                 return@fetchCompatible
+05413             }
+05414             val existing=checked.getOrNull()
+==== FILE CanonicalSourceImageStorage.kt total=96 ====
+--- 1-65 ---
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.content.Context
+00004 import android.graphics.Bitmap
+00005 import com.google.firebase.FirebaseApp
+00006 import com.google.firebase.auth.FirebaseAuth
+00007 import com.google.firebase.storage.FirebaseStorage
+00008 import com.google.firebase.storage.StorageMetadata
+00009 import java.io.ByteArrayOutputStream
+00010 import java.net.URI
+00011 import java.security.MessageDigest
+00012 
+00013 /**
+00014  * Admin-controlled source-image storage for canonical re-decodes.
+00015  * A crop must not be shared until the exact bitmap on which it was calculated is
+00016  * available to every client at the canonical source URL.
+00017  *
+00018  * Requires the separately reviewed Firebase Storage rules supplied with v0.15.176.
+00019  * The DRY variant never uploads or modifies any Firebase data.
+00020  */
+00021 object CanonicalSourceImageStorage {
+00022     data class Uploaded(val url:String,val sha256:String,val bytes:Int)
+00023     private const val ROOT="higi/canonical-sources/v1"
+00024     private const val MAX_BYTES=16*1024*1024
+00025 
+00026     fun isManagedUrl(url:String):Boolean = runCatching {
+00027         val parsed=URI(url.trim())
+00028         parsed.scheme=="https" && parsed.host=="firebasestorage.googleapis.com" &&
+00029             parsed.rawPath.orEmpty().contains("/o/higi%2Fcanonical-sources%2Fv1%2F") &&
+00030             parsed.rawQuery.orEmpty().contains("alt=media")
+00031     }.getOrDefault(false)
+00032 
+00033     fun upload(
+00034         context:Context,
+00035         issueKey:String,
+00036         bitmap:Bitmap,
+00037         callback:(Result<Uploaded>)->Unit
+00038     ) {
+00039         if(BuildConfig.HIGI_DRY_BUILD) {
+00040             callback(Result.failure(IllegalStateException("גרסת DRY אינה מעלה תמונות לענן")))
+00041             return
+00042         }
+00043         if(issueKey.isBlank() || bitmap.isRecycled || bitmap.width<100 || bitmap.height<100) {
+00044             callback(Result.failure(IllegalArgumentException("תמונת מקור או מזהה תשבץ אינם תקינים")))
+00045             return
+00046         }
+00047         // Compression is lossless: the canonical crop coordinates remain tied to
+00048         // these exact pixels. Do not transcode to JPEG or resize after OCR.
+00049         val bytes=runCatching { ByteArrayOutputStream().use { out ->
+00050             check(bitmap.compress(Bitmap.CompressFormat.PNG,100,out))
+00051             out.toByteArray()
+00052         } }.getOrElse { callback(Result.failure(it));return }
+00053         if(bytes.isEmpty() || bytes.size>MAX_BYTES) {
+00054             callback(Result.failure(IllegalArgumentException("תמונת המקור גדולה מדי לשמירה בענן (מגבלה: 16MB)")))
+00055             return
+00056         }
+00057         val imageHash=sha256(bytes)
+00058         val issueHash=sha256(issueKey.toByteArray(Charsets.UTF_8))
+00059         val path="$ROOT/$issueHash/$imageHash.png"
+00060         AdminAccess(context).loadRole { role ->
+00061             if(role==AdminAccess.Role.NONE) {
+00062                 callback(Result.failure(SecurityException("העלאת תמונה קנונית מותרת למנהל בלבד")))
+00063                 return@loadRole
+00064             }
+00065             val app=runCatching { FirebaseApp.getInstance() }.getOrElse {
+--- 67-96 ---
+00067             }
+00068             if(FirebaseAuth.getInstance(app).currentUser==null) {
+00069                 callback(Result.failure(SecurityException("לא נמצאה הזדהות Firebase")))
+00070                 return@loadRole
+00071             }
+00072             val storage=runCatching { FirebaseStorage.getInstance(app) }.getOrElse {
+00073                 callback(Result.failure(it));return@loadRole
+00074             }
+00075             val ref=storage.reference.child(path)
+00076             val metadata=StorageMetadata.Builder().setContentType("image/png").build()
+00077             ref.putBytes(bytes,metadata).addOnSuccessListener {
+00078                 ref.downloadUrl.addOnSuccessListener { uri ->
+00079                     val url=uri.toString()
+00080                     if(!isManagedUrl(url)) {
+00081                         callback(Result.failure(IllegalStateException("כתובת התמונה בענן אינה מזוהה")))
+00082                     }else {
+00083                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","success sha256=$imageHash bytes=${bytes.size} issue=${DebugLog.compactId(issueKey)}")
+00084                         callback(Result.success(Uploaded(url,imageHash,bytes.size)))
+00085                     }
+00086                 }.addOnFailureListener { callback(Result.failure(it)) }
+00087             }.addOnFailureListener { error ->
+00088                 DebugLog.w("CANONICAL_SOURCE_UPLOAD","failed ${error.javaClass.simpleName}: ${DebugLog.sanitize(error.message.orEmpty())}")
+00089                 callback(Result.failure(error))
+00090             }
+00091         }
+00092     }
+00093 
+00094     private fun sha256(bytes:ByteArray):String=MessageDigest.getInstance("SHA-256")
+00095         .digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+00096 }
