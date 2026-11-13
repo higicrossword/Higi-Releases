@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.203",
+  "versionCode": 353,
+  "patchFile": "cloud-patches/v0.15.203-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "9f97c53b99a7fba145586ddb45561dcb7f0ab798af92cf4c375a30b818cf7dc9",
+  "notes": "Higi 0.15.203 DRY: explicit administrator-only, saved-UUID Canonical image/clue publication with confirmation, verified source identity and protected Firebase refresh; no AI rerun, no auto-publishing, no automatic OCR crop approval, regular DRY limitations maintained. Original v202 behavior retained. Cloud Gradle regressions and original signer verification required before prerelease."
+}
