@@ -21,7 +21,7 @@ revisionGuard=f"{revNew} === {revOld} + 1"
 base=f"{rootGuard} && {urlChanged} && {revisionGuard}"
 managedUrl="newData.isString() && newData.val().length <= 2500 && newData.val().matches(/^https:\\/\\/firebasestorage\\.googleapis\\.com\\/v0\\/b\\/[A-Za-z0-9._-]+\\/o\\/higi%2Fcanonical-sources%2Fv1%2F[0-9a-f]{64}%2F[0-9a-f]{64}\\.png\\?alt=media(&token=[A-Za-z0-9._-]+)?$/)"
 rules={
- "sourceImageUrl":f"{base} && {managedUrl}",
+ "sourceImageUrl":f"{base} && {managedUrl} && " + " && ".join(f"!newData.parent().child('{field}').exists()" for field in ["clueRegions","clueRegionLines","clueRegionEvidence","clueRegionEdits","clueApprovals"]),
  "revision":f"{base} && newData.isNumber() && newData.val() === data.val()+1",
  "updatedAt":f"{base} && newData.isNumber() && newData.val() >= now - 15000 && newData.val() <= now + 15000",
  "lastEditedBy":f"{base} && newData.val() === auth.uid",
