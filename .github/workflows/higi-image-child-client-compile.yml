@@ -1,0 +1,71 @@
+name: Higi post-v204 image-only client compile (no release)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-image-child-client-compile.yml'
+      - 'cloud-tools/higi-after-v204-image-child-apply.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '8.11.1'}
+      - name: Restore pinned source and exact v204 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $raw=(& gh api "repos/$env:REPO/releases?per_page=100&page=1" | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'Release listing failed'}
+          $baseline=@(($raw|ConvertFrom-Json)|Where-Object {$_.tag_name -eq 'v0.15.175'})
+          if($baseline.Count -ne 1){throw 'Expected one pinned v175 source release'}
+          $asset=@($baseline[0].assets|Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1){throw 'Missing pinned source asset'}
+          $zip=Join-Path $env:RUNNER_TEMP 'base.zip'
+          & curl.exe --silent --show-error --fail --location --retry 3 `
+            --header "Authorization: Bearer $env:GH_TOKEN" `
+            --header 'Accept: application/octet-stream' `
+            --header 'X-GitHub-Api-Version: 2022-11-28' --output $zip `
+            "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0){throw 'Cannot download source'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Pinned source SHA mismatch'}
+          $extract=Join-Path $env:RUNNER_TEMP 'higi-extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $root=Join-Path $extract 'HebrewCrosswordApp_v0.15.175'
+          $patch=Join-Path $env:RUNNER_TEMP 'v204.patch'
+          $manifest=Get-Content -Raw cloud-releases/v0.15.204-DRY.json | ConvertFrom-Json
+          & python -c 'import base64,hashlib,lzma,pathlib,sys; raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True)); assert hashlib.sha256(raw).hexdigest()==sys.argv[3];pathlib.Path(sys.argv[2]).write_bytes(raw)' $manifest.patchFile $patch $manifest.patchSha256
+          if($LASTEXITCODE -ne 0){throw 'v204 patch checksum mismatch'}
+          & git -C $root apply --check $patch
+          if($LASTEXITCODE -ne 0){throw 'v204 patch cannot be applied'}
+          & git -C $root apply $patch
+          if($LASTEXITCODE -ne 0){throw 'v204 patch apply failure'}
+          & python cloud-tools/higi-after-v204-image-child-apply.py $root
+          if($LASTEXITCODE -ne 0){throw 'Client image-only update could not be applied'}
+          $gradle=Get-Content -Raw (Join-Path $root 'app/build.gradle.kts')
+          if($gradle -notmatch 'versionCode = 354' -or $gradle -notmatch 'versionName = "0.15.204"'){throw 'Unwanted version change'}
+          Add-Content $env:GITHUB_ENV "HIGI_COMPILE_ROOT=$root"
+      - name: Compile DRY Android and run unit tests, do not publish
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:HIGI_COMPILE_ROOT
+          if(Test-Path gradlew.bat){
+            & .\gradlew.bat --no-daemon -PhigiDryBuild=true testDebugUnitTest assembleDebug
+          }else{
+            & gradle --no-daemon -PhigiDryBuild=true testDebugUnitTest assembleDebug
+          }
+          if($LASTEXITCODE -ne 0){throw 'Unreleased client compilation/tests failed'}
+          Write-Host 'PASS post-v204 unreleased Canonical image-only client compile/tests. NO APK PUBLISHED.'
