@@ -43,6 +43,10 @@ function patch(){return {sourceImageUrl:u,revision:4,updatedAt:Date.now(),lastEd
   await t('wrong revision denied',()=>assertFails(update(ref(admin,'canonicalPuzzles/P1'),{...patch(),revision:5})));
   await t('forged external image denied',()=>assertFails(update(ref(admin,'canonicalPuzzles/P1'),{...patch(),sourceImageUrl:'https://example.com/fake.png'})));
   await t('retaining stale crop denied',()=>{let x=patch();delete x.clueRegions;return assertFails(update(ref(admin,'canonicalPuzzles/P1'),x))});
+  await t('answers cannot change during image update',()=>assertFails(update(ref(admin,'canonicalPuzzles/P1'),{...patch(),'answers/H_1':'FORGED'})));
+  await t('ordinary clue editing still works',()=>assertSucceeds(set(ref(user,'canonicalPuzzles/P1'),{
+    ...base,clues:{...base.clues,H_1:'corrected text'},revision:4,updatedAt:Date.now(),lastEditedBy:'other'
+  })));
   await t('grid smuggling denied',()=>assertFails(update(ref(admin,'canonicalPuzzles/P1'),{...patch(),rows:12})));
   console.log('PASSED',passed,'scoped tests with full baseline rules');
  }finally{await env.cleanup()}
