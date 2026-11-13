@@ -22,7 +22,7 @@ fi
 if gcloud iam roles describe "$ROLE" --project="$PROJECT" >/dev/null 2>&1; then
   EXISTING="$(gcloud iam roles describe "$ROLE" --project="$PROJECT" --format='value(includedPermissions)' | tr ';' '\n' | sort)"
   # Do not silently replace or broaden an existing role. Audit it before use.
-  EXPECTED="$(printf '%s\\n' firebase.projects.get firebasedatabase.instances.get firebasedatabase.instances.update resourcemanager.projects.get | sort)"
+  EXPECTED="$(printf '%s\n' firebase.projects.get firebasedatabase.instances.get firebasedatabase.instances.update resourcemanager.projects.get | sort)"
   [[ "$EXISTING" == "$EXPECTED" ]] || { echo 'BLOCKED: existing custom role permissions differ'; exit 1; }
 else
   gcloud iam roles create "$ROLE" --project="$PROJECT" \
