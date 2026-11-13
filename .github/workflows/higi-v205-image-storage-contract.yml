@@ -1,0 +1,59 @@
+name: Higi 0.15.205 - verify canonical image Storage URL contract
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-v205-image-storage-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Reconstruct CanonicalSourceImageStorage.kt from pinned source and v202 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/higi-storage"
+          mkdir -p "$WORK"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$WORK/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $WORK/base.zip" | sha256sum --check
+          unzip -q "$WORK/base.zip" -d "$WORK/src"
+          ROOT="$WORK/src/HebrewCrosswordApp_v0.15.175"
+          python3 - "$GITHUB_WORKSPACE/cloud-patches/v0.15.202-from-v0.15.175.patch.xz.b64" "$WORK/v202.patch" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='0673bcda0ab0105d1dafe826b4a5a7977c0f220ad1c111ef49a5156705040b1f'
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$WORK/v202.patch"
+          git -C "$ROOT" apply "$WORK/v202.patch"
+          python3 - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys,re
+          root=Path(sys.argv[1])
+          path=root/'app/src/main/java/com/example/hebrewcrossword/CanonicalSourceImageStorage.kt'
+          assert path.is_file(), 'CanonicalSourceImageStorage.kt not found'
+          text=path.read_text(encoding='utf-8')
+          lines=text.splitlines()
+          print('CanonicalSourceImageStorage.kt source URI and object path contract:')
+          markers=('canonical-sources','storagePath','child(','storage','sha256','issueHash','getDownloadUrl','downloadUrl','isManagedUrl','path =','path=')
+          for i,l in enumerate(lines):
+            if any(m in l for m in markers):
+              print(str(i+1)+': '+l[:250])
+          assert 'canonical-sources' in text, 'Unexpected Canonical storage namespace'
+          print('PASS source image storage component reconstructed and namespace found')
+          PY
