@@ -1,0 +1,22 @@
+name: Higi RTDB v205 publish safety - offline tests
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud-tools/test-higi-rtdb-v205-publish.py'
+      - 'cloud-tools/higi-rtdb-v205-deploy.py'
+      - '.github/workflows/higi-rtdb-publish-safety-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify no-ETag fallback is fail-closed (no Firebase access)
+        run: python3 cloud-tools/test-higi-rtdb-v205-publish.py
