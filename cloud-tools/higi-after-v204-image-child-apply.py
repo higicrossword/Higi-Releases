@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 root=Path(sys.argv[1])/"app/src/main/java/com/example/hebrewcrossword"
 p=root/"CanonicalPuzzleCloud.kt"
-s=p.read_text()
+s=p.read_text(encoding='utf-8')
 start=s.find("    fun replaceCanonicalSourceImageOnly(")
 end=s.find("    /**\n     * User clue corrections are canonical.",start)
 if start<0 or end<0:raise RuntimeError("Expected v204 method markers missing; fail closed")
@@ -101,5 +101,5 @@ new='''    /**
 
 '''
 assert "ref.runTransaction(" not in new
-p.write_text(s[:start]+new+s[end:])
+p.write_text(s[:start]+new+s[end:],encoding='utf-8')
 print("POST-204 CHILD-SCOPED IMAGE WRITE STAGED (NO RELEASE)")
