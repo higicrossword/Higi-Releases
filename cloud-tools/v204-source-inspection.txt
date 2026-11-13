@@ -1,0 +1,1523 @@
+======== MainActivity.kt lines 6006 ========
+==== withSource range 4960 5060
+04960             isApproved={key->canonicalForEditor?.takeIf{it.first==cw.puzzleId}?.second?.approvedClueKeys?.contains(key)==true},
+04961             setApproval=if(digital)null else {key,approved,done->approveClueAndCrop(cw,key,approved,done)}))
+04962         }
+04963     }
+04964     private fun rebuildCluesBelowIfNeeded() { if(settings.showCluesBelow) rebuildCluesBelow() }
+04965 
+04966     private fun withSource(displayOnly:Boolean=false,done: (Bitmap?) -> Unit) {
+04967         val cw = board.crossword ?: return
+04968         val structuredKey=structuredDisplayKey(cw.puzzleId)
+04969         val isStructured=structuredKey.startsWith("INTEL:") ||
+04970             structuredKey.startsWith("HIGAYON:") || structuredKey.startsWith("ISRAEL_HAYOM:") ||
+04971             structuredKey.startsWith("ACROSS14:")
+04972         // Printed companions are for display ONLY. The normal clue editor still
+04973         // cannot mistake them for OCR/AI source geometry or text authority.
+04974         if(isStructured && !displayOnly){done(null);return}
+04975         val manualPrint=isStructured && getSharedPreferences("higi-source-display",MODE_PRIVATE)
+04976             .getBoolean("manual-${cw.puzzleId}",false)
+04977         val legacyManualPrint=(structuredKey.startsWith("HIGAYON:") ||
+04978             structuredKey.startsWith("INTEL:")) && library.sourceFiles(cw.puzzleId).isNotEmpty()
+04979         val galleryPublisher=displayOnly && hasGalleryPublisherDisplay(cw)
+04980         val preferPrinted=(isStructured && displayOnly && !manualPrint && !legacyManualPrint) || galleryPublisher
+04981         // A previously displayed printed image must never override a newly
+04982         // selected manual source (or vice versa) via the activity bitmap cache.
+04983         if(!isStructured && !preferPrinted && !GalleryPublisherPolicy.isGallery(activePuzzleTitle))
+04984             source?.let { done(it); return }
+04985         val displayTitle=activePuzzleTitle
+04986         val backgroundDisplay=(isStructured || GalleryPublisherPolicy.isGallery(activePuzzleTitle)) && displayOnly
+04987         val id=if(backgroundDisplay)generation else ++generation
+04988         if(!backgroundDisplay)busy(true, "\u05d8\u05d5\u05e2\u05df \u05ea\u05de\u05d5\u05e0\u05ea \u05de\u05e7\u05d5\u05e8...")
+04989         executor.execute {
+04990             var bitmap=if(preferPrinted)library.printedCompanionFiles(cw.puzzleId)
+04991                 .firstNotNullOfOrNull{file->runCatching{ImageLoader.load(file)}.getOrNull()}
+04992                 else null
+04993             if(bitmap==null && preferPrinted){
+04994                 // Never wait for the network or OCR from any visible clue screen.
+04995                 PrintedStructuredSource.enqueue(applicationContext,cw.puzzleId,
+04996                     structuredKey,displayTitle,cw)
+04997             }
+04998             if(bitmap==null)bitmap=library.sourceFiles(cw.puzzleId)
+04999                 .firstNotNullOfOrNull{file->runCatching{ImageLoader.load(file)}.getOrNull()}
+05000             if(bitmap==null && !isStructured){
+05001                 val directUrl=canonicalIndex.sourceImageUrl(cw.puzzleId)
+05002                 val threadUrl=canonicalIndex.sourceThreadUrl(cw.puzzleId)
+05003                 fun loadInternet(url:String):Bitmap? = if(!url.startsWith("https://")) null else runCatching {
+05004                     val file=ImageDownload.fetch(url,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
+05005                     ImageLoader.load(file).also{loaded->runCatching{library.writeSource(cw.puzzleId){out->loaded.compress(Bitmap.CompressFormat.PNG,95,out)}}}
+05006                 }.getOrNull()
+05007                 bitmap=loadInternet(directUrl)
+05008                 if(bitmap==null && threadUrl.isNotBlank()) {
+05009                     val recovered=WeeklyCrosswordsFetcher.recoverAttachment(threadUrl,directUrl)
+05010                     if(recovered!=null) {
+05011                         val directIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(directUrl).ifBlank{directUrl.substringBefore('?')}
+05012                         val recoveredIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(recovered.url).ifBlank{recovered.url.substringBefore('?')}
+05013                         val regionKeys=Direction.values().flatMap { d ->
+05014                             cw.startNumbers(d).map { ClueEditorModel.Key(it,d) }
+05015                         }
+05016                         val geometryBoundToSource=clueRegionStore.canonicalRegionRevision(cw.puzzleId)>0L ||
+05017                             regionKeys.any { clueRegionStore.getVerified(cw.puzzleId,it)!=null ||
+05018                                 clueRegionStore.getVerifiedRows(cw.puzzleId,it).isNotEmpty() }
+05019                         val differentAttachment=directIdentity.isNotBlank()&&recoveredIdentity.isNotBlank()&&directIdentity!=recoveredIdentity
+05020                         if(geometryBoundToSource&&differentAttachment){
+05021                             DebugLog.w("CLUE_REGION","source recovery rejected different attachment; verified clue coordinates require exact source")
+05022                         }else{
+05023                             bitmap=loadInternet(recovered.url)
+05024                             if(bitmap!=null && recovered.url!=directUrl) {
+05025                                 val issue=canonicalIndex.issueKey(cw.puzzleId)
+05026                                 if(issue!=null) canonicalIndex.bind(cw.puzzleId,issue,canonicalIndex.revision(cw.puzzleId),recovered.url,threadUrl)
+05027                                 else canonicalIndex.bindSource(cw.puzzleId,recovered.url,threadUrl)
+05028                             }
+05029                         }
+05030                     }
+05031                 }
+05032             }
+05033             if(backgroundDisplay)runOnUiThread {
+05034                 if(!isFinishing && !isDestroyed && board.crossword===cw){
+05035                     // Never cache an alternate Gallery companion as the canonical
+05036                     // editing source; its clue boxes use different coordinates.
+05037                     if(!galleryPublisher)source=bitmap
+05038                     done(bitmap)
+05039                 }
+05040             }else post(id) { busy(false); if (board.crossword === cw) { source = bitmap; done(bitmap) } }
+05041         }
+05042     }
+05043     private fun attachSourceImage() {
+05044         val cw = board.crossword ?: return
+05045         AlertDialog.Builder(this).setTitle("\u05e6\u05d9\u05e8\u05d5\u05e3 \u05ea\u05de\u05d5\u05e0\u05ea \u05de\u05e7\u05d5\u05e8")
+05046             .setMessage("\u05d1\u05d7\u05e8 \u05ea\u05de\u05d5\u05e0\u05d4 \u05e9\u05dc \u05d0\u05d5\u05ea\u05d5 \u05ea\u05e9\u05d1\u05e5 \u05d5\u05d0\u05d5\u05ea\u05d5 \u05d2\u05d9\u05dc\u05d9\u05d5\u05df. \u05d4\u05e8\u05e9\u05ea \u05d5\u05d4\u05d0\u05d5\u05ea\u05d9\u05d5\u05ea \u05dc\u05d0 \u05d9\u05e9\u05ea\u05e0\u05d5.")
+05047             .setPositiveButton("\u05d1\u05d7\u05e8") { _, _ -> attachPuzzleId = cw.puzzleId; sourcePicker.launch("image/*") }
+05048             .setNegativeButton("\u05d1\u05d9\u05d8\u05d5\u05dc", null).show()
+05049     }
+05050     private fun currentRegions(): PuzzleRegions = PuzzleRegions(
+05051         sourceCorners?.map { Vec2(it.x,it.y) }, hRegion?.map { Vec2(it.x,it.y) }, vRegion?.map { Vec2(it.x,it.y) })
+05052     private fun persistSource(original: Bitmap, cw: Crossword) {
+05053         val regions = currentRegions()
+05054         executor.execute { try {
+05055             library.writeSource(cw.puzzleId) { out -> check(original.compress(Bitmap.CompressFormat.PNG, 100, out)) }
+05056             library.setRegions(cw.puzzleId, regions)
+05057         } catch (_: Exception) { runOnUiThread {
+05058             if (!isDestroyed && board.crossword === cw) toast("\u05ea\u05de\u05d5\u05e0\u05ea \u05d4\u05de\u05e7\u05d5\u05e8 \u05dc\u05d0 \u05e0\u05e9\u05de\u05e8\u05d4. \u05d1\u05d3\u05d5\u05e7 \u05de\u05e7\u05d5\u05dd \u05e4\u05e0\u05d5\u05d9.")
+05059         } } }
+05060     }
+==== showSourceImage range 4318 4361
+04318             if (warningDetails.isNotBlank()) "\n\n$warningDetails" else ""
+04319         val scroll=ScrollView(this).apply { addView(textView(text)) }
+04320         lateinit var d:PanelDialog
+04321         d=PanelDialog(this,"\u05d1\u05d3\u05d9\u05e7\u05ea \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea",scroll,listOf("\u05d4\u05de\u05e9\u05da" to { d.dismiss() },"\u05e2\u05e8\u05d9\u05db\u05d4" to { d.dismiss(); editClues() },"\u05e1\u05d9\u05de\u05d5\u05df" to { d.dismiss(); rescanClues() }))
+04322         show(d)
+04323     }
+04324     private fun showSourceImage() {
+04325         val cw=board.crossword?:return
+04326         ScreenUi.hideKeyboard(board)
+04327         withSource(displayOnly=true) { bitmap ->
+04328             if(board.crossword!==cw)return@withSource
+04329             if(bitmap==null) {
+04330                 toast(if(isLocalStructuredSource(cw.puzzleId))
+04331                     PrintedStructuredSource.userFacingStatus(cw.puzzleId) else
+04332                     "תמונת המקור אינה שמורה לתשבץ הזה.")
+04333                 return@withSource
+04334             }
+04335             show(SourceImageDialog(this,bitmap))
+04336         }
+04337     }
+04338 
+04339     /**
+04340      * Return a clue-specific cached box without another Vision call.  Full-page OCR
+04341      * boxes are promoted only after the same grid/size validation used at import plus
+04342      * a direction-region check; no number-only geometric estimate is ever accepted.
+04343      */
+04344     private fun cachedCluePhysicalRows(cw:Crossword,bitmap:Bitmap,key:ClueEditorModel.Key):List<BoxF> {
+04345         // A user-corrected box must never fall back to the stale AI debug snapshot.
+04346         if(clueRegionStore.hasManualOverride(cw.puzzleId,key))return emptyList()
+04347         val persisted=clueRegionStore.getVerifiedRows(cw.puzzleId,key)
+04348         // Debug snapshots include failed/recovery hints. They are NEVER a source
+04349         // for automatically opening a clue, even if their rectangles look valid.
+04350         val normalized=persisted
+04351         return normalized.mapNotNull { row ->
+04352             row.takeIf { it.left.isFinite()&&it.top.isFinite()&&it.right.isFinite()&&it.bottom.isFinite()&&it.right>it.left&&it.bottom>it.top }
+04353                 ?.let { ClueRegionStore.toPixels(it,bitmap.width,bitmap.height) }
+04354         }
+04355     }
+04356 
+04357     /**
+04358      * Read-only compatibility for OCR crops first saved by 0.15.139, before the
+04359      * source-identity provenance marker existed. The stored rows MUST match the
+04360      * trusted OCR diagnostic snapshot on the identical source bitmap. This does
+04361      * not restore, replace, or publish any geometry; an explicit correction wins.
+==== admin picker range 229 266
+00229         )
+00230     }
+00231     private var activeDuelMode = false
+00232     private var duelVerifier: FirebaseSharing.DuelVerifier? = null
+00233     private var wasPuzzleComplete = false
+00234     private var pendingRoomInvite: String? = null
+00235     private val sourcePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> whenReady {
+00236         val cw = board.crossword
+00237         if (uri != null && cw != null && attachPuzzleId == cw.puzzleId) {
+00238             val id = ++generation; busy(true, "\u05d8\u05d5\u05e2\u05df \u05ea\u05de\u05d5\u05e0\u05ea \u05de\u05e7\u05d5\u05e8...")
+00239             executor.execute { try { val bitmap = ImageLoader.load(this, uri); post(id) {
+00240                 busy(false); source = bitmap; sourceCorners = null; hRegion = null; vRegion = null
+00241                 sourceViewportStore.clear(cw.puzzleId)
+00242                 sourceClueCropStore.clear(cw.puzzleId)
+00243                 getSharedPreferences("higi-source-display",MODE_PRIVATE).edit()
+00244                     .putBoolean("manual-${cw.puzzleId}",true).apply()
+00245                 persistSource(bitmap, cw); toast("\u05ea\u05de\u05d5\u05e0\u05ea \u05d4\u05de\u05e7\u05d5\u05e8 \u05e6\u05d5\u05e8\u05e4\u05d4. \u05d4\u05ea\u05e9\u05d1\u05e5 \u05dc\u05d0 \u05e9\u05d5\u05e0\u05d4.")
+00246             } } catch (e: Exception) { fail(id, e) } }
+00247         }
+00248     }
+00249     }
+00250     private val solutionsPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result -> whenReady {
+00251         if (result.resultCode == RESULT_OK && result.data != null) acceptReferences(result.data!!)
+00252         else pendingSolution = null
+00253     }
+00254     }
+00255     private var executor=Executors.newSingleThreadExecutor()
+00256     private var weeklyExecutor=Executors.newSingleThreadExecutor()
+00257     private var favoriteExecutor=Executors.newSingleThreadExecutor()
+00258     private lateinit var importSession: ImportSessionController
+00259     private var mainImportFuture: Future<*>? = null
+00260     private var favoriteImportFuture: Future<*>? = null
+00261     private var mainImportActive = false
+00262     private var explicitImportFlowPending = false
+00263     private var visibleFavoriteSeriesId: String? = null
+00264     private var favoriteImportRunning=false
+00265     private var favoriteRunToken=0
+00266     @Volatile private var backgroundImportTraceId:String=""
+==== admin picker range 296 333
+00296             board.crossword?.puzzleId?.let{pid->runCatching{library.load(pid)?.regions}.getOrNull()?.let(::loadSourceContext)}
+00297             if(settings.clueBelowMode==ClueBelowMode.SOURCE)loadClueSourceBelow()
+00298             DebugLog.i("ADMIN_SOURCE","active source cache invalidated after replacement")
+00299         }
+00300         return true
+00301     }
+00302     private val picker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if(uri!=null) { pendingImportedTitle=null; clearPendingCanonical(); prepareImage(uri) } }
+00303     private val recentPicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+00304         explicitImportFlowPending=false
+00305         if(BuildConfig.HIGI_DRY_BUILD && result.resultCode==RESULT_OK &&
+00306             result.data?.getBooleanExtra(RecentCrosswordsActivity.EXTRA_ADMIN_OCR_RETURN_TO_LIBRARY,false)==true){
+00307             // The saved-review launcher has finished; restore only this library
+00308             // context, never the normal weekly/import activity flow.
+00309             whenReady{if(!isFinishing && !isDestroyed && atHome)
+00310                 refreshLibrary{displayLibrary()}}
+00311             return@registerForActivityResult
+00312         }
+00313         if(result.resultCode==RESULT_OK) {
+00314             val data=result.data
+00315             if(handleSourceReplacementOnly(data))return@registerForActivityResult
+00316             val existingId=data?.getStringExtra(RecentCrosswordsActivity.EXTRA_EXISTING_PUZZLE_ID)
+00317             if(existingId!=null) whenReady { openPuzzle(existingId) }
+00318             else {
+00319                 captureCanonicalImport(data)
+00320                 val title=data?.getStringExtra(RecentCrosswordsActivity.EXTRA_PUZZLE_TITLE)
+00321                 val item=weeklyItemFrom(data)
+00322                 if(item!=null){beginMainImport("מוריד תמונה…",title.orEmpty());prepareWeeklyAuto(item,title)}
+00323                 else data?.getStringExtra(RecentCrosswordsActivity.EXTRA_IMAGE_PATH)?.let { path ->
+00324                     if(data.getBooleanExtra(RecentCrosswordsActivity.EXTRA_FORCE_REDECODE,false)){
+00325                         beginMainImport("טוען את תמונת המקור החדשה…",title.orEmpty())
+00326                         prepareImageAuto(File(path),title)
+00327                     } else prepareImage(File(path),title)
+00328                 }
+00329             }
+00330         }
+00331     }
+00332     private val autoRecentPicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+00333         explicitImportFlowPending=false
+==== canonical watch image range 5546 5616
+05546                 }
+05547                 // Geometry coordinates belong to the exact source attachment used by
+05548                 // the canonical decode.  Older copies could be bound to another image
+05549                 // from the same thread, which made clue crops differ between phones.
+05550                 // If both bindings are known and point at different attachments, drop
+05551                 // only the stale local bitmap so the canonical source is fetched next.
+05552                 val previousSourceUrl=canonicalIndex.sourceImageUrl(record.id)
+05553                 val canonicalSourceUrl=cached.sourceImageUrl
+05554                 val previousIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(previousSourceUrl).ifBlank{previousSourceUrl.substringBefore('?')}
+05555                 val canonicalIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(canonicalSourceUrl).ifBlank{canonicalSourceUrl.substringBefore('?')}
+05556                 if(previousIdentity.isNotBlank()&&canonicalIdentity.isNotBlank()&&previousIdentity!=canonicalIdentity){
+05557                     if(runCatching{library.clearSource(record.id)}.getOrDefault(false)){
+05558                         sourceViewportStore.clear(record.id)
+05559                         sourceClueCropStore.clear(record.id)
+05560                         if(board.crossword?.puzzleId==record.id)source=null
+05561                         DebugLog.i("CLUE_REGION","discarded local source with non-canonical attachment identity")
+05562                     }
+05563                 }
+05564                 // Geometry has its own revision so unrelated answer/clue edits do not
+05565                 // erase a later manual local region.  An admin re-decode, however,
+05566                 // replaces the whole canonical geometry snapshot and therefore removes
+05567                 // stale boxes that were rejected by the new decode.
+05568                 if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA && cached.clueRegionsRevision>clueRegionStore.canonicalRegionRevision(record.id)){
+05569                     val regionCw=board.crossword?.takeIf{it.puzzleId==record.id}?:record.crossword
+05570                     val regionKeys=Direction.values().flatMap { d -> regionCw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
+05571                     val previousGeometryRevision=clueRegionStore.canonicalRegionRevision(record.id)
+05572                     clueRegionStore.replaceVerifiedGeometryFromCanonical(record.id,regionKeys,cached.trustedClueRegions(),cached.trustedClueRegionLines(),
+05573                         cached.clueRegionsRevision,cached.sourceImageUrl,cached.clueRegionEditRevisions.keys)
+05574                     val canonicalCorrections=cached.clueRegionEditRevisions.filterValues{it>previousGeometryRevision}.keys
+05575                     clueRegionStore.clearManualOverrides(record.id,canonicalCorrections)
+05576                     DebugLog.i("CLUE_REGION","canonical geometry applied revision=${cached.clueRegionsRevision} schema=${cached.clueRegionSchema} boxes=${cached.trustedClueRegions().size} rows=${cached.trustedClueRegionLines().size} unverified=${(cached.clueRegions.keys+cached.clueRegionLines.keys).toSet().size-(cached.trustedClueRegions().keys+cached.trustedClueRegionLines().keys).toSet().size}")
+05577                 }else if((cached.clueRegions.isNotEmpty()||cached.clueRegionLines.isNotEmpty()) && cached.clueRegionSchema!=CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+05578                     DebugLog.i("CLUE_REGION","canonical geometry ignored legacy schema=${cached.clueRegionSchema.ifBlank{"legacy"}} boxes=${cached.clueRegions.size} rows=${cached.clueRegionLines.size}")
+05579                 }
+05580                 if(cached.revision<=localRevision && localRevision>0L){
+05581                     canonicalIndex.bind(record.id,issue,localRevision,cached.sourceImageUrl,cached.sourceThreadUrl)
+05582                     // An unchanged canonical revision may still provide the first
+05583                     // usable source URL for a crop-less local crossword.
+05584                     enqueueMissingCanonicalCrops(record)
+05585                     return@sync
+05586                 }
+05587                 val cw=board.crossword?:return@sync
+05588                 if(cw.puzzleId!=record.id)return@sync
+05589                 // Canonical revisions may correct clue wording and/or verified answers.
+05590                 // User letters/progress are never overwritten.
+05591                 val before=canonicalClueMap(cw)
+05592                 val beforeAnswers=reference?.answers.orEmpty().associate {
+05593                     ClueEditorModel.Key(it.number,it.direction) to CrosswordSession.normalize(it.answer)
+05594                 }
+05595                 ClueEditorModel.apply(cw,cached.clues)
+05596                 val changed=cached.clues.keys.filter { key -> before[key] != cached.clues[key] }
+05597                 if(changed.isNotEmpty())DebugLog.i("CANONICAL","live-clue-applied issue=${DebugLog.compactId(issue)} revision=${cached.revision} changes=${changed.joinToString { "${it.number}:${it.direction}" }}")
+05598                 // The active record's reference is already in memory. Do not
+05599                 // synchronously read puzzle.bin (fsync/IO lock) while painting.
+05600                 val current=reference?.takeIf{it.puzzleId==cw.puzzleId&&it.gridSignature==AnswerChecking.signature(cw)}
+05601                 val currentExplanations=current?.answers.orEmpty().associate{
+05602                     ClueEditorModel.Key(it.number,it.direction) to it.explanation
+05603                 }
+05604                 // A canonical revision may contain an old imported/base answer set.  Never
+05605                 // replay that entire set over a newer local 14across import.  Fill only
+05606                 // missing base answers, then apply explicit shared answer corrections.
+05607                 val remoteChanges=if(current==null)cached.answers else cached.answerOverrides
+05608                 val changedAnswers=remoteChanges.keys.filter { key -> beforeAnswers[key] != remoteChanges[key] }
+05609                 var referenceForPersistence:ReferenceSet?=null
+05610                 if(cached.answers.isNotEmpty()){
+05611                     val merged=linkedMapOf<ClueEditorModel.Key,String>()
+05612                     current?.answers.orEmpty().forEach{merged[ClueEditorModel.Key(it.number,it.direction)]=CrosswordSession.normalize(it.answer)}
+05613                     if(current==null)cached.answers.forEach{(key,answer)->merged[key]=CrosswordSession.normalize(answer)}
+05614                     else cached.answers.forEach{(key,answer)->if(key !in merged)merged[key]=CrosswordSession.normalize(answer)}
+05615                     cached.answerOverrides.forEach{(key,answer)->merged[key]=CrosswordSession.normalize(answer)}
+05616                     answerOverrideStore.putAll(cw.puzzleId,cached.answerOverrides)
+==== image change range 284 315
+00284     private var vRegion:List<PointF>?=null
+00285     private var lastReview:ClueParser.Parsed?=null
+00286     private var saveErrorShown=false
+00287     private var activeDialog:android.app.Dialog?=null
+00288     // DRY administrator-only UI selection. No disk writes, network or hot-path work.
+00289     private var adminLibrarySeriesFilterId=AdminLibrarySeriesFilterV202.ALL
+00290     private fun handleSourceReplacementOnly(data:Intent?):Boolean {
+00291         if(data?.getBooleanExtra(RecentCrosswordsActivity.EXTRA_SOURCE_REPLACED_ONLY,false)!=true)return false
+00292         whenReady {
+00293             source?.takeIf{!it.isRecycled}?.recycle()
+00294             source=null;sourceCorners=null;hRegion=null;vRegion=null
+00295             board.crossword?.puzzleId?.let{ sourceClueCropStore.clear(it);sourceViewportStore.clear(it) }
+==== image change range 309 340
+00334         if(result.resultCode==RESULT_OK) {
+00335             val data=result.data
+00336             if(handleSourceReplacementOnly(data))return@registerForActivityResult
+00337             val existingId=data?.getStringExtra(RecentCrosswordsActivity.EXTRA_EXISTING_PUZZLE_ID)
+00338             if(existingId!=null) whenReady { openPuzzle(existingId) }
+00339             else {
+00340                 captureCanonicalImport(data)
+==== image change range 330 361
+00341                 val title=data?.getStringExtra(RecentCrosswordsActivity.EXTRA_PUZZLE_TITLE)
+00342                 val item=weeklyItemFrom(data)
+00343                 if(item!=null){beginMainImport("מוריד תמונה…",title.orEmpty());prepareWeeklyAuto(item,title)}
+00344                 else data?.getStringExtra(RecentCrosswordsActivity.EXTRA_IMAGE_PATH)?.let {
+00345                     beginMainImport("טוען תמונה…",title.orEmpty()); prepareImageAuto(File(it),title)
+00346                 }
+00347             }
+00348         }
+00349     }
+00350     private val catalogPicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+00351         if(result.resultCode!=RESULT_OK)return@registerForActivityResult
+00352         val data=result.data
+00353         val openSeries=data?.getStringExtra(AllCrosswordsActivity.EXTRA_OPEN_SERIES_ID).orEmpty()
+00354         val favoritesChanged=data?.getBooleanExtra(AllCrosswordsActivity.EXTRA_FAVORITES_CHANGED,false)==true
+00355         whenReady {
+00356             when {
+00357                 openSeries.isNotBlank() -> openLatestSeriesOrImport(openSeries)
+00358                 favoritesChanged -> startFavoriteAutoImportIfNeeded(force=true)
+00359             }
+00360         }
+00361     }
+======== SourceImageDialog.kt lines 50 ========
+==== ALL range 1 50
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.app.Dialog
+00004 import android.content.Context
+00005 import android.graphics.Bitmap
+00006 import android.view.Gravity
+00007 import android.view.View
+00008 import android.view.ViewGroup
+00009 import android.view.Window
+00010 import android.view.WindowManager
+00011 import android.widget.Button
+00012 import android.widget.LinearLayout
+00013 import android.widget.TextView
+00014 
+00015 /** Full original scan. Pinch/drag to inspect; swipe left or right to return to solving. */
+00016 class SourceImageDialog(context: Context, bitmap: Bitmap,
+00017                         verifiedFocus: BoxF? = null) : Dialog(context, R.style.Theme_HebrewCrossword) {
+00018     private val root = LinearLayout(context).apply {
+00019         orientation = LinearLayout.VERTICAL
+00020         layoutDirection = View.LAYOUT_DIRECTION_RTL
+00021         AppBackground.apply(this,AppBackground.Family.FOCUS)
+00022     }
+00023     private val image = CropOverlayView(context,bitmap,
+00024         BoxF(0f,0f,bitmap.width.toFloat(),bitmap.height.toFloat()),
+00025         verifiedFocus).apply {
+00026         panOnly = true
+00027         showSelection = false
+00028         onHorizontalSwipe = { dismiss() }
+00029     }
+00030     init {
+00031         requestWindowFeature(Window.FEATURE_NO_TITLE)
+00032         root.addView(TextView(context).apply {
+00033             text = if(verifiedFocus!=null) "תמונת ההגדרה במקור • הגדל או הזז לפי הצורך"
+00034                    else "תמונת התשבץ המקורית"
+00035             textSize = 16f; gravity = Gravity.CENTER; setPadding(8,12,8,10)
+00036         })
+00037         root.addView(image, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
+00038         val bar=LinearLayout(context).apply { gravity=Gravity.CENTER }
+00039         bar.addView(Button(context).apply { text="כל התמונה"; isAllCaps=false; setOnClickListener { image.fitImage() } }, LinearLayout.LayoutParams(0,dp(50),1f))
+00040         bar.addView(Button(context).apply { text="סגור"; isAllCaps=false; setOnClickListener { dismiss() } }, LinearLayout.LayoutParams(0,dp(50),1f))
+00041         root.addView(bar)
+00042         setContentView(root)
+00043     }
+00044     override fun onStart() { super.onStart(); window?.let {
+00045         it.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
+00046         it.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+00047         ScreenUi.insets(it,root,true)
+00048     } }
+00049     private fun dp(n:Int)=(n*context.resources.displayMetrics.density+.5f).toInt()
+00050 }
+======== CanonicalPuzzleCloud.kt lines 1901 ========
+==== admin update range 1320 1525
+01320         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+01321         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+01322         editorName:String,
+01323         callback:(Result<CachedPuzzle>)->Unit = {}
+01324     ) = updateDecodedForAdminAtNode(issueKey, null, record, clueRegions, clueGeometries, editorName, callback)
+01325 
+01326     private fun updateDecodedForAdminAtNode(
+01327         issueKey:String,
+01328         discoveredNodeKey:String?,
+01329         record:SavedPuzzle,
+01330         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+01331         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry>,
+01332         editorName:String,
+01333         callback:(Result<CachedPuzzle>)->Unit,
+01334         recoverLocalReview:Boolean=false,
+01335         replacementUrl:String?=null,
+01336         expectedSourceUrl:String="",
+01337         previousSourceUrl:String?=null
+01338     ){
+01339         if(issueKey.isBlank()||!isAdminPublishableRecord(record)){
+01340             callback(Result.failure(IllegalArgumentException("לא ניתן לעדכן קנוני בלי רשת והגדרות מזוהות")));return
+01341         }
+01342         val cw=record.crossword
+01343         val newSignature=AnswerChecking.signature(cw)
+01344         val newBlocked=buildString(cw.rows*cw.cols){for(r in 0 until cw.rows)for(c in 0 until cw.cols)append(if(cw.cell(r,c).blocked)'#' else '.')}
+01345         val newClues=linkedMapOf<String,String>()
+01346         cw.clues.forEach{clue->newClues[SharingCodec.key(clue.number,clue.direction)]=canonicalText(clue.text)}
+01347         val newRegions=linkedMapOf<String,String>()
+01348         val trustworthy=clueGeometries.filterValues(ClueGeometryEvidencePolicy::canPublish)
+01349         clueRegions.forEach{(key,box)->
+01350             if(key !in trustworthy)return@forEach
+01351             val left=box.left.coerceIn(0f,1f);val top=box.top.coerceIn(0f,1f)
+01352             val right=box.right.coerceIn(0f,1f);val bottom=box.bottom.coerceIn(0f,1f)
+01353             if(right-left>=.01f&&bottom-top>=.006f)newRegions[SharingCodec.key(key.number,key.direction)]="$left,$top,$right,$bottom"
+01354         }
+01355         val newLines=linkedMapOf<String,String>()
+01356         trustworthy.forEach { (key,geometry) ->
+01357             val encoded=encodeLines(geometry.lines)
+01358             if(encoded.isNotBlank())newLines[SharingCodec.key(key.number,key.direction)]=encoded
+01359         }
+01360         val newGeometryKeys=(newRegions.keys+newLines.keys).toSet()
+01361         val newEvidence=trustworthy.mapKeys{(key,_)->SharingCodec.key(key.number,key.direction)}
+01362             .mapValues{(_,geo)->geo.evidence.wire}
+01363         authenticated({uid,d->
+01364             val physicalNodeKey=CanonicalNodeRoute.resolve(issueKey,discoveredNodeKey)
+01365             val ref=d.getReference("canonicalPuzzles/$physicalNodeKey")
+01366 
+01367             // A Realtime Database transaction starts from the client's local cache.
+01368             // In administrator batch re-decode that exact child is often not cached yet,
+01369             // so the first doTransaction() can receive null even though fetchCompatible()
+01370             // just found the record on the server.  Prime the exact child first and keep
+01371             // its server value as a one-shot bootstrap for that initial cache-null call.
+01372             ref.get().addOnSuccessListener { preflight ->
+01373                 if(!preflight.exists()){
+01374                     DebugLog.w("CANONICAL","admin-refresh preflight node=${DebugLog.compactId(physicalNodeKey)} exists=false")
+01375                     callback(Result.failure(IllegalStateException("התשבץ עדיין לא קיים במאגר המשותף")))
+01376                     return@addOnSuccessListener
+01377                 }
+01378                 if(preflight.child("issueKey").value!=issueKey ||
+01379                     (preflight.child("schema").value as? Number)?.toInt()!=SCHEMA ||
+01380                     (preflight.child("parserSchema").value as? Number)?.toInt()!=PARSER_SCHEMA){
+01381                     callback(Result.failure(IllegalStateException("רשומת Canonical אינה תואמת לגרסה הנוכחית")))
+01382                     return@addOnSuccessListener
+01383                 }
+01384                 val prefetchedValue=preflight.value
+01385                 if(prefetchedValue==null){
+01386                     callback(Result.failure(IllegalStateException("לא ניתן לטעון את רשומת Canonical לעדכון")))
+01387                     return@addOnSuccessListener
+01388                 }
+01389                 DebugLog.i("CANONICAL","admin-refresh preflight node=${DebugLog.compactId(physicalNodeKey)} exists=true")
+01390 
+01391                 var rejectReason="התשבץ עדיין לא קיים במאגר המשותף"
+01392                 var invocation=0
+01393                 ref.runTransaction(object:Transaction.Handler{
+01394                     override fun doTransaction(data:MutableData):Transaction.Result{
+01395                         invocation++
+01396                         if(data.value==null){
+01397                             // Seed only the very first local-cache-null invocation. If the
+01398                             // server subsequently retries us with null, the record was really
+01399                             // deleted concurrently and must not be resurrected from the seed.
+01400                             when(CanonicalTransactionCachePolicy.action(invocation,prefetchedValue!=null)){
+01401                                 CanonicalTransactionCachePolicy.NullAction.BOOTSTRAP_PREFETCH->{
+01402                                     data.value=prefetchedValue
+01403                                     DebugLog.w("CANONICAL","admin-refresh tx-cache-null node=${DebugLog.compactId(physicalNodeKey)} bootstrap=preflight")
+01404                                 }
+01405                                 CanonicalTransactionCachePolicy.NullAction.ABORT_AS_DELETED->{
+01406                                     rejectReason="התשבץ נמחק מהמאגר המשותף במהלך העדכון"
+01407                                     return Transaction.abort()
+01408                                 }
+01409                             }
+01410                         }
+01411                         if(data.child("issueKey").value!=issueKey ||
+01412                             (data.child("schema").value as? Number)?.toInt()!=SCHEMA ||
+01413                             (data.child("parserSchema").value as? Number)?.toInt()!=PARSER_SCHEMA){rejectReason="רשומת Canonical אינה תואמת לגרסה הנוכחית";return Transaction.abort()}
+01414                         val oldRows=(data.child("rows").value as? Number)?.toInt()
+01415                         val oldCols=(data.child("cols").value as? Number)?.toInt()
+01416                         val oldBlocked=data.child("blocked").value as? String
+01417                         val oldSignature=data.child("gridSignature").value as? String
+01418                         val gridChanged=oldRows!=cw.rows||oldCols!=cw.cols||oldBlocked!=newBlocked||oldSignature!=newSignature
+01419                         val oldImageUrl=data.child("sourceImageUrl").value as? String ?: ""
+01420                         if(replacementUrl!=null && previousSourceUrl!=null &&
+01421                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01422                                 LocalOcrGeometryAuthority.sourceIdentity(previousSourceUrl)){
+01423                             rejectReason="תמונת הקנוני השתנתה במכשיר אחר; ההעלאה החדשה לא פורסמה"
+01424                             return Transaction.abort()
+01425                         }
+01426                         val sourceChanged=replacementUrl!=null &&
+01427                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01428                                 LocalOcrGeometryAuthority.sourceIdentity(replacementUrl)
+01429                         // Never publish source-relative crop geometry derived from
+01430                         // another image, even if both have an identical 11x11 grid.
+01431                         val unapprovedSourceMismatch=replacementUrl==null &&
+01432                             expectedSourceUrl.isNotBlank() && oldImageUrl.isNotBlank() &&
+01433                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01434                                 LocalOcrGeometryAuthority.sourceIdentity(expectedSourceUrl)
+01435                         if(unapprovedSourceMismatch){
+01436                             rejectReason="תמונת המקור שונה מהקנוני; נדרשת העלאה מאומתת לפני שמירת החיתוכים"
+01437                             return Transaction.abort()
+01438                         }
+01439                         // Preserve only deliberate human edits, never the earlier AI snapshot.
+01440                         // Older records without an origin marker are treated conservatively as manual.
+01441                         val previousTexts=data.child("clues").children.mapNotNull { child ->
+01442                             val key=child.key; val value=child.value as? String
+01443                             if(key!=null && value!=null)key to value else null
+01444                         }.toMap()
+01445                         val previousEditRevisions=data.child("clueEdits").children.mapNotNull { child ->
+01446                             val key=child.key; val stamp=(child.value as? Number)?.toLong()?:0L
+01447                             if(key!=null && stamp>0L)key to stamp else null
+01448                         }.toMap()
+01449                         val previousActors=data.child("clueEditActors").children.mapNotNull { child ->
+01450                             child.key?.let { it to child.value }
+01451                         }.toMap()
+01452                         val previousOrigins=previousEditRevisions.keys.associateWith { key ->
+01453                             data.child("clueEditActors").child(key).child("origin").value as? String ?: ""
+01454                         }
+01455                         val approvedBefore=data.child("clueApprovals").children.mapNotNull {child->
+01456                             child.key?.takeIf{ child.child("approved").value==true }
+01457                         }.toSet()
+01458                         val protectedText=AdminCanonicalMergeV172.manualTextKeys(
+01459                             previousEditRevisions,previousOrigins,previousTexts.keys)+approvedBefore
+01460                         val keepPriorForPartial=newClues.keys.filterTo(linkedSetOf()) { key ->
+01461                             GalleryRecoveryPolicy.isPlaceholder(newClues[key].orEmpty()) &&
+01462                                 previousTexts[key]?.let { !GalleryRecoveryPolicy.isPlaceholder(it) }==true
+01463                         }
+01464                         // A 0.15.172 local-review copy already contains edits made while
+01465                         // Firebase was blocked. Its previous unmarked local text is the
+01466                         // only durable copy of those repairs; never discard it on migration.
+01467                         val recoveredText=if(recoverLocalReview)newClues.keys.filterTo(linkedSetOf()) { key ->
+01468                             !GalleryRecoveryPolicy.isPlaceholder(newClues[key].orEmpty()) && key !in protectedText
+01469                         }else emptySet()
+01470                         val protectedGeometry=approvedBefore + data.child("clueRegionEdits").children.mapNotNull { it.key }.toSet() +
+01471                             data.child("clueRegionEvidence").children.mapNotNull { child ->
+01472                                 child.key?.takeIf { child.value==ClueGeometryEvidence.MANUAL.wire }
+01473                             }
+01474                         val protectedAnswers=data.child("answerEdits").children.any()
+01475                         if(gridChanged && (protectedText.isNotEmpty()||protectedGeometry.isNotEmpty()||protectedAnswers)){
+01476                             rejectReason="קיימים תיקונים ידניים ברשת הישנה; לא ניתן להעביר אותם בבטחה לרשת החדשה. הקנוני לא שונה."
+01477                             DebugLog.w("CANONICAL","admin-refresh grid-change guarded manualClues=${protectedText.size} manualRegions=${protectedGeometry.size} manualAnswers=$protectedAnswers")
+01478                             return Transaction.abort()
+01479                         }
+01480                         if(sourceChanged && protectedGeometry.isNotEmpty()){
+01481                             rejectReason="קיימים חיתוכים ידניים בתמונה הקודמת. יש לבדוק ולהתאים אותם לפני החלפת המקור הקנוני."
+01482                             return Transaction.abort()
+01483                         }
+01484                         if(sourceChanged){
+01485                             data.child("sourceImageUrl").value=replacementUrl
+01486                             DebugLog.i("CANONICAL_SOURCE_UPLOAD","transaction replacing source image at revision")
+01487                         }
+01488                         if(gridChanged){
+01489                             // A deliberate ADMIN correction supersedes an erroneous
+01490                             // canonical grid. Regular users cannot do this: Firebase
+01491                             // rules authorize structural replacement to admins only.
+01492                             data.child("rows").value=cw.rows
+01493                             data.child("cols").value=cw.cols
+01494                             data.child("blocked").value=newBlocked
+01495                             data.child("gridSignature").value=newSignature
+01496                             // Answers and corrections from the previous grid may point
+01497                             // to other words (even when clue numbers happen to match).
+01498                             data.child("answers").value=null
+01499                             data.child("answerEdits").value=null
+01500                             data.child("answerExplanations").value=null
+01501                             data.child("answerSourceTitle").value=""
+01502                             data.child("answerSourceUrl").value=""
+01503                         }
+01504                         // The merge is evaluated on each Firebase transaction invocation,
+01505                         // including retries after concurrent manual edits.
+01506                         val mergedClues=AdminCanonicalMergeV172.mergeTexts(
+01507                             newClues,previousTexts,protectedText+keepPriorForPartial)
+01508                         data.child("clues").value=mergedClues
+01509                         val previousRegions=linkedMapOf<String,String>()
+01510                         val previousLines=linkedMapOf<String,String>()
+01511                         val previousEvidence=linkedMapOf<String,String>()
+01512                         val previousGeometrySchema=data.child("clueRegionSchema").value as? String ?: ""
+01513                         if(previousGeometrySchema==CLUE_REGION_SCHEMA){
+01514                             data.child("clueRegions").children.forEach { child ->
+01515                                 val key=child.key;val value=child.value as? String
+01516                                 if(key!=null&&!value.isNullOrBlank())previousRegions[key]=value
+01517                             }
+01518                             data.child("clueRegionLines").children.forEach { child ->
+01519                                 val key=child.key;val value=child.value as? String
+01520                                 if(key!=null&&!value.isNullOrBlank())previousLines[key]=value
+01521                             }
+01522                             data.child("clueRegionEvidence").children.forEach { child ->
+01523                                 val key=child.key;val value=child.value as? String
+01524                                 if(key!=null && value!=null && ClueGeometryEvidence.trustedWire(value))previousEvidence[key]=value
+01525                             }
+==== CachedPuzzle range 11 126
+00011 /**
+00012  * Shared, decoded-puzzle cache.  A published issue contains only stable puzzle
+00013  * content (grid, clue text and verified answers); user progress and race state
+00014  * never live here.
+00015  */
+00016 class CanonicalPuzzleCloud(private val context: Context) {
+00017     data class CachedPuzzle(
+00018         val issueKey: String,
+00019         val title: String,
+00020         val sourceThreadUrl: String,
+00021         val sourceImageUrl: String,
+00022         val rows: Int,
+00023         val cols: Int,
+00024         val blocked: String,
+00025         val gridSignature: String,
+00026         val clues: Map<ClueEditorModel.Key, String>,
+00027         /** Monotonic per-clue edit stamp; other clues and answer updates do not conflict. */
+00028         val clueEditRevisions: Map<ClueEditorModel.Key, Long> = emptyMap(),
+00029         /** Exact author of each edited clue, independent of unrelated canonical edits. */
+00030         val clueEditActors: Map<ClueEditorModel.Key, SharedClueUpdateAlerts.Actor> = emptyMap(),
+00031         /** AI-provided clue text coordinates in normalized full-source coordinates. */
+00032         val clueRegions: Map<ClueEditorModel.Key, BoxF> = emptyMap(),
+00033         /** Verified physical printed rows, preserved even when a clue crosses columns. */
+00034         val clueRegionLines: Map<ClueEditorModel.Key, List<BoxF>> = emptyMap(),
+00035         /** Monotonic revision of the canonical geometry snapshot, independent of answer/clue edits. */
+00036         val clueRegionsRevision: Long = 0L,
+00037         /** Per-key canonical manual corrections; used to retire stale local overrides. */
+00038         val clueRegionEditRevisions: Map<ClueEditorModel.Key,Long> = emptyMap(),
+00039         val clueRegionSchema: String = "",
+00040         val answers: Map<ClueEditorModel.Key, String>,
+00041         /** Optional 14across explanation text for a verified/base answer. */
+00042         val answerExplanations: Map<ClueEditorModel.Key, String> = emptyMap(),
+00043         /** Explicit shared answer corrections, separate from the imported/base answer set. */
+00044         val answerOverrides: Map<ClueEditorModel.Key, String> = emptyMap(),
+00045         val answerSourceTitle: String,
+00046         val answerSourceUrl: String,
+00047         val revision: Long,
+00048         val parserSchema: Int,
+00049         val lastEditedBy: String = "",
+00050         val lastEditedByName: String = "",
+00051         /** Physical child key under canonicalPuzzles. Needed for historical records. */
+00052         val storageNodeKey: String = "",
+00053         /** New per-key proof; absent in old v2 snapshots and NEVER guessed from box size. */
+00054         val clueRegionEvidence: Map<ClueEditorModel.Key,String> = emptyMap(),
+00055         /** Explicit administrator confirmation of BOTH wording and source crop. */
+00056         val approvedClueKeys:Set<ClueEditorModel.Key> = emptySet()
+00057     ) {
+00058         fun trustedClueKeys():Set<ClueEditorModel.Key> =
+00059             (clueRegions.keys+clueRegionLines.keys).filterTo(linkedSetOf()){key->
+00060                 ClueGeometryEvidence.trustedWire(clueRegionEvidence[key].orEmpty()) ||
+00061                     key in clueRegionEditRevisions // manually edited before evidence existed
+00062             }
+00063         fun trustedClueRegions():Map<ClueEditorModel.Key,BoxF> = clueRegions.filterKeys{it in trustedClueKeys()}
+00064         fun trustedClueRegionLines():Map<ClueEditorModel.Key,List<BoxF>> = clueRegionLines.filterKeys{it in trustedClueKeys()}
+00065 
+00066         fun toCrossword(localPuzzleId: String = UUID.randomUUID().toString()): Crossword {
+00067             require(rows in 3..40 && cols in 3..40 && blocked.length == rows * cols)
+00068             val cells = MutableList(rows) { r -> MutableList(cols) { c ->
+00069                 val isBlocked = blocked[r * cols + c] == '#'
+00070                 Cell(blocked = isBlocked, letter = "")
+00071             } }
+00072             return Crossword(rows, cols, cells, puzzleId = localPuzzleId).also { cw ->
+00073                 cw.assignNumbers()
+00074                 Direction.values().forEach { direction ->
+00075                     cw.startNumbers(direction).sorted().forEach { number ->
+00076                         clues[ClueEditorModel.Key(number, direction)]?.takeIf { it.isNotBlank() }?.let { text ->
+00077                             cw.clues += Clue(number, direction, text.take(2000))
+00078                         }
+00079                     }
+00080                 }
+00081             }
+00082         }
+00083 
+00084         fun matchesSource(sourceThreadUrl: String, sourceImageUrl: String): Boolean {
+00085             val thread = WeeklyCrosswordsFetcher.conversationIdentity(sourceThreadUrl)
+00086             val storedThread = WeeklyCrosswordsFetcher.conversationIdentity(this.sourceThreadUrl)
+00087             val image = WeeklyCrosswordsFetcher.attachmentIdentity(sourceImageUrl)
+00088             val storedImage = WeeklyCrosswordsFetcher.attachmentIdentity(this.sourceImageUrl)
+00089             return thread.isNotBlank() && image.isNotBlank() && storedThread == thread && storedImage == image
+00090         }
+00091 
+00092         /** Verified solution/reference values tied to this exact canonical grid. */
+00093         fun toLocalReference(localPuzzleId: String): ReferenceSet? = answers.takeIf { it.isNotEmpty() }?.let { shared ->
+00094             ReferenceSet(
+00095                 localPuzzleId, gridSignature, answerSourceTitle, answerSourceUrl,
+00096                 shared.entries.sortedWith(compareBy({ it.key.direction.ordinal }, { it.key.number })).map { entry ->
+00097                     ReferenceAnswer(entry.key.number, entry.key.direction, entry.value,
+00098                         if(entry.key in answerOverrides) "" else answerExplanations[entry.key].orEmpty())
+00099                 }
+00100             )
+00101         }
+00102 
+00103         fun createLocalCopy(library: PuzzleLibrary, clueRegionStore:ClueRegionStore?=null): SavedPuzzle {
+00104             val cw = toCrossword()
+00105             require(AnswerChecking.signature(cw) == gridSignature) { "מטמון התשבץ אינו תואם לרשת" }
+00106             val record = library.create(CrosswordSession(cw), title)
+00107             if (clueRegionStore != null && clueRegionSchema == CLUE_REGION_SCHEMA) {
+00108                 val regionKeys=Direction.values().flatMap { d -> cw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
+00109                 if(clueRegionsRevision>0L) clueRegionStore.replaceVerifiedGeometryFromCanonical(record.id,regionKeys,trustedClueRegions(),trustedClueRegionLines(),clueRegionsRevision)
+00110                 else {
+00111                     if(trustedClueRegions().isNotEmpty())clueRegionStore.putVerifiedAll(record.id,trustedClueRegions())
+00112                     if(trustedClueRegionLines().isNotEmpty())clueRegionStore.putVerifiedRowsAll(record.id,trustedClueRegionLines())
+00113                 }
+00114             }
+00115             toLocalReference(record.id)?.let { library.saveReference(record.id, it) }
+00116             return library.load(record.id) ?: error("שמירת התשבץ מהענן נכשלה")
+00117         }
+00118     }
+00119 
+00120 
+00121     class WatchHandle internal constructor() {
+00122         @Volatile internal var closed = false
+00123         // Cancels work that was queued before close or superseded by a newer snapshot.
+00124         private var snapshotSequence = 0L
+00125         internal fun nextSnapshot(): Long = synchronized(this) { ++snapshotSequence }
+00126         internal fun isLatest(sequence:Long): Boolean = synchronized(this) {
+==== update clue region range 975 1085
+00975 
+00976     /**
+00977      * Save one clue's text and optional manually selected source rectangle in ONE
+00978      * canonical transaction.  A selection is never published by CropDialog alone.
+00979      * The same Firebase revision identifies text and region on other devices.
+00980      */
+00981     fun updateClueAndRegion(
+00982         issueKey: String,
+00983         key: ClueEditorModel.Key,
+00984         rawText: String,
+00985         normalizedRegion: BoxF?,
+00986         editorName: String,
+00987         discoveredNodeKey: String? = null,
+00988         expectedGridSignature: String? = null,
+00989         // Snapshot captured when the editor opened, NOT retrieved just before Save.
+00990         // A nullable revision means the initial canonical event had not arrived yet;
+00991         // the immutable displayed text must still match inside the transaction.
+00992         expectedOriginalText: String? = null,
+00993         expectedClueEditRevision: Long? = null,
+00994         expectedRegionEditRevision: Long? = null,
+00995         callback: (Result<ClueEditCommit>) -> Unit = {}
+00996     ) {
+00997         val text = canonicalText(rawText)
+00998         if(issueKey.isBlank() || text.isBlank()) {
+00999             callback(Result.failure(IllegalArgumentException("יש להזין טקסט הגדרה לפני שמירה"))); return
+01000         }
+01001         val box = normalizedRegion?.let { raw ->
+01002             ClueManualRegionPolicy.reason(raw)?.let { why ->
+01003                 callback(Result.failure(IllegalArgumentException(ClueManualRegionPolicy.message(why))))
+01004                 return
+01005             }
+01006             raw
+01007         }
+01008         val keyString=SharingCodec.key(key.number,key.direction)
+01009         authenticated({uid,d->
+01010             val physicalNodeKey=CanonicalNodeRoute.resolve(issueKey,discoveredNodeKey)
+01011             val ref=d.getReference("canonicalPuzzles/$physicalNodeKey")
+01012             // This server preflight prevents a first local transaction invocation from
+01013             // wrongly aborting when the Firebase disk cache has no canonical entry.
+01014             ref.get().addOnSuccessListener { preflight ->
+01015                 if(!preflight.exists() || preflight.child("issueKey").value!=issueKey){
+01016                     callback(Result.failure(IllegalStateException("עותק התשבץ הקנוני אינו זמין")))
+01017                     return@addOnSuccessListener
+01018                 }
+01019                 val prefetchedValue=preflight.value
+01020                 var invocation=0
+01021                 var abortReason="עדכון ההגדרה הקנונית לא הושלם"
+01022                 ref.runTransaction(object:Transaction.Handler {
+01023                     override fun doTransaction(data:MutableData):Transaction.Result {
+01024                         invocation++
+01025                         if(data.value==null){
+01026                             when(CanonicalTransactionCachePolicy.action(invocation,prefetchedValue!=null)){
+01027                                 CanonicalTransactionCachePolicy.NullAction.BOOTSTRAP_PREFETCH -> data.value=prefetchedValue
+01028                                 CanonicalTransactionCachePolicy.NullAction.ABORT_AS_DELETED -> return Transaction.abort()
+01029                             }
+01030                         }
+01031                         if(data.child("issueKey").value!=issueKey ||
+01032                             (data.child("schema").value as? Number)?.toInt()!=SCHEMA ||
+01033                             (data.child("parserSchema").value as? Number)?.toInt()!=PARSER_SCHEMA ||
+01034                             data.child("clues").child(keyString).value==null) return Transaction.abort()
+01035                         if(expectedGridSignature!=null && data.child("gridSignature").value!=expectedGridSignature)
+01036                             return Transaction.abort()
+01037                         // Firebase re-runs this handler against the server value if a
+01038                         // concurrent write wins. Compare this ONE clue, not the entire
+01039                         // puzzle revision (other clues may change independently).
+01040                         val onServer=canonicalText(data.child("clues").child(keyString).value as? String ?: "")
+01041                         val clueEditStamp=(data.child("clueEdits").child(keyString).value as? Number)?.toLong() ?: 0L
+01042                         val regionEditStamp=(data.child("clueRegionEdits").child(keyString).value as? Number)?.toLong() ?: 0L
+01043                         val conflict=(expectedOriginalText!=null && onServer!=canonicalText(expectedOriginalText)) ||
+01044                             (expectedClueEditRevision!=null && clueEditStamp!=expectedClueEditRevision) ||
+01045                             (expectedRegionEditRevision!=null && regionEditStamp!=expectedRegionEditRevision)
+01046                         if(conflict){
+01047                             abortReason="ההגדרה השתנתה ונשמרה במכשיר אחר בזמן שערכת אותה. השמירה נחסמה כדי לא לדרוס את התיקון. הטקסט שלך נשאר בחלון; העתק אותו לפני פתיחה מחדש."
+01048                             return Transaction.abort()
+01049                         }
+01050                         val next=((data.child("revision").value as? Number)?.toLong()?:0L)+1L
+01051                         data.child("clues").child(keyString).value=text
+01052                         data.child("clueEdits").child(keyString).value=next
+01053                         data.child("clueApprovals").child(keyString).value=null
+01054                         data.child("clueEditActors").child(keyString).value=mapOf(
+01055                             "by" to uid, "name" to editorName.trim().take(40), "revision" to next
+01056                         )
+01057                         if(box!=null){
+01058                             // Do not promote legacy layout coordinates to the current schema.
+01059                             if(data.child("clueRegionSchema").value!=CLUE_REGION_SCHEMA){
+01060                                 data.child("clueRegions").value=null
+01061                                 data.child("clueRegionLines").value=null
+01062                                 data.child("clueRegionEvidence").value=null
+01063                             }
+01064                             val encoded="${box.left},${box.top},${box.right},${box.bottom}"
+01065                             data.child("clueRegions").child(keyString).value=encoded
+01066                             // One exact manual rectangle replaces obsolete AI physical rows
+01067                             // on ALL devices (including copies with incomplete geometry).
+01068                             data.child("clueRegionLines").child(keyString).value=encoded
+01069                             data.child("clueRegionEvidence").child(keyString).value=ClueGeometryEvidence.MANUAL.wire
+01070                             data.child("clueRegionsRevision").value=next
+01071                             data.child("clueRegionEdits").child(keyString).value=next
+01072                             data.child("clueRegionSchema").value=CLUE_REGION_SCHEMA
+01073                         }
+01074                         data.child("revision").value=next
+01075                         data.child("updatedAt").value=System.currentTimeMillis()
+01076                         data.child("lastEditedBy").value=uid
+01077                         data.child("lastEditedByName").value=editorName.trim().take(40)
+01078                         return Transaction.success(data)
+01079                     }
+01080                     override fun onComplete(error:DatabaseError?,committed:Boolean,snapshot:DataSnapshot?){
+01081                         when {
+01082                             error!=null -> callback(Result.failure(error.toException()))
+01083                             !committed -> {
+01084                                 DebugLog.i("CANONICAL","single-clue-save aborted issue=${DebugLog.compactId(issueKey)} number=${key.number} dir=${key.direction} conflict=${abortReason.startsWith("ההגדרה השתנתה")}")
+01085                                 callback(Result.failure(IllegalStateException(abortReason)))
+==== refresh admin range 601 688
+00601 
+00602     /**
+00603      * One shared administrator canonical-refresh path for both single and batch
+00604      * re-decode. Resolve the compatible physical record once, then either update
+00605      * exactly that record or publish a new canonical when none exists.
+00606      */
+00607     fun refreshDecodedForAdmin(
+00608         sourceKey:String,
+00609         legacyIssueKey:String?,
+00610         sourceThreadUrl:String,
+00611         sourceImageUrl:String,
+00612         record:SavedPuzzle,
+00613         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+00614         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+00615         editorName:String,
+00616         callback:(Result<CachedPuzzle>)->Unit = {},
+00617         recoverLocalReview:Boolean = false,
+00618         allowSourceReplacement:Boolean = false,
+00619         previousSourceImageUrl:String = ""
+00620     ){
+00621         // A changed source image is never an implicit side effect of re-decoding.
+00622         // The only allowed replacement is an image uploaded by the admin to
+00623         // this app's versioned, content-addressed Firebase Storage namespace.
+00624         if(allowSourceReplacement && !CanonicalSourceImageStorage.isManagedUrl(sourceImageUrl)){
+00625             callback(Result.failure(SecurityException("תמונת המקור לא הועלתה לאחסון מאומת")))
+00626             return
+00627         }
+00628         if(BuildConfig.HIGI_DRY_BUILD){
+00629             callback(Result.failure(IllegalStateException("גרסת DRY אינה מפרסמת פענוחים למאגר הקנוני")))
+00630             return
+00631         }
+00632         if(sourceKey.isBlank()){
+00633             callback(Result.failure(IllegalArgumentException("לא נמצא מזהה Canonical לתשבץ")));return
+00634         }
+00635         if(!isAdminPublishableRecord(record)){
+00636             callback(Result.failure(IllegalArgumentException("אין רשת והגדרות מזוהות לשמירה קנונית")));return
+00637         }
+00638         // Do not let a non-admin invoke the partial-source publication path, even
+00639         // when Firebase would allow an ordinary FIRST canonical publication.
+00640         AdminAccess(context).loadRole { role ->
+00641             if(role==AdminAccess.Role.NONE){
+00642                 callback(Result.failure(SecurityException("פענוח מחדש קנוני למנהל בלבד")))
+00643                 return@loadRole
+00644             }
+00645         // Resolve the EXISTING record against the old image, not against the
+00646         // newly uploaded URL. Legacy physical aliases require this identity.
+00647         val lookupImage=if(allowSourceReplacement)previousSourceImageUrl else sourceImageUrl
+00648         fetchCompatible(sourceKey,legacyIssueKey,sourceThreadUrl,lookupImage){fetched->
+00649             if(fetched.isFailure){callback(Result.failure(fetched.exceptionOrNull()!!));return@fetchCompatible}
+00650             val existing=fetched.getOrNull()
+00651             if(existing==null){
+00652                 if(allowSourceReplacement){
+00653                     callback(Result.failure(IllegalStateException("לא נמצאה רשומת קנוני קיימת להחלפת התמונה. לא נוצר תשבץ נוסף")))
+00654                     return@fetchCompatible
+00655                 }
+00656                 publishIfAbsent(
+00657                     sourceKey,record,sourceThreadUrl,sourceImageUrl,editorName,
+00658                     clueRegions=clueRegions,clueGeometries=clueGeometries,
+00659                     adminPartialAllowed=true,recoveredLocalCopy=recoverLocalReview,callback=callback
+00660                 )
+00661             }else{
+00662                 // Automatic migration must not overwrite a newer same-issue
+00663                 // image with stale local source geometry. Explicit admin
+00664                 // re-decode remains allowed to select a different source.
+00665                 if(recoverLocalReview){
+00666                     val publishedImage=WeeklyCrosswordsFetcher.attachmentIdentity(existing.sourceImageUrl)
+00667                     val localImage=WeeklyCrosswordsFetcher.attachmentIdentity(sourceImageUrl)
+00668                     if(publishedImage.isNotBlank() && localImage.isNotBlank() && publishedImage!=localImage){
+00669                         callback(Result.failure(IllegalStateException("תמונת המקור הקנונית השתנתה; העותק המקומי נשמר ולא נדרס")))
+00670                         return@fetchCompatible
+00671                     }
+00672                 }
+00673                 DebugLog.i(
+00674                     "CANONICAL",
+00675                     "admin-refresh found issue=${DebugLog.compactId(existing.issueKey)} node=${DebugLog.compactId(existing.storageNodeKey)} physical-route=true"
+00676                 )
+00677                 updateDecodedForAdminAtNode(existing.issueKey,existing.storageNodeKey,record,
+00678                     clueRegions,clueGeometries,editorName,callback,recoverLocalReview,
+00679                     replacementUrl=sourceImageUrl.takeIf{allowSourceReplacement},
+00680                     expectedSourceUrl=sourceImageUrl,
+00681                     previousSourceUrl=previousSourceImageUrl.takeIf{allowSourceReplacement})
+00682             }
+00683         }
+00684         }
+00685     }
+00686 
+00687     /**
+00688      * User clue corrections are canonical. The transaction preserves the grid and
+======== CanonicalSourceImageStorage.kt lines 96 ========
+==== ALL range 1 96
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.content.Context
+00004 import android.graphics.Bitmap
+00005 import com.google.firebase.FirebaseApp
+00006 import com.google.firebase.auth.FirebaseAuth
+00007 import com.google.firebase.storage.FirebaseStorage
+00008 import com.google.firebase.storage.StorageMetadata
+00009 import java.io.ByteArrayOutputStream
+00010 import java.net.URI
+00011 import java.security.MessageDigest
+00012 
+00013 /**
+00014  * Admin-controlled source-image storage for canonical re-decodes.
+00015  * A crop must not be shared until the exact bitmap on which it was calculated is
+00016  * available to every client at the canonical source URL.
+00017  *
+00018  * Requires the separately reviewed Firebase Storage rules supplied with v0.15.176.
+00019  * The DRY variant never uploads or modifies any Firebase data.
+00020  */
+00021 object CanonicalSourceImageStorage {
+00022     data class Uploaded(val url:String,val sha256:String,val bytes:Int)
+00023     private const val ROOT="higi/canonical-sources/v1"
+00024     private const val MAX_BYTES=16*1024*1024
+00025 
+00026     fun isManagedUrl(url:String):Boolean = runCatching {
+00027         val parsed=URI(url.trim())
+00028         parsed.scheme=="https" && parsed.host=="firebasestorage.googleapis.com" &&
+00029             parsed.rawPath.orEmpty().contains("/o/higi%2Fcanonical-sources%2Fv1%2F") &&
+00030             parsed.rawQuery.orEmpty().contains("alt=media")
+00031     }.getOrDefault(false)
+00032 
+00033     fun upload(
+00034         context:Context,
+00035         issueKey:String,
+00036         bitmap:Bitmap,
+00037         callback:(Result<Uploaded>)->Unit
+00038     ) {
+00039         if(BuildConfig.HIGI_DRY_BUILD) {
+00040             callback(Result.failure(IllegalStateException("גרסת DRY אינה מעלה תמונות לענן")))
+00041             return
+00042         }
+00043         if(issueKey.isBlank() || bitmap.isRecycled || bitmap.width<100 || bitmap.height<100) {
+00044             callback(Result.failure(IllegalArgumentException("תמונת מקור או מזהה תשבץ אינם תקינים")))
+00045             return
+00046         }
+00047         // Compression is lossless: the canonical crop coordinates remain tied to
+00048         // these exact pixels. Do not transcode to JPEG or resize after OCR.
+00049         val bytes=runCatching { ByteArrayOutputStream().use { out ->
+00050             check(bitmap.compress(Bitmap.CompressFormat.PNG,100,out))
+00051             out.toByteArray()
+00052         } }.getOrElse { callback(Result.failure(it));return }
+00053         if(bytes.isEmpty() || bytes.size>MAX_BYTES) {
+00054             callback(Result.failure(IllegalArgumentException("תמונת המקור גדולה מדי לשמירה בענן (מגבלה: 16MB)")))
+00055             return
+00056         }
+00057         val imageHash=sha256(bytes)
+00058         val issueHash=sha256(issueKey.toByteArray(Charsets.UTF_8))
+00059         val path="$ROOT/$issueHash/$imageHash.png"
+00060         AdminAccess(context).loadRole { role ->
+00061             if(role==AdminAccess.Role.NONE) {
+00062                 callback(Result.failure(SecurityException("העלאת תמונה קנונית מותרת למנהל בלבד")))
+00063                 return@loadRole
+00064             }
+00065             val app=runCatching { FirebaseApp.getInstance() }.getOrElse {
+00066                 callback(Result.failure(it));return@loadRole
+00067             }
+00068             if(FirebaseAuth.getInstance(app).currentUser==null) {
+00069                 callback(Result.failure(SecurityException("לא נמצאה הזדהות Firebase")))
+00070                 return@loadRole
+00071             }
+00072             val storage=runCatching { FirebaseStorage.getInstance(app) }.getOrElse {
+00073                 callback(Result.failure(it));return@loadRole
+00074             }
+00075             val ref=storage.reference.child(path)
+00076             val metadata=StorageMetadata.Builder().setContentType("image/png").build()
+00077             ref.putBytes(bytes,metadata).addOnSuccessListener {
+00078                 ref.downloadUrl.addOnSuccessListener { uri ->
+00079                     val url=uri.toString()
+00080                     if(!isManagedUrl(url)) {
+00081                         callback(Result.failure(IllegalStateException("כתובת התמונה בענן אינה מזוהה")))
+00082                     }else {
+00083                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","success sha256=$imageHash bytes=${bytes.size} issue=${DebugLog.compactId(issueKey)}")
+00084                         callback(Result.success(Uploaded(url,imageHash,bytes.size)))
+00085                     }
+00086                 }.addOnFailureListener { callback(Result.failure(it)) }
+00087             }.addOnFailureListener { error ->
+00088                 DebugLog.w("CANONICAL_SOURCE_UPLOAD","failed ${error.javaClass.simpleName}: ${DebugLog.sanitize(error.message.orEmpty())}")
+00089                 callback(Result.failure(error))
+00090             }
+00091         }
+00092     }
+00093 
+00094     private fun sha256(bytes:ByteArray):String=MessageDigest.getInstance("SHA-256")
+00095         .digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+00096 }
+======== RecentCrosswordsActivity.kt lines 2284 ========
+==== source select range 168 298
+00168                                 ?: ImageDownload.fetch(url,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
+00169                             replaceLocalSourceCopies(raw,sourceFile,url,thread)
+00170                         }
+00171                         runOnUiThread {
+00172                             if(isDestroyed)return@runOnUiThread
+00173                             progress.visibility=View.INVISIBLE
+00174                             replacement.onFailure{DebugLog.e("ADMIN_SOURCE","site replacement local persist failed",it)}
+00175                             val effective=adminEffectiveItem(raw,url,thread)
+00176                             reloadModeration()
+00177                             val count=replacement.getOrDefault(0)
+00178                             setResult(Activity.RESULT_OK,Intent().putExtra(EXTRA_SOURCE_REPLACED_ONLY,true))
+00179                             toastAdmin(if(count>0)"תמונת המקור הוחלפה ונשמרה בתשבץ המקומי" else "תמונת המקור מהאתר עודכנה לכולם")
+00180                             askRedecodeAfterReplacement(raw,effective,null)
+00181                         }
+00182                     }
+00183                 }
+00184             }
+00185         }
+00186     }
+00187     private val adminSolutionsPicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+00188         val raw=pendingAdminItem; pendingAdminItem=null
+00189         if(result.resultCode==RESULT_OK&&raw!=null){
+00190             val answers=result.data?.getStringExtra(SolutionsActivity.EXTRA_ANSWERS).orEmpty()
+00191             val title=result.data?.getStringExtra(SolutionsActivity.EXTRA_TITLE).orEmpty()
+00192             val url=result.data?.getStringExtra(SolutionsActivity.EXTRA_URL).orEmpty()
+00193             moderation.setSolutionOverride(raw,title,url,answers){ok->runOnUiThread{
+00194                 if(ok)reloadModeration("הפתרונות הידניים נשמרו לתשבץ") else toastAdmin("שמירת הפתרונות נכשלה")
+00195             }}
+00196         }
+00197     }
+00198 
+00199     override fun onCreate(savedInstanceState:Bundle?) {
+00200         super.onCreate(savedInstanceState)
+00201         pendingAdminItem=restorePendingAdminItem(savedInstanceState)
+00202         selectedImportKey=savedInstanceState?.getString("selectedImportKey")
+00203         showingOlder=savedInstanceState?.getBoolean("showingOlder",false)==true
+00204         olderScannedDays=savedInstanceState?.getInt("olderScannedDays",0)?:0
+00205         showAllHistory=savedInstanceState?.getBoolean("showAllHistory",false)==true
+00206         // A saved-puzzle administrator action is never a weekly multi-select session,
+00207         // including after Activity recreation while a single puzzle is decoding.
+00208         if (savedAdminId.isBlank()) {
+00209             batchSelectMode=savedInstanceState?.getBoolean("weeklyBatchSelectMode",false)==true
+00210             selectedBatchKeys.addAll(savedInstanceState?.getStringArrayList("weeklyBatchSelected").orEmpty())
+00211         } else {
+00212             batchSelectMode=false
+00213             selectedBatchKeys.clear()
+00214         }
+00215         AppCheckSetup.initialize(this)
+00216         val root=LinearLayout(this).apply {
+00217             orientation=LinearLayout.VERTICAL; layoutDirection=View.LAYOUT_DIRECTION_RTL; setPadding(dp(8),dp(6),dp(8),0)
+00218             AppBackground.apply(this,AppBackground.Family.LIBRARY)
+00219         }
+00220         val bar=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; layoutDirection=View.LAYOUT_DIRECTION_LTR }
+00221         refresh=UiKit.button(this,"רענן",primary=true) {
+00222             refreshStructuredCatalog()
+00223             if(showingOlder)loadOlder() else loadWeek(deepRefresh=true)
+00224         }
+00225         val help=UiKit.button(this,"?") { HelpUi.showContext(this, HelpUi.Screen.WEEKLY) }.apply { contentDescription="עזרה"; textSize=20f }
+00226         // Help is deliberately anchored at the top-left on all screens.
+00227         bar.addView(help,LinearLayout.LayoutParams(dp(48),dp(48)).apply{marginEnd=dp(3)})
+00228         bar.addView(refresh,LinearLayout.LayoutParams(0,dp(48),1f).apply{marginStart=dp(3)})
+00229         root.addView(bar)
+00230         root.addView(TextView(this).apply { text=if(savedAdminId.isNotBlank())"ניהול תשבץ שמור" else "תשבץ חדש"; textSize=24f; gravity=Gravity.CENTER; setPadding(0,dp(8),0,dp(2)) })
+00231         searchField=EditText(this).apply {
+00232             hint="חפש תשבץ (מנהל: ישראל היום YYYYMMDD)"
+00233             setSingleLine(true);textSize=16f;layoutDirection=View.LAYOUT_DIRECTION_RTL
+00234             imeOptions=EditorInfo.IME_ACTION_SEARCH
+00235             setOnEditorActionListener { _,actionId,event ->
+00236                 if(actionId!=EditorInfo.IME_ACTION_SEARCH &&
+00237                     event?.keyCode!=android.view.KeyEvent.KEYCODE_ENTER)false
+00238                 else {
+00239                     val date=newPuzzleQuery.trim()
+00240                     if(Regex("20[0-9]{6}").matches(date)){
+00241                         findIsraelHayomArchiveDate(date)
+00242                         true
+00243                     } else false
+00244                 }
+00245             }
+00246             setPadding(dp(12),dp(4),dp(12),dp(4))
+00247             visibility=if(savedAdminId.isBlank())View.VISIBLE else View.GONE
+00248             addTextChangedListener(object:TextWatcher{
+00249                 override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+00250                 override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){
+00251                     newPuzzleQuery=s?.toString().orEmpty();searchHandler.removeCallbacks(searchRefresh);searchHandler.postDelayed(searchRefresh,170)
+00252                 }
+00253                 override fun afterTextChanged(s:Editable?){}
+00254             })
+00255         }
+00256         root.addView(searchField,LinearLayout.LayoutParams(-1,dp(54)).apply{bottomMargin=dp(4)})
+00257         modeRow=LinearLayout(this).apply {
+00258             layoutDirection=View.LAYOUT_DIRECTION_RTL;gravity=Gravity.CENTER;visibility=View.INVISIBLE
+00259             setPadding(dp(6),dp(4),dp(6),dp(4))
+00260         }
+00261         normalModeTab=UiKit.button(this,"רגיל"){
+00262             if(adminMode){
+00263                 if(!batchRunning)clearWeeklyBatchSelection()
+00264                 adminMode=false;updateAdminModeUi();refreshDisplayedItems()
+00265             }
+00266         }
+00267         adminModeTab=UiKit.button(this,"מנהל"){
+00268             if(!adminMode){adminMode=true;updateAdminModeUi();refreshDisplayedItems()}
+00269         }
+00270         modeRow.addView(normalModeTab,LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(3)})
+00271         modeRow.addView(adminModeTab,LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(3)})
+00272         root.addView(modeRow)
+00273         batchRow=LinearLayout(this).apply{
+00274             orientation=LinearLayout.HORIZONTAL;layoutDirection=View.LAYOUT_DIRECTION_RTL;visibility=View.GONE
+00275         }
+00276         batchSelectButton=UiKit.button(this,"בחר לפענוח מחדש"){
+00277             if(weeklyBatchUiAllowed() && !batchRunning){
+00278                 batchSelectMode=!batchSelectMode
+00279                 if(!batchSelectMode){selectedBatchKeys.clear();batchStatus.clear()}
+00280                 updateWeeklyBatchControls();rebuildUnifiedRows()
+00281             }
+00282         }
+00283         batchRunButton=UiKit.button(this,"פענח מחדש מסומנים (0)",primary=true){chooseWeeklyBatchMode()}.apply{
+00284             visibility=View.GONE;isEnabled=false
+00285             contentDescription="פענוח מחדש של מספר תשבצים מסומנים ברשימת השבוע"
+00286         }
+00287         batchRow.addView(batchRunButton,LinearLayout.LayoutParams(0,dp(48),1f).apply{marginEnd=dp(4)})
+00288         batchRow.addView(batchSelectButton,LinearLayout.LayoutParams(0,dp(48),1f).apply{marginStart=dp(4)})
+00289         root.addView(batchRow,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(52)).apply{
+00290             marginStart=dp(6);marginEnd=dp(6);bottomMargin=dp(4)
+00291         })
+00292         showAllCheck=CheckBox(this).apply {
+00293             text="הצג את כל התשבצים"
+00294             textSize=14f
+00295             gravity=Gravity.RIGHT or Gravity.CENTER_VERTICAL
+00296             layoutDirection=View.LAYOUT_DIRECTION_RTL
+00297             isChecked=showAllHistory
+00298             contentDescription="הצג גם תשבצים שכבר נוספו או נמחקו מהתשבצים שלי"
+==== source select range 1207 1337
+01207                 if(newSourceKey!=null){
+01208                     canonicalIndex.bind(record.id,newSourceKey,canonicalIndex.revision(record.id),imageUrl,threadUrl,canonicalIndex.parserSchema(record.id))
+01209                 } else {
+01210                     canonicalIndex.bindSource(record.id,imageUrl,threadUrl)
+01211                 }
+01212             }
+01213             DebugLog.i("ADMIN_SOURCE","issue=${DebugLog.compactId(issue)} localCopies=${matches.size} image=${if(imageUrl.startsWith("https://"))"remote" else "local"}")
+01214             matches.size
+01215         } finally { bitmap.recycle() }
+01216     }
+01217 
+01218     private fun askRedecodeAfterReplacement(raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item,localFile:File?){
+01219         AlertDialog.Builder(this)
+01220             .setTitle("תמונת המקור הוחלפה")
+01221             .setMessage("לפענח מחדש את ההגדרות לפי התמונה החדשה?")
+01222             .setNegativeButton("לא — רק החלף תמונה",null)
+01223             .setPositiveButton("כן — פענח מחדש"){_,_->
+01224                 chooseRedecodeMode { mode,options ->
+01225                     if(localFile!=null)forceRedecodeLocalImage(raw,localFile,mode,options) else forceRedecode(raw,effective,mode,options)
+01226                 }
+01227             }.show()
+01228     }
+01229 
+01230     private fun forceRedecodeLocalImage(raw:WeeklyCrosswordsFetcher.Item,file:File,mode:AiDecodeMode,options:AiRunOptions){
+01231         val sourceKey=CrosswordCatalog.sourceKey(raw)
+01232         DebugLog.i("IMPORT","forced-redecode=true source=local-admin-image issue=${DebugLog.compactId(sourceKey)}")
+01233         val out=Intent()
+01234             .putExtra(EXTRA_IMAGE_PATH,file.absolutePath)
+01235             .putExtra(EXTRA_PUZZLE_TITLE,WeeklyCrosswordsFetcher.displayTitle(raw))
+01236             .putExtra(EXTRA_ISSUE_KEY,sourceKey)
+01237             // The improved bitmap remains local, but the canonical keeps the public
+01238             // source URL so every device resolves the same logical crossword.
+01239             .putExtra(EXTRA_SOURCE_IMAGE_URL,raw.imageUrl.takeIf{it.startsWith("https://")}.orEmpty())
+01240             .putExtra(EXTRA_SOURCE_THREAD_URL,raw.threadUrl)
+01241             .putExtra(EXTRA_FORCE_REDECODE,true)
+01242             .putExtra(EXTRA_AI_DECODE_MODE,mode.wireValue)
+01243         putAiOptions(out,options)
+01244         setResult(Activity.RESULT_OK,out)
+01245         finish()
+01246     }
+01247 
+01248     private fun clearLocalPhoneOverride(raw:WeeklyCrosswordsFetcher.Item){
+01249         val key=WeeklyCrosswordModeration.overrideKey(raw)
+01250         localOverridePrefs.getString(key,null)?.let{runCatching{File(it).delete()}}
+01251         localOverridePrefs.edit().remove(key).apply()
+01252     }
+01253 
+01254     private fun restoreWithdrawn(raw:WeeklyCrosswordsFetcher.Item){
+01255         val hash=withdrawnHash(raw)?:run{toastAdmin("לא נמצא מזהה מחיקה לתשבץ");return}
+01256         val clearFailure=moderationState.decodeFailures.containsKey(hash)
+01257         AlertDialog.Builder(this)
+01258             .setTitle("שחזר לכולם")
+01259             .setMessage("להחזיר את התשבץ לרשימת התשבצים הזמינים לכל המשתמשים?")
+01260             .setNegativeButton("ביטול",null)
+01261             .setPositiveButton("שחזר לכולם"){_,_->
+01262                 moderation.restoreByHash(hash,clearFailure){ok->runOnUiThread{
+01263                     if(isDestroyed)return@runOnUiThread
+01264                     if(ok)reloadModeration("התשבץ שוחזר לכולם") else toastAdmin("השחזור נכשל")
+01265                 }}
+01266             }.show()
+01267     }
+01268 
+01269     private fun showAdminMenu(anchor:View,raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item){
+01270         if(!moderationState.admin||!adminMode)return
+01271         if(isAdminWithdrawn(raw)){
+01272             PopupMenu(this,anchor).apply{
+01273                 menu.add(0,100,0,"שחזר לכולם")
+01274                 menu.add(0,6,1,"הצג תמונת פענוח")
+01275                 menu.add(0,7,2,"בדיקת AI: מודלים / קריאה נוכחית-חדשה")
+01276                 menu.add(0,8,3,"ניסוי: תמלול הגדרות בלבד (Gemini)")
+01277                 menu.add(0,9,4,"יצירת חיתוכי OCR מחדש (בדיקת מנהל)")
+01278                 setOnMenuItemClickListener{m->
+01279                     when(m.itemId){
+01280                         100->restoreWithdrawn(raw)
+01281                         6->openClueRegionInspector(raw,effective)
+01282                         7->confirmAdminAiPromptDiagnostic(raw,effective)
+01283                         8->confirmAdminVerbatimTranscription(raw,effective)
+01284                     9->openAdminOcrRecrop(raw,effective)
+01285                     }
+01286                     true
+01287                 }
+01288                 show()
+01289             }
+01290             return
+01291         }
+01292         PopupMenu(this,anchor).apply{
+01293             AdminPuzzleMenu.actions.forEachIndexed{index,action->menu.add(0,action.id,index,action.title)}
+01294             setOnMenuItemClickListener{m->runAdminMenuAction(m.itemId,raw,effective);true}
+01295             show()
+01296         }
+01297     }
+01298 
+01299     private fun runAdminMenuAction(
+01300         actionId:Int, raw:WeeklyCrosswordsFetcher.Item, effective:WeeklyCrosswordsFetcher.Item
+01301     ){
+01302         if(!moderationState.admin||!adminMode||!AdminPuzzleMenu.has(actionId))return
+01303         when(actionId){
+01304                     1->{
+01305                         val sourceKey=CrosswordCatalog.sourceKey(raw)
+01306                         if(sourceKey==null)toastAdmin("לא נמצא מזהה לתשבץ") else AlertDialog.Builder(this@RecentCrosswordsActivity)
+01307                             .setTitle("הסרת תשבץ")
+01308                             .setMessage("להסיר את התשבץ מרשימת השבוע? משתמשים אחרים לא יוכלו לייבא אותו יותר.")
+01309                             .setNegativeButton("ביטול",null).setPositiveButton("הסר"){_,_->
+01310                                 moderation.withdraw(raw){ok->runOnUiThread{
+01311                                     if(ok){moderationState=moderationState.copy(withdrawn=moderationState.withdrawn+WeeklyCrosswordModeration.key(sourceKey));refreshDisplayedItems();toastAdmin("התשבץ הוסר מהרשימה לכולם")}
+01312                                     else toastAdmin("ההסרה נכשלה. בדוק הרשאת מנהל ב-Firebase.")
+01313                                 }}
+01314                             }.show()
+01315                     }
+01316                     2->{pendingAdminItem=raw;adminPhoneImagePicker.launch("image/*")}
+01317                     3->{
+01318                         pendingAdminItem=raw
+01319                         runCatching {
+01320                             adminSiteImagePicker.launch(Intent(this@RecentCrosswordsActivity,ManualGroupsActivity::class.java).apply{
+01321                                 putExtra(ManualGroupsActivity.EXTRA_START_URL,effective.threadUrl.ifBlank{raw.threadUrl})
+01322                             })
+01323                         }.onFailure{pendingAdminItem=null;toastAdmin("לא ניתן לפתוח את בוחר תמונת האתר: ${it.message.orEmpty()}")}
+01324                     }
+01325                     4->{
+01326                         pendingAdminItem=raw
+01327                         val o=moderation.solutionOverride(raw,moderationState)
+01328                         adminSolutionsPicker.launch(Intent(this@RecentCrosswordsActivity,SolutionsActivity::class.java).apply{
+01329                             o?.solutionUrl?.takeIf{it.isNotBlank()}?.let{putExtra(SolutionsActivity.EXTRA_URL,it)}
+01330                         })
+01331                     }
+01332                     5->chooseRedecodeMode { mode,options -> forceRedecode(raw,effective,mode,options) }
+01333                     6->openClueRegionInspector(raw,effective)
+01334                     7->confirmAdminAiPromptDiagnostic(raw,effective)
+01335                     8->confirmAdminVerbatimTranscription(raw,effective)
+01336                     9->openAdminOcrRecrop(raw,effective)
+01337         }
+==== image action range 1293 1398
+01338     }
+01339 
+01340     /** Execute an administrator action against the EXACT UUID selected in "התשבצים שלי".
+01341      * A puzzle need not be present in the rolling weekly cache.  Destructive
+01342      * issue-wide actions are blocked unless its original Canonical source can be
+01343      * matched without guessing; local inspection and diagnostics still work.
+01344      */
+01345     private fun resolveSavedAdminTarget():SavedAdminTarget?{
+01346         if(!PuzzleLibrary.validId(savedAdminId))return null
+01347         val record=library.load(savedAdminId)?:return null
+01348         val entry=PuzzleLibrary.Entry(savedAdminId,record)
+01349         val storedKey=canonicalIndex.issueKey(savedAdminId)
+01350         val thread=canonicalIndex.sourceThreadUrl(savedAdminId)
+01351         val image=canonicalIndex.sourceImageUrl(savedAdminId)
+01352         val date=WeeklyCrosswordsFetcher.titleDateMillis(record.title)?:0L
+01353         val cached=storedKey?.let{key->cache.load(365).items.firstOrNull{CrosswordCatalog.sourceKey(it)==key}}
+01354         val raw=cached?:WeeklyCrosswordsFetcher.Item(record.title,date,thread,image)
+01355         val verified=storedKey!=null && CrosswordCatalog.sourceKey(raw)==storedKey &&
+01356             raw.dateMillis>0 && raw.imageUrl.startsWith("https://") && raw.threadUrl.startsWith("https://")
+01357         val localSource=library.sourceFiles(savedAdminId).firstOrNull{it.isFile&&it.length()>0L}
+01358         val localUri=localSource?.let{"file://${it.absolutePath}"}.orEmpty()
+01359         val effective=if(localUri.isNotBlank())raw.copy(
+01360             imageUrl=localUri,
+01361             attachmentLabel="תמונת המקור השמורה",
+01362             candidateImageUrls=listOf(localUri),
+01363             candidateLabels=listOf("תמונת המקור השמורה"),
+01364             candidateScores=listOf(1000)
+01365         ) else raw
+01366         return SavedAdminTarget(entry,record,raw,effective,verified,storedKey)
+01367     }
+01368 
+01369     private fun executeSavedAdminAction(){
+01370         if(!moderationState.admin || !adminMode || !AdminPuzzleMenu.has(savedAdminAction)){
+01371             toastAdmin("אין הרשאה לפעולה זו");finish();return
+01372         }
+01373         val target=resolveSavedAdminTarget()
+01374         if(target==null){toastAdmin("התשבץ השמור אינו זמין");finish();return}
+01375         activeSavedTarget=target
+01376         message.text="ניהול: ${target.record.title.take(110)}"
+01377         DebugLog.i("ADMIN_LIBRARY_ACTION","selected puzzle=${DebugLog.compactId(target.entry.id)} action=$savedAdminAction " +
+01378             "verifiedRemote=${target.remoteVerified} sourcePresent=${target.effective.imageUrl.isNotBlank()}")
+01379         when(savedAdminAction){
+01380             1,2,3,4->{
+01381                 if(!target.remoteVerified){
+01382                     AlertDialog.Builder(this)
+01383                         .setTitle("חסרים נתוני מקור מאומתים")
+01384                         .setMessage("התשבץ השמור אינו מקושר למקור השבועי המקורי באופן מאומת. " +
+01385                             "לא ניתן לבצע פעולה שמשנה תשבצים של משתמשים אחרים בלי לזהות במדויק את הרשומה. " +
+01386                             "ניתן להשתמש בפענוח מחדש, בבדיקת תמונת הפענוח ובניסויי AI מקומיים.")
+01387                         .setPositiveButton("סגור",null).show()
+01388                 }else runAdminMenuAction(savedAdminAction,target.raw,target.raw)
+01389             }
+01390             5->chooseRedecodeMode{mode,options->runSavedAdminRedecode(target.entry,mode,options)}
+01391             6->openClueRegionInspector(target.raw,target.effective)
+01392             9->openAdminOcrRecrop(target.raw,target.effective)
+01393             7,8->{
+01394                 if(target.effective.imageUrl.isBlank()){
+01395                     toastAdmin("לא נמצאה תמונת מקור לתשבץ הזה")
+01396                 }else if(savedAdminAction==7){
+01397                     confirmAdminAiPromptDiagnostic(target.raw,target.effective)
+01398                 }else confirmAdminVerbatimTranscription(target.raw,target.effective)
+======== PuzzleLibrary.kt lines 344 ========
+==== source files range 212 282
+00212         if(clueChanges.isNotEmpty() || mergedReference!=existing)
+00213             writeRecord(old.copy(session=old.session,reference=mergedReference))
+00214         true
+00215     }
+00216 
+00217     /** Returns only this puzzle's private original. Never fall back to another ID. */
+00218     fun sourceFiles(id: String): List<File> = synchronized(LOCK) {
+00219         if (load(id) == null) emptyList() else listOf(File(directory(id), "source.png"), File(directory(id), "source.png.bak")).filter { it.isFile && it.length() > 0 }
+00220     }
+00221     /** Remove only the cached source bitmap; puzzle/session/reference data stay intact. */
+00222     fun clearSource(id:String):Boolean = synchronized(LOCK) {
+00223         if(load(id)==null)return@synchronized false
+00224         listOf(File(directory(id),"source.png"),File(directory(id),"source.png.bak")).fold(true){ok,file->
+00225             ok && (!file.exists() || file.delete())
+00226         }
+00227     }
+00228     /** Compression happens outside the repository lock so typing isn't blocked. */
+00229     fun writeSource(id: String, writer: (OutputStream) -> Unit) {
+00230         synchronized(LOCK) { required(id) }
+00231         val pending = File(root, ".source-$id-${UUID.randomUUID()}.pending")
+00232         try {
+00233             FileOutputStream(pending).use { out -> writer(out); out.flush(); out.fd.sync() }
+00234             require(pending.length() in 1..64_000_000L) { "Invalid source image size" }
+00235             synchronized(LOCK) {
+00236                 required(id) // deletion while compressing must NOT resurrect a puzzle
+00237                 commitPending(File(directory(id), "source.png"), pending, true)
+00238             }
+00239         } finally { pending.delete() }
+00240     }
+00241     /** A *separate* read-only print companion. The publisher's original
+00242      * source.png (and any manual attachment) is never replaced.
+00243      */
+00244     fun printedCompanionFiles(id:String):List<File> = synchronized(LOCK) {
+00245         if(load(id)==null)emptyList() else listOf(
+00246             File(directory(id),"printed-source.png"),
+00247             File(directory(id),"printed-source.png.bak")
+00248         ).filter{it.isFile && it.length()>0}
+00249     }
+00250     fun writePrintedCompanionIfAbsent(id:String,writer:(OutputStream)->Unit):Boolean {
+00251         synchronized(LOCK){
+00252             required(id)
+00253             if(printedCompanionFiles(id).isNotEmpty())return false
+00254         }
+00255         val pending=File(root,".source-$id-${UUID.randomUUID()}.pending")
+00256         try{
+00257             FileOutputStream(pending).use{out->writer(out);out.flush();out.fd.sync()}
+00258             require(pending.length() in 1..64_000_000L){"Invalid source image size"}
+00259             return synchronized(LOCK){
+00260                 required(id)
+00261                 if(printedCompanionFiles(id).isNotEmpty())false
+00262                 else{
+00263                     commitPending(File(directory(id),"printed-source.png"),pending,true)
+00264                     true
+00265                 }
+00266             }
+00267         }finally{pending.delete()}
+00268     }
+00269 
+00270     fun delete(id: String): Deletion = synchronized(LOCK) {
+00271         val dir = directory(id)
+00272         check(dir.exists() || deleted(id)) { "No such puzzle" }
+00273         // Retained tiny ID-only marker: not a copy of the deleted puzzle.
+00274         if (!deleted(id)) atomicBytes(tombstone(id), "deleted".toByteArray(), false)
+00275         Deletion(!dir.exists() || dir.deleteRecursively())
+00276     }
+00277     fun cleanupDeleted() = synchronized(LOCK) {
+00278         root.listFiles().orEmpty().filter { it.isDirectory && validId(it.name) && deleted(it.name) }.forEach { it.deleteRecursively() }
+00279         // Pending source files from an INTERRUPTED previous process have no visible
+00280         // record. Do not delete fresh pending writes owned by a recreated Activity.
+00281         root.listFiles().orEmpty().filter { it.name.startsWith(".source-") && it.name.endsWith(".pending") && now()-it.lastModified()>86_400_000L }.forEach { it.delete() }
+00282     }
+==== source files range 216 286
+00283 
+00284     fun migrationFinished(): Boolean = synchronized(LOCK) { File(root, "legacy-v1.done").isFile }
+00285     fun migratedId(): String? = synchronized(LOCK) {
+00286         runCatching { File(root, "legacy-v1.done").readText().trim().takeIf(::validId) }.getOrNull()
+==== source files range 223 293
+00287     }
+00288     fun finishEmptyMigration() = synchronized(LOCK) { if (!migrationFinished()) atomicBytes(File(root,"legacy-v1.done"), "none".toByteArray(), false) }
+00289     /**
+00290      * Copy before marking done. Idempotent across interruption after record/image
+00291      * creation; will not overwrite newer library edits or restore deleted entries.
+00292      */
+00293     fun importLegacy(session: CrosswordSession, title: String, regions: PuzzleRegions,
+== MISSING CanonicalPuzzleIndex.kt
+======== ImageDownload.kt lines 44 ========
+==== ALL range 1 44
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.graphics.BitmapFactory
+00004 import android.webkit.CookieManager
+00005 import java.io.File
+00006 import java.net.HttpURLConnection
+00007 import java.net.URL
+00008 
+00009 /** HTTPS only, bounded redirects/bytes/time; cookies are looked up per redirect host. */
+00010 object ImageDownload {
+00011     fun fetch(url:String,agent:String?,cache:File,onResolved:((String)->Unit)?=null):File {
+00012         var current=URL(url)
+00013         val file=File.createTempFile("crossword_", ".image", cache)
+00014         try {
+00015             for(attempt in 0..5) {
+00016                 require(current.protocol=="https" && current.host.isNotBlank()) { "Only HTTPS image links are supported" }
+00017                 val conn=current.openConnection() as HttpURLConnection
+00018                 conn.connectTimeout=15000; conn.readTimeout=30000; conn.instanceFollowRedirects=false
+00019                 agent?.let { conn.setRequestProperty("User-Agent",it) }
+00020                 CookieManager.getInstance().getCookie(current.toString())?.let { conn.setRequestProperty("Cookie",it) }
+00021                 try {
+00022                     val code=conn.responseCode
+00023                     if(code in listOf(301,302,303,307,308)) {
+00024                         val next=conn.getHeaderField("Location")?:error("Image redirect has no destination")
+00025                         current=URL(current,next); continue
+00026                     }
+00027                     require(code in 200..299) { "Image download HTTP $code" }
+00028                     require(conn.contentLengthLong<=32L*1024*1024) { "Image exceeds 32 MB" }
+00029                     conn.inputStream.use { input -> file.outputStream().use { output ->
+00030                         val buffer=ByteArray(32768); var total=0L
+00031                         while(true) { if(Thread.currentThread().isInterrupted)throw InterruptedException(); val n=input.read(buffer); if(n<0)break
+00032                             total+=n; require(total<=32L*1024*1024) { "Image exceeds 32 MB" }; output.write(buffer,0,n) }
+00033                     } }
+00034                     val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+00035                     BitmapFactory.decodeFile(file.absolutePath,bounds)
+00036                     require(bounds.outWidth>0 && bounds.outHeight>0) { "The link returned a page, PDF or unsupported file, not an image" }
+00037                     onResolved?.invoke(current.toString())
+00038                     return file
+00039                 } finally { conn.disconnect() }
+00040             }
+00041             error("Too many image redirects")
+00042         } catch(e:Exception) { file.delete(); throw e }
+00043     }
+00044 }
+======== SourceClueCropStore.kt lines 50 ========
+==== source cache range 10 50
+00010         val values=prefs.getString(puzzleId,null)?.split(',')?:return null
+00011         if(values.size!=4)return null
+00012         val nums=values.map{it.toFloatOrNull()?:return null}
+00013         val b=BoxF(nums[0],nums[1],nums[2],nums[3])
+00014         return SourceClueCropBounds.denormalize(b,1000,1000)?.let{b}
+00015     }
+00016     fun put(puzzleId:String,pixelBounds:BoxF,width:Int,height:Int):Boolean {
+00017         if(!PuzzleLibrary.validId(puzzleId))return false
+00018         val b=SourceClueCropBounds.normalize(pixelBounds,width,height)?:return false
+00019         prefs.edit().putString(puzzleId,"${b.left},${b.top},${b.right},${b.bottom}").apply()
+00020         return true
+00021     }
+00022     fun clear(puzzleId:String){if(PuzzleLibrary.validId(puzzleId))prefs.edit().remove(puzzleId).apply()}
+00023 
+00024     /** Gallery publisher pages and older Groups images have DIFFERENT pixel
+00025      * coordinates. Manual panel crops are isolated by exact image fingerprint;
+00026      * the legacy per-puzzle crop is never reinterpreted on another source.
+00027      */
+00028     private fun boundKey(puzzleId:String,sourceIdentity:String):String? =
+00029         if(PuzzleLibrary.validId(puzzleId) &&
+00030            sourceIdentity.matches(Regex("pixels:[0-9a-f]{64}")))
+00031             "publisher:$puzzleId:$sourceIdentity" else null
+00032 
+00033     fun getBound(puzzleId:String,sourceIdentity:String):BoxF? {
+00034         val key=boundKey(puzzleId,sourceIdentity)?:return null
+00035         val data=prefs.getString(key,null)?.split(',')?:return null
+00036         if(data.size!=4)return null
+00037         val values=data.map{it.toFloatOrNull()?:return null}
+00038         val box=BoxF(values[0],values[1],values[2],values[3])
+00039         return SourceClueCropBounds.denormalize(box,1000,1000)?.let{box}
+00040     }
+00041     fun putBound(puzzleId:String,sourceIdentity:String,pixels:BoxF,width:Int,height:Int):Boolean {
+00042         val key=boundKey(puzzleId,sourceIdentity)?:return false
+00043         val normalized=SourceClueCropBounds.normalize(pixels,width,height)?:return false
+00044         prefs.edit().putString(key,"${normalized.left},${normalized.top},${normalized.right},${normalized.bottom}").apply()
+00045         return true
+00046     }
+00047     fun clearBound(puzzleId:String,sourceIdentity:String){
+00048         boundKey(puzzleId,sourceIdentity)?.let{prefs.edit().remove(it).apply()}
+00049     }
+00050 }
+==== source cache range 16 50
+==== source cache range 22 50
+==== source cache range 27 50
