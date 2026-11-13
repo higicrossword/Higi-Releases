@@ -13,8 +13,8 @@ def edit(name, old, new):
 
 # Keep every existing caller of SourceImageDialog compatible.
 edit('SourceImageDialog.kt',
-    'class SourceImageDialog(context: Context, bitmap: Bitmap,\n                         verifiedFocus: BoxF? = null) : Dialog(context, R.style.Theme_HebrewCrossword) {',
-    'class SourceImageDialog(context: Context, bitmap: Bitmap,\n                         verifiedFocus: BoxF? = null,\n                         sourceStatus:String = "") : Dialog(context, R.style.Theme_HebrewCrossword) {')
+    'class SourceImageDialog(context: Context, bitmap: Bitmap,\n                        verifiedFocus: BoxF? = null) : Dialog(context, R.style.Theme_HebrewCrossword) {',
+    'class SourceImageDialog(context: Context, bitmap: Bitmap,\n                        verifiedFocus: BoxF? = null,\n                         sourceStatus:String = "") : Dialog(context, R.style.Theme_HebrewCrossword) {')
 edit('SourceImageDialog.kt',
     '    init {\n        requestWindowFeature(Window.FEATURE_NO_TITLE)',
     '''    private val bar = LinearLayout(context).apply { gravity=Gravity.CENTER }
