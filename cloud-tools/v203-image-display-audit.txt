@@ -1,0 +1,1364 @@
+=== AdminAiPromptDiagnostic.kt matches= 1 ===
+=== AdminClueRegionsActivity.kt matches= 5 ===
+=== AdminClueSnapshotSelection.kt matches= 1 ===
+=== AdminCroppedClueDiagnostic.kt matches= 2 ===
+=== AdminLibraryRedecodeRunner.kt matches= 13 ===
+=== AdminOcrRecropActivity.kt matches= 9 ===
+=== CanonicalPuzzleCloud.kt matches= 52 ===
+=== ClueEditorDialog.kt matches= 3 ===
+=== ClueGeometryDebugStore.kt matches= 8 ===
+=== ClueRaceActivity.kt matches= 4 ===
+=== ClueRaceFirebase.kt matches= 4 ===
+=== ClueRegionStore.kt matches= 6 ===
+=== CropOverlayView.kt matches= 1 ===
+=== MainActivity.kt matches= 80 ===
+-- 77 102 hit 88 --
+00077         val expectedCount: Int,
+00078         val needsSolutions: Boolean
+00079     )
+00080 
+00081 
+00082     /** Enough source context to offer an explicit administrator retry after a failed forced re-import. */
+00083     private data class ForcedRedecodeRetryContext(
+00084         val weeklyItem: WeeklyCrosswordsFetcher.Item? = null,
+00085         val localFile: File? = null,
+00086         val suggestedTitle: String? = null,
+00087         val issueKey: String? = null,
+00088         val sourceImageUrl: String = "",
+00089         val sourceThreadUrl: String = ""
+00090     )
+00091 
+00092     private lateinit var board:CrosswordView
+00093     private lateinit var status:TextView
+00094     private lateinit var clueHeader:LinearLayout
+00095     private lateinit var clue:TextView
+00096     private lateinit var clueSolvedBy:TextView
+00097     private lateinit var cluesBelow:LinearLayout
+00098     private lateinit var clueSourceHost:FrameLayout
+00099     private var clueSourceViewer:CropOverlayView?=null
+00100     private lateinit var puzzleScroll:ScrollView
+00101     private lateinit var cluesScroll:ScrollView
+00102     private lateinit var solveContent:LinearLayout
+-- 180 205 hit 191 --
+00180     private var atHome = true
+00181     private var isBusy = false
+00182     private var homeNotice = ""
+00183     private val FAVORITE_IMPORT_SUCCESS_TEXT = "יובא בהצלחה לתשבצים שלי."
+00184     private var pendingSeriesOpenId: String? = null
+00185     private var reference: ReferenceSet? = null
+00186     private var solutionPuzzleId: String? = null
+00187     private var pendingSolution: Pair<ClueEditorModel.Key, Boolean>? = null
+00188     private var attachPuzzleId: String? = null
+00189     private var pendingImportedTitle: String? = null
+00190     private var pendingCanonicalIssueKey: String? = null
+00191     private var pendingCanonicalImageUrl: String = ""
+00192     private var pendingCanonicalThreadUrl: String = ""
+00193     private var pendingForcedRedecode: Boolean = false
+00194     /** True only for a bitmap read from the phone/file picker, not a remote source. */
+00195     private var pendingCanonicalLocalBitmap: Boolean = false
+00196     private var pendingGalleryRecovery: Boolean = false
+00197     private var pendingAiDecodeMode: AiDecodeMode = AiDecodeMode.AUTO
+00198     private var pendingAiRunOptions: AiRunOptions = AiRunOptions.DEFAULT
+00199     /** One local full-puzzle AI decode per import flow; clue/source actions never reset this. */
+00200     private var pendingAiAlreadyUsed: Boolean = false
+00201     private var pendingReferenceAnswers: String = ""
+00202     private var pendingReferenceTitle: String = ""
+00203     private var pendingReferenceUrl: String = ""
+00204     private var activePuzzleTitle: String = ""
+00205     private var sharedAnswerUrl: String = ""
+-- 285 310 hit 296 --
+00285     private var lastReview:ClueParser.Parsed?=null
+00286     private var saveErrorShown=false
+00287     private var activeDialog:android.app.Dialog?=null
+00288     // DRY administrator-only UI selection. No disk writes, network or hot-path work.
+00289     private var adminLibrarySeriesFilterId=AdminLibrarySeriesFilterV202.ALL
+00290     private fun handleSourceReplacementOnly(data:Intent?):Boolean {
+00291         if(data?.getBooleanExtra(RecentCrosswordsActivity.EXTRA_SOURCE_REPLACED_ONLY,false)!=true)return false
+00292         whenReady {
+00293             source?.takeIf{!it.isRecycled}?.recycle()
+00294             source=null;sourceCorners=null;hRegion=null;vRegion=null
+00295             board.crossword?.puzzleId?.let{ sourceClueCropStore.clear(it);sourceViewportStore.clear(it) }
+00296             board.crossword?.puzzleId?.let{pid->runCatching{library.load(pid)?.regions}.getOrNull()?.let(::loadSourceContext)}
+00297             if(settings.clueBelowMode==ClueBelowMode.SOURCE)loadClueSourceBelow()
+00298             DebugLog.i("ADMIN_SOURCE","active source cache invalidated after replacement")
+00299         }
+00300         return true
+00301     }
+00302     private val picker=registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if(uri!=null) { pendingImportedTitle=null; clearPendingCanonical(); prepareImage(uri) } }
+00303     private val recentPicker=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+00304         explicitImportFlowPending=false
+00305         if(BuildConfig.HIGI_DRY_BUILD && result.resultCode==RESULT_OK &&
+00306             result.data?.getBooleanExtra(RecentCrosswordsActivity.EXTRA_ADMIN_OCR_RETURN_TO_LIBRARY,false)==true){
+00307             // The saved-review launcher has finished; restore only this library
+00308             // context, never the normal weekly/import activity flow.
+00309             whenReady{if(!isFinishing && !isDestroyed && atHome)
+00310                 refreshLibrary{displayLibrary()}}
+-- 472 497 hit 483 --
+00472             extraBottomScrollSpace=true
+00473             onClueChanged={ updateActiveClueHeader(it) }
+00474             onSelectionChanged={ selected ->
+00475                 val effective=applyCompoundSelection(selected)
+00476                 if (settings.showCluesBelow && effective != null && effective.direction != settings.clueDirectionBelow) {
+00477                     settings.clueDirectionBelow = effective.direction
+00478                     rebuildCluesBelow()
+00479                 } else refreshClueRowSelection(effective)
+00480             }
+00481             onPuzzleChanged={ onLocalPuzzleChanged() }
+00482             onEntryLongPress = { showLongPressActions(it) }
+00483             onHorizontalSwipe = { showSourceImage() }
+00484             onRemoteHighlightCleared = { }
+00485         }
+00486         cluesBelow=LinearLayout(this).apply {
+00487             orientation=LinearLayout.VERTICAL; layoutDirection=View.LAYOUT_DIRECTION_RTL; visibility=View.GONE
+00488             setPadding(dp(4),dp(4),dp(4),dp(32))
+00489         }
+00490         horizontalCluesBtn=button("מאוזן") {
+00491             settings.clueDirectionBelow=Direction.HORIZONTAL
+00492             rebuildCluesBelow(); refreshClueToolbarState()
+00493         }.apply { textSize=14f }
+00494         verticalCluesBtn=button("מאונך") {
+00495             settings.clueDirectionBelow=Direction.VERTICAL
+00496             rebuildCluesBelow(); refreshClueToolbarState()
+00497         }.apply { textSize=14f }
+-- 756 781 hit 767 --
+00756             localReviewRecovering.remove(puzzleId)
+00757             DebugLog.w("LOCAL_REVIEW_RECOVERY","skip puzzle=${DebugLog.compactId(puzzleId)} reason=invalid-source-or-record")
+00758             return
+00759         }
+00760         val keys=Direction.values().flatMap{d->record.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+00761         val manuallySelected=keys.mapNotNull { key ->
+00762             clueRegionStore.getManualVerified(puzzleId,key)?.let { key to it }
+00763         }.toMap()
+00764         val geometries=manuallySelected.mapValues { (_, box) ->
+00765             ClueGeometry(box,listOf(box),box,evidence=ClueGeometryEvidence.MANUAL)
+00766         }
+00767         val sourceImage=canonicalIndex.sourceImageUrl(puzzleId)
+00768         val sourceThread=canonicalIndex.sourceThreadUrl(puzzleId)
+00769         DebugLog.i("LOCAL_REVIEW_RECOVERY","begin puzzle=${DebugLog.compactId(puzzleId)} issue=${DebugLog.compactId(issue)} manualRegions=${manuallySelected.size} aiRequests=0")
+00770         canonicalCloud.refreshDecodedForAdmin(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),
+00771             sourceThread,sourceImage,record,manuallySelected,geometries,settings.displayName,
+00772             callback={ result -> runOnUiThread {
+00773                 localReviewRecovering.remove(puzzleId)
+00774                 result.onSuccess { cached ->
+00775                     // Update the issue index only on a server-confirmed transaction.
+00776                     canonicalIndex.bind(puzzleId,cached.issueKey,cached.revision,
+00777                         cached.sourceImageUrl.ifBlank{sourceImage},cached.sourceThreadUrl.ifBlank{sourceThread})
+00778                     prefs.edit().remove(puzzleId).apply()
+00779                     DebugLog.i("LOCAL_REVIEW_RECOVERY","canonical-committed puzzle=${DebugLog.compactId(puzzleId)} revision=${cached.revision} retainedLocal=true")
+00780                     if(board.crossword?.puzzleId==puzzleId){
+00781                         library.load(puzzleId)?.let{syncCanonicalPuzzle(it,cached)}
+-- 766 791 hit 777 --
+00766         }
+00767         val sourceImage=canonicalIndex.sourceImageUrl(puzzleId)
+00768         val sourceThread=canonicalIndex.sourceThreadUrl(puzzleId)
+00769         DebugLog.i("LOCAL_REVIEW_RECOVERY","begin puzzle=${DebugLog.compactId(puzzleId)} issue=${DebugLog.compactId(issue)} manualRegions=${manuallySelected.size} aiRequests=0")
+00770         canonicalCloud.refreshDecodedForAdmin(issue,CrosswordCatalog.issueKeyFromSourceKey(issue),
+00771             sourceThread,sourceImage,record,manuallySelected,geometries,settings.displayName,
+00772             callback={ result -> runOnUiThread {
+00773                 localReviewRecovering.remove(puzzleId)
+00774                 result.onSuccess { cached ->
+00775                     // Update the issue index only on a server-confirmed transaction.
+00776                     canonicalIndex.bind(puzzleId,cached.issueKey,cached.revision,
+00777                         cached.sourceImageUrl.ifBlank{sourceImage},cached.sourceThreadUrl.ifBlank{sourceThread})
+00778                     prefs.edit().remove(puzzleId).apply()
+00779                     DebugLog.i("LOCAL_REVIEW_RECOVERY","canonical-committed puzzle=${DebugLog.compactId(puzzleId)} revision=${cached.revision} retainedLocal=true")
+00780                     if(board.crossword?.puzzleId==puzzleId){
+00781                         library.load(puzzleId)?.let{syncCanonicalPuzzle(it,cached)}
+00782                         toast("התשבץ המקומי פורסם קנונית בהצלחה")
+00783                     }else if(record.title.contains("תרתי משמע")){
+00784                         toast("תרתי משמע פורסם קנונית בהצלחה")
+00785                     }
+00786                 }.onFailure { error ->
+00787                     DebugLog.w("LOCAL_REVIEW_RECOVERY","canonical-failed puzzle=${DebugLog.compactId(puzzleId)} reason=${DebugLog.sanitize(error.message.orEmpty())}; retry=next-start")
+00788                     if(board.crossword?.puzzleId==puzzleId)toast("שמירה מקומית בלבד; פרסום קנוני נכשל — יבוצע ניסיון נוסף בהפעלה הבאה")
+00789                 }
+00790             }},recoverLocalReview=true)
+00791     }
+-- 965 990 hit 976 --
+00965         // 0.15.118: structured sources are deliberately local-only; no remote
+00966         // canonical has been published by this import path. Do not block the
+00967         // first open on a pointless Firebase lookup or accidentally upgrade
+00968         // local-only imports from an unrelated remote record.
+00969         if ((sourceKey.startsWith("INTEL:") || sourceKey.startsWith("HIGAYON:") || sourceKey.startsWith("ISRAEL_HAYOM:") || sourceKey.startsWith("ACROSS14:")) &&
+00970             canonicalIndex.revision(local.id)==0L) {
+00971             DebugLog.i("STRUCTURED_IMPORT","LOCAL_OPEN issue=$sourceKey canonicalFetch=skipped revision=0")
+00972             return CanonicalOpenResult(local)
+00973         }
+00974         val legacy=CrosswordCatalog.issueKeyFromSourceKey(sourceKey)?.takeIf{it!=sourceKey}
+00975             ?: CrosswordCatalog.issueKeyFromTitle(local.title)?.takeIf{it!=sourceKey}
+00976         val sourceImage=canonicalIndex.sourceImageUrl(local.id)
+00977         val sourceThread=canonicalIndex.sourceThreadUrl(local.id)
+00978         val fetched=canonicalCloud.fetchCompatibleBlockingResult(sourceKey,legacy,sourceThread,sourceImage,8_000L)
+00979         if(fetched==null || fetched.isFailure){
+00980             DebugLog.w("CANONICAL","open-verify-failed local=${DebugLog.compactId(local.id)} kind=${if(fetched==null)"TIMEOUT" else "NETWORK_OR_PERMISSION"}")
+00981             return CanonicalOpenResult(local,couldNotVerify=true)
+00982         }
+00983         val cached=fetched.getOrNull() ?: return CanonicalOpenResult(local)
+00984         val decision=CanonicalGridAutoRepair.decide(local,cached.rows,cached.cols,cached.gridSignature,
+00985             cached.revision,canonicalIndex.revision(local.id))
+00986         if(decision==CanonicalGridAutoRepair.Decision.KEEP)return CanonicalOpenResult(local,canonical=cached)
+00987         val canonicalImage=cached.sourceImageUrl.ifBlank{sourceImage}
+00988         val canonicalThread=cached.sourceThreadUrl.ifBlank{sourceThread}
+00989         if(decision==CanonicalGridAutoRepair.Decision.OPEN_CORRECTED_COPY){
+00990             // Unexpected real progress on a malformed old grid: leave it intact, but
+-- 976 1001 hit 987 --
+00976         val sourceImage=canonicalIndex.sourceImageUrl(local.id)
+00977         val sourceThread=canonicalIndex.sourceThreadUrl(local.id)
+00978         val fetched=canonicalCloud.fetchCompatibleBlockingResult(sourceKey,legacy,sourceThread,sourceImage,8_000L)
+00979         if(fetched==null || fetched.isFailure){
+00980             DebugLog.w("CANONICAL","open-verify-failed local=${DebugLog.compactId(local.id)} kind=${if(fetched==null)"TIMEOUT" else "NETWORK_OR_PERMISSION"}")
+00981             return CanonicalOpenResult(local,couldNotVerify=true)
+00982         }
+00983         val cached=fetched.getOrNull() ?: return CanonicalOpenResult(local)
+00984         val decision=CanonicalGridAutoRepair.decide(local,cached.rows,cached.cols,cached.gridSignature,
+00985             cached.revision,canonicalIndex.revision(local.id))
+00986         if(decision==CanonicalGridAutoRepair.Decision.KEEP)return CanonicalOpenResult(local,canonical=cached)
+00987         val canonicalImage=cached.sourceImageUrl.ifBlank{sourceImage}
+00988         val canonicalThread=cached.sourceThreadUrl.ifBlank{sourceThread}
+00989         if(decision==CanonicalGridAutoRepair.Decision.OPEN_CORRECTED_COPY){
+00990             // Unexpected real progress on a malformed old grid: leave it intact, but
+00991             // still open the corrected canonical as a NEW independent play.
+00992             val copy=cached.createLocalCopy(repo,clueRegionStore)
+00993             answerOverrideStore.putAll(copy.id,cached.answerOverrides)
+00994             canonicalIndex.bind(copy.id,sourceKey,cached.revision,canonicalImage,canonicalThread)
+00995             downloadedStore.recordFromTitle(copy.id,copy.title)
+00996             DebugLog.i("CANONICAL","open-repair created-new-copy old=${DebugLog.compactId(local.id)} new=${DebugLog.compactId(copy.id)} grid=${cached.rows}x${cached.cols}")
+00997             return CanonicalOpenResult(copy,corrected=true,preservedOldCopy=true,canonical=cached)
+00998         }
+00999         val oldSignature=AnswerChecking.signature(local.crossword)
+01000         // Atomic on-disk replacement. Old source/geometry/answers are all scoped to
+01001         // the old grid; never mix them into the corrected one.
+-- 983 1008 hit 994 --
+00983         val cached=fetched.getOrNull() ?: return CanonicalOpenResult(local)
+00984         val decision=CanonicalGridAutoRepair.decide(local,cached.rows,cached.cols,cached.gridSignature,
+00985             cached.revision,canonicalIndex.revision(local.id))
+00986         if(decision==CanonicalGridAutoRepair.Decision.KEEP)return CanonicalOpenResult(local,canonical=cached)
+00987         val canonicalImage=cached.sourceImageUrl.ifBlank{sourceImage}
+00988         val canonicalThread=cached.sourceThreadUrl.ifBlank{sourceThread}
+00989         if(decision==CanonicalGridAutoRepair.Decision.OPEN_CORRECTED_COPY){
+00990             // Unexpected real progress on a malformed old grid: leave it intact, but
+00991             // still open the corrected canonical as a NEW independent play.
+00992             val copy=cached.createLocalCopy(repo,clueRegionStore)
+00993             answerOverrideStore.putAll(copy.id,cached.answerOverrides)
+00994             canonicalIndex.bind(copy.id,sourceKey,cached.revision,canonicalImage,canonicalThread)
+00995             downloadedStore.recordFromTitle(copy.id,copy.title)
+00996             DebugLog.i("CANONICAL","open-repair created-new-copy old=${DebugLog.compactId(local.id)} new=${DebugLog.compactId(copy.id)} grid=${cached.rows}x${cached.cols}")
+00997             return CanonicalOpenResult(copy,corrected=true,preservedOldCopy=true,canonical=cached)
+00998         }
+00999         val oldSignature=AnswerChecking.signature(local.crossword)
+01000         // Atomic on-disk replacement. Old source/geometry/answers are all scoped to
+01001         // the old grid; never mix them into the corrected one.
+01002         val corrected=repo.replaceUnstartedGrid(local.id,oldSignature,cached.toCrossword(local.id),
+01003             cached.toLocalReference(local.id))
+01004         // The original bitmap is still valid when canonical and local refer to the
+01005         // same attachment. Keep it: deleting it would break offline clue/source view.
+01006         // Only discard a DIFFERENT known attachment, whose coordinates are unsafe.
+01007         val oldImageIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(sourceImage)
+01008             .ifBlank { sourceImage.substringBefore('?') }
+-- 998 1023 hit 1009 --
+00998         }
+00999         val oldSignature=AnswerChecking.signature(local.crossword)
+01000         // Atomic on-disk replacement. Old source/geometry/answers are all scoped to
+01001         // the old grid; never mix them into the corrected one.
+01002         val corrected=repo.replaceUnstartedGrid(local.id,oldSignature,cached.toCrossword(local.id),
+01003             cached.toLocalReference(local.id))
+01004         // The original bitmap is still valid when canonical and local refer to the
+01005         // same attachment. Keep it: deleting it would break offline clue/source view.
+01006         // Only discard a DIFFERENT known attachment, whose coordinates are unsafe.
+01007         val oldImageIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(sourceImage)
+01008             .ifBlank { sourceImage.substringBefore('?') }
+01009         val newImageIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(canonicalImage)
+01010             .ifBlank { canonicalImage.substringBefore('?') }
+01011         if(oldImageIdentity.isNotBlank() && newImageIdentity.isNotBlank() && oldImageIdentity!=newImageIdentity){
+01012             if(!repo.clearSource(local.id))DebugLog.w("CANONICAL","open-repair source cleanup failed local=${DebugLog.compactId(local.id)}")
+01013         }
+01014         clueRegionStore.deletePuzzle(local.id)
+01015         sourceViewportStore.clear(local.id)
+01016         sourceClueCropStore.clear(local.id)
+01017         printedClueCropStore.clear(local.id)
+01018         clueGeometryDebugStore.deletePuzzle(local.id)
+01019         decodeMetadataStore.clear(local.id)
+01020         answerOverrideStore.clear(local.id)
+01021         answerOverrideStore.putAll(local.id,cached.answerOverrides)
+01022         if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+01023             val keys=Direction.values().flatMap{d->corrected.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+-- 999 1024 hit 1010 --
+00999         val oldSignature=AnswerChecking.signature(local.crossword)
+01000         // Atomic on-disk replacement. Old source/geometry/answers are all scoped to
+01001         // the old grid; never mix them into the corrected one.
+01002         val corrected=repo.replaceUnstartedGrid(local.id,oldSignature,cached.toCrossword(local.id),
+01003             cached.toLocalReference(local.id))
+01004         // The original bitmap is still valid when canonical and local refer to the
+01005         // same attachment. Keep it: deleting it would break offline clue/source view.
+01006         // Only discard a DIFFERENT known attachment, whose coordinates are unsafe.
+01007         val oldImageIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(sourceImage)
+01008             .ifBlank { sourceImage.substringBefore('?') }
+01009         val newImageIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(canonicalImage)
+01010             .ifBlank { canonicalImage.substringBefore('?') }
+01011         if(oldImageIdentity.isNotBlank() && newImageIdentity.isNotBlank() && oldImageIdentity!=newImageIdentity){
+01012             if(!repo.clearSource(local.id))DebugLog.w("CANONICAL","open-repair source cleanup failed local=${DebugLog.compactId(local.id)}")
+01013         }
+01014         clueRegionStore.deletePuzzle(local.id)
+01015         sourceViewportStore.clear(local.id)
+01016         sourceClueCropStore.clear(local.id)
+01017         printedClueCropStore.clear(local.id)
+01018         clueGeometryDebugStore.deletePuzzle(local.id)
+01019         decodeMetadataStore.clear(local.id)
+01020         answerOverrideStore.clear(local.id)
+01021         answerOverrideStore.putAll(local.id,cached.answerOverrides)
+01022         if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+01023             val keys=Direction.values().flatMap{d->corrected.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+01024             if(cached.clueRegionsRevision>0L){
+-- 1015 1040 hit 1026 --
+01015         sourceViewportStore.clear(local.id)
+01016         sourceClueCropStore.clear(local.id)
+01017         printedClueCropStore.clear(local.id)
+01018         clueGeometryDebugStore.deletePuzzle(local.id)
+01019         decodeMetadataStore.clear(local.id)
+01020         answerOverrideStore.clear(local.id)
+01021         answerOverrideStore.putAll(local.id,cached.answerOverrides)
+01022         if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+01023             val keys=Direction.values().flatMap{d->corrected.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+01024             if(cached.clueRegionsRevision>0L){
+01025                 clueRegionStore.replaceVerifiedGeometryFromCanonical(local.id,keys,cached.trustedClueRegions(),
+01026                     cached.trustedClueRegionLines(),cached.clueRegionsRevision,cached.sourceImageUrl,cached.clueRegionEditRevisions.keys)
+01027             }else{
+01028                 if(cached.trustedClueRegions().isNotEmpty())clueRegionStore.putVerifiedAll(local.id,cached.trustedClueRegions())
+01029                 if(cached.trustedClueRegionLines().isNotEmpty())clueRegionStore.putVerifiedRowsAll(local.id,cached.trustedClueRegionLines())
+01030             }
+01031         }
+01032         canonicalIndex.bind(local.id,sourceKey,cached.revision,canonicalImage,canonicalThread)
+01033         downloadedStore.recordFromTitle(local.id,local.title)
+01034         DebugLog.i("CANONICAL","open-repair replaced-in-place local=${DebugLog.compactId(local.id)} old=${local.crossword.rows}x${local.crossword.cols} new=${cached.rows}x${cached.cols} revision=${cached.revision}")
+01035         return CanonicalOpenResult(repo.load(local.id)?:corrected,corrected=true,canonical=cached)
+01036     }
+01037 
+01038     /** Local-only 0.15.119 Intel metadata migration on first open after upgrade.
+01039      * Never changes clue text, cell contents or identity. */
+01040     private fun upgradeIntelWordOrderIfNeeded(repo:PuzzleLibrary,record:SavedPuzzle):SavedPuzzle {
+-- 1021 1046 hit 1032 --
+01021         answerOverrideStore.putAll(local.id,cached.answerOverrides)
+01022         if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+01023             val keys=Direction.values().flatMap{d->corrected.crossword.startNumbers(d).map{ClueEditorModel.Key(it,d)}}
+01024             if(cached.clueRegionsRevision>0L){
+01025                 clueRegionStore.replaceVerifiedGeometryFromCanonical(local.id,keys,cached.trustedClueRegions(),
+01026                     cached.trustedClueRegionLines(),cached.clueRegionsRevision,cached.sourceImageUrl,cached.clueRegionEditRevisions.keys)
+01027             }else{
+01028                 if(cached.trustedClueRegions().isNotEmpty())clueRegionStore.putVerifiedAll(local.id,cached.trustedClueRegions())
+01029                 if(cached.trustedClueRegionLines().isNotEmpty())clueRegionStore.putVerifiedRowsAll(local.id,cached.trustedClueRegionLines())
+01030             }
+01031         }
+01032         canonicalIndex.bind(local.id,sourceKey,cached.revision,canonicalImage,canonicalThread)
+01033         downloadedStore.recordFromTitle(local.id,local.title)
+01034         DebugLog.i("CANONICAL","open-repair replaced-in-place local=${DebugLog.compactId(local.id)} old=${local.crossword.rows}x${local.crossword.cols} new=${cached.rows}x${cached.cols} revision=${cached.revision}")
+01035         return CanonicalOpenResult(repo.load(local.id)?:corrected,corrected=true,canonical=cached)
+01036     }
+01037 
+01038     /** Local-only 0.15.119 Intel metadata migration on first open after upgrade.
+01039      * Never changes clue text, cell contents or identity. */
+01040     private fun upgradeIntelWordOrderIfNeeded(repo:PuzzleLibrary,record:SavedPuzzle):SavedPuzzle {
+01041         if(record.crossword.separatorPartOrder==SeparatorPartOrder.SOURCE_TEXT_ORDER)return record
+01042         val issue=canonicalIndex.issueKey(record.id).orEmpty()
+01043         if(!issue.matches(Regex("INTEL:\\d+")))return record
+01044         return runCatching {
+01045             val upgraded=repo.updateSeparatorPartOrder(record.id,AnswerChecking.signature(record.crossword),SeparatorPartOrder.SOURCE_TEXT_ORDER)
+01046             DebugLog.i("INTEL_WORD_ORDER","local-migration id=${DebugLog.compactId(record.id)} source=INTEL")
+-- 1085 1110 hit 1096 --
+01085         unopenedStore.markOpened(record.id)
+01086         updateUnopenedUi()
+01087         source=null; lastReview=null; saveErrorShown=false
+01088         if (!keepPending) { solutionPuzzleId=null; pendingSolution=null; attachPuzzleId=null }
+01089         resetSharedLogicalIndex()
+01090         activeSharedFocus=null; board.sharedFocusCells=emptySet()
+01091         activeNonLlmConditional=NonLlmConditionalCellStore(this).load(record.id,record.crossword)
+01092         board.editMode=false; board.crossword=record.crossword; board.compoundEntries=emptyList()
+01093         board.conditionalCellPosition=activeNonLlmConditional?.position
+01094         board.session?.restoreSelection(record.session.row,record.session.col,record.session.direction)
+01095         applyCompoundSelection(board.selectedKey())
+01096         reference=record.reference; sharedAnswerUrl=record.reference?.sourceUrl.orEmpty(); activePuzzleTitle=record.title; puzzleTitleLabel.text=WeeklyCrosswordsFetcher.compactTitle(record.title); loadSourceContext(record.regions)
+01097         correctLogicalKeys=currentCorrectLogicalKeys(record.crossword)
+01098         refreshSharedSolvedLocks()
+01099         atHome=false; homePanel.visibility=View.GONE; homeBackdrop.visibility=View.GONE; solverPanel.visibility=View.VISIBLE
+01100         applySystemBarAppearance(false)
+01101         activeDuelMode=sharingState.duelForPuzzle(record.id)
+01102         board.persistentRemoteHighlights=activeDuelMode
+01103         board.interactive=true; completedValues=completeEntryValues(record.crossword); wasPuzzleComplete=puzzleCompleteWithLocalCondition(record.crossword); updateAnswerColors(); solverMode(true); applyClueDisplayMode(); board.refresh(); board.keepSelectedVisible()
+01104         menuBtn.contentDescription="תפריט: ${record.title}"
+01105         printedSourceListenerId?.let{PrintedStructuredSource.removeListener(it,printedSourceListener)}
+01106         printedSourceListenerId=null
+01107         val printedIssue=structuredDisplayKey(record.id)
+01108         if(PrintedSourceIssueMatcher.from(printedIssue,record.title)!=null){
+01109             printedSourceListenerId=record.id
+01110             PrintedStructuredSource.addListener(record.id,printedSourceListener)
+-- 1137 1162 hit 1148 --
+01137         if(isLocalStructuredSource(record.id) || GalleryPublisherPolicy.isGallery(record.title))return
+01138         val expected=Direction.entries.flatMap { dir ->
+01139             cw.startNumbers(dir).map { ClueEditorModel.Key(it,dir) }
+01140         }.toSet()
+01141         if(expected.isEmpty())return
+01142         val manual=expected.filterTo(linkedSetOf()){ clueRegionStore.hasManualOverride(record.id,it) }
+01143         val verified=expected.filterTo(linkedSetOf()){ key ->
+01144             clueRegionStore.getVerified(record.id,key)!=null || clueRegionStore.getVerifiedRows(record.id,key).isNotEmpty()
+01145         }
+01146         val missing=CanonicalCropBackfillPolicy.missing(expected,manual,verified)
+01147         if(missing.isEmpty())return
+01148         val sourceUrl=canonicalIndex.sourceImageUrl(record.id)
+01149         val issueKey=canonicalIndex.issueKey(record.id).orEmpty()
+01150         val signature=AnswerChecking.signature(cw)
+01151         val sourceKey=LocalOcrGeometryAuthority.sourceIdentity(sourceUrl)
+01152         // Version-specific throttle: a failed OCR pass should not repeat on each open.
+01153         // Recheck after 6h; a changed attachment/grid starts a fresh attempt.
+01154         val stampKey="crop-backfill:${record.id}"
+01155         val stamp="308:$signature:$sourceKey"
+01156         val attemptPrefs=getSharedPreferences("higi-ocr-backfill-v158",MODE_PRIVATE)
+01157         val previous=attemptPrefs.getString(stampKey,null).orEmpty().split('|')
+01158         val now=System.currentTimeMillis()
+01159         if(previous.getOrNull(0)==stamp && now-(previous.getOrNull(1)?.toLongOrNull()?:0L) in 0..21_600_000L)return
+01160         val flightKey="${record.id}:$stamp"
+01161         if(!cropRecoveryInFlight.add(flightKey))return
+01162         val grid=record.regions.grid?.takeIf{it.size==4}?.map{PointF(it.x,it.y)}.orEmpty()
+-- 1159 1184 hit 1170 --
+01159         if(previous.getOrNull(0)==stamp && now-(previous.getOrNull(1)?.toLongOrNull()?:0L) in 0..21_600_000L)return
+01160         val flightKey="${record.id}:$stamp"
+01161         if(!cropRecoveryInFlight.add(flightKey))return
+01162         val grid=record.regions.grid?.takeIf{it.size==4}?.map{PointF(it.x,it.y)}.orEmpty()
+01163         val nodeKey=canonicalForEditor?.takeIf{it.first==record.id}?.second?.storageNodeKey
+01164         DebugLog.i("LOCAL_OCR_BACKFILL","start puzzle=${DebugLog.compactId(record.id)} missing=${missing.size}/${expected.size} source=${sourceKey.isNotBlank()} aiRequests=0")
+01165         runCatching { cropRecoveryExecutor.execute {
+01166             var bitmap:Bitmap?=null
+01167             try {
+01168                 // A downloaded canonical attachment must be loaded by its own URL;
+01169                 // a different recovered attachment must not reuse old coordinates.
+01170                 val saved=library.sourceFiles(record.id).firstNotNullOfOrNull { file ->
+01171                     runCatching{ImageLoader.load(file)}.getOrNull()
+01172                 }
+01173                 bitmap=saved
+01174                 if(bitmap==null && sourceUrl.startsWith("https://")){
+01175                     val file=ImageDownload.fetch(sourceUrl,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
+01176                     bitmap=ImageLoader.load(file)
+01177                     runCatching { library.writeSource(record.id) { out -> bitmap!!.compress(Bitmap.CompressFormat.PNG,95,out) } }
+01178                 }
+01179                 val image=bitmap
+01180                 if(image==null){
+01181                     DebugLog.i("LOCAL_OCR_BACKFILL","skip puzzle=${DebugLog.compactId(record.id)} reason=source-image-unavailable")
+01182                     return@execute
+01183                 }
+01184                 val result=LocalOcrCropPass.run(applicationContext,image,cw,grid)
+-- 1166 1191 hit 1177 --
+01166             var bitmap:Bitmap?=null
+01167             try {
+01168                 // A downloaded canonical attachment must be loaded by its own URL;
+01169                 // a different recovered attachment must not reuse old coordinates.
+01170                 val saved=library.sourceFiles(record.id).firstNotNullOfOrNull { file ->
+01171                     runCatching{ImageLoader.load(file)}.getOrNull()
+01172                 }
+01173                 bitmap=saved
+01174                 if(bitmap==null && sourceUrl.startsWith("https://")){
+01175                     val file=ImageDownload.fetch(sourceUrl,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
+01176                     bitmap=ImageLoader.load(file)
+01177                     runCatching { library.writeSource(record.id) { out -> bitmap!!.compress(Bitmap.CompressFormat.PNG,95,out) } }
+01178                 }
+01179                 val image=bitmap
+01180                 if(image==null){
+01181                     DebugLog.i("LOCAL_OCR_BACKFILL","skip puzzle=${DebugLog.compactId(record.id)} reason=source-image-unavailable")
+01182                     return@execute
+01183                 }
+01184                 val result=LocalOcrCropPass.run(applicationContext,image,cw,grid)
+01185                 // Never accept a different source if canonical was corrected while OCR ran.
+01186                 if(sourceUrl!=canonicalIndex.sourceImageUrl(record.id) ||
+01187                    signature!=AnswerChecking.signature(cw)){
+01188                     DebugLog.w("LOCAL_OCR_BACKFILL","discard source-or-grid-changed")
+01189                     return@execute
+01190                 }
+01191                 val additions=CanonicalCropBackfillPolicy.approved(missing,result.trusted) { key ->
+-- 1175 1200 hit 1186 --
+01175                     val file=ImageDownload.fetch(sourceUrl,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
+01176                     bitmap=ImageLoader.load(file)
+01177                     runCatching { library.writeSource(record.id) { out -> bitmap!!.compress(Bitmap.CompressFormat.PNG,95,out) } }
+01178                 }
+01179                 val image=bitmap
+01180                 if(image==null){
+01181                     DebugLog.i("LOCAL_OCR_BACKFILL","skip puzzle=${DebugLog.compactId(record.id)} reason=source-image-unavailable")
+01182                     return@execute
+01183                 }
+01184                 val result=LocalOcrCropPass.run(applicationContext,image,cw,grid)
+01185                 // Never accept a different source if canonical was corrected while OCR ran.
+01186                 if(sourceUrl!=canonicalIndex.sourceImageUrl(record.id) ||
+01187                    signature!=AnswerChecking.signature(cw)){
+01188                     DebugLog.w("LOCAL_OCR_BACKFILL","discard source-or-grid-changed")
+01189                     return@execute
+01190                 }
+01191                 val additions=CanonicalCropBackfillPolicy.approved(missing,result.trusted) { key ->
+01192                     !clueRegionStore.hasManualOverride(record.id,key) &&
+01193                     clueRegionStore.getVerified(record.id,key)==null &&
+01194                     clueRegionStore.getVerifiedRows(record.id,key).isEmpty()
+01195                 }
+01196                 if(additions.isNotEmpty()){
+01197                     clueRegionStore.putVerifiedGeometryAll(record.id,additions,sourceUrl.ifBlank{
+01198                         LocalOcrImageIdentity.fingerprint(image)
+01199                     })
+01200                     DebugLog.i("LOCAL_OCR_BACKFILL","local-success puzzle=${DebugLog.compactId(record.id)} added=${additions.size} stillMissing=${missing.size-additions.size} lines=${result.ocrLineCount} ms=${result.elapsedMs} aiRequests=0")
+-- 1409 1434 hit 1420 --
+01409             clueSourceHost.visibility=View.VISIBLE
+01410             pinnedHost.addView(clueSourceHost,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1f))
+01411             loadClueSourceBelow()
+01412         }
+01413     }
+01414 
+01415     private fun hasGalleryPublisherDisplay(cw:Crossword):Boolean =
+01416         GalleryPublisherPolicy.isGallery(activePuzzleTitle) &&
+01417             !getSharedPreferences("higi-source-display",MODE_PRIVATE)
+01418                 .getBoolean("manual-${cw.puzzleId}",false) &&
+01419             (library.printedCompanionFiles(cw.puzzleId).isNotEmpty() ||
+01420              GalleryPublisherPolicy.isApprovedMedia(canonicalIndex.sourceImageUrl(cw.puzzleId)))
+01421 
+01422     private fun clueSourceArea(bitmap:Bitmap,cw:Crossword):BoxF {
+01423         if(hasGalleryPublisherDisplay(cw)) {
+01424             val identity=LocalOcrImageIdentity.fingerprint(bitmap)
+01425             val lines=printedClueCropStore.all(cw.puzzleId,identity).values.flatten()
+01426                 .map{ClueRegionStore.toPixels(it,bitmap.width,bitmap.height)}
+01427             if(lines.isNotEmpty())return ClueSourceAreaPlanner.plan(bitmap.width,bitmap.height,null,lines)
+01428             val located=runCatching{GridDetector.locate(bitmap)}.getOrNull()
+01429             if(located!=null && located.result.crossword.rows==cw.rows &&
+01430                 located.result.crossword.cols==cw.cols){
+01431                 val b=located.bounds
+01432                 val crop=HaaretzGalleryCrop.rect(bitmap.width,bitmap.height,b)
+01433                 val top=(b.bottom-b.height/cw.rows.coerceAtLeast(1)*1.2f).coerceAtLeast(0f)
+01434                 return BoxF(crop.left.toFloat(),top,crop.right.toFloat(),crop.bottom.toFloat())
+-- 1901 1926 hit 1912 --
+01901         else canonicalIndex.bindSource(puzzleId,source.imageUrl,source.threadUrl)
+01902     }
+01903 
+01904     /** A room carries the host's trusted geometry even if this historical puzzle has no Canonical boxes. */
+01905     private fun importSharedClueGeometry(puzzleId:String,cw:Crossword,src:FirebaseSharing.SharedSource?) {
+01906         val geometry=src?.clueGeometry ?: run {
+01907             DebugLog.i("SHARED_CLUE_REGION","join snapshot absent; Canonical may still provide coordinates")
+01908             return
+01909         }
+01910         val signature=AnswerChecking.signature(cw)
+01911         if(!geometry.matches(signature,src.imageUrl) ||
+01912             canonicalIndex.sourceImageUrl(puzzleId)!=src.imageUrl ||
+01913             clueRegionStore.canonicalRegionRevision(puzzleId)>0L){
+01914             DebugLog.i("SHARED_CLUE_REGION","room snapshot skipped due to source, grid, or newer canonical geometry")
+01915             return
+01916         }
+01917         val validKeys=Direction.values().flatMap { d ->
+01918             cw.startNumbers(d).map { ClueEditorModel.Key(it,d) }
+01919         }.toSet()
+01920         // Never replace an existing AI/CANONICAL box or an explicit local manual edit.
+01921         val missingBoxes=geometry.boxes.filter { (key,_) ->
+01922             key in validKeys && clueRegionStore.getVerified(puzzleId,key)==null &&
+01923                 clueRegionStore.getVerifiedRows(puzzleId,key).isEmpty()
+01924         }
+01925         val missingRows=geometry.lines.filter { (key,_) ->
+01926             key in validKeys && !clueRegionStore.hasManualOverride(puzzleId,key) &&
+-- 1971 1996 hit 1982 --
+01971         }}
+01972     }
+01973 
+01974     private fun createSharing(name:String,duelMode:Boolean=false) {
+01975         val cw=board.crossword?:return
+01976         if(activeNonLlmConditional?.validFor(cw)==true){
+01977             toast("לא ניתן לשתף תשבץ עם משבצת מותנית בגרסת ניסיון זו")
+01978             return
+01979         }
+01980         val record=library.load(cw.puzzleId)?:return
+01981         busy(true,if(duelMode)"יוצר חדר דו-קרב..." else "יוצר חדר משותף...")
+01982         val imageUrl=canonicalIndex.sourceImageUrl(record.id)
+01983         val sharedGeometry=if(!duelMode && imageUrl.startsWith("https://")) {
+01984             val keys=Direction.values().flatMap { d -> cw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
+01985             // The room is bound to this exact image + grid. A user's deliberately
+01986             // corrected region is the best verified one for a newly invited solver.
+01987             // It must replace (not accompany) the obsolete AI box/rows. This is
+01988             // ROOM-LOCAL transfer only: never publish the manual box to Canonical.
+01989             val boxes=keys.mapNotNull { key ->
+01990                 clueRegionStore.getVerified(record.id,key)?.let { key to it }
+01991             }.toMap()
+01992             val rows=keys.filterNot { clueRegionStore.hasManualOverride(record.id,it) }
+01993                 .mapNotNull { key ->
+01994                     clueRegionStore.getAutomaticRowsForAlignment(record.id,key)
+01995                         .takeIf{it.isNotEmpty()}?.let{key to it}
+01996                 }.toMap()
+-- 2859 2884 hit 2870 --
+02859                                 autoImportLog("favorite=${series.title}; date=${item.dateMillis}; canonical-check-failed; no-local-fallback")
+02860                                 continue
+02861                             }
+02862                             val cached=checked.getOrNull()
+02863                             val local=if(cached==null)canonicalIndex.findCompleteForSource(
+02864                                 sourceKey,legacyIssueKey,item.threadUrl,item.imageUrl,library
+02865                             ) else null
+02866                             val reused=runCatching{
+02867                                 if(cached!=null){
+02868                                     cached.createLocalCopy(library,clueRegionStore).also{copy->
+02869                                         answerOverrideStore.putAll(copy.id,cached.answerOverrides)
+02870                                         val canonicalSourceImage=cached.sourceImageUrl.ifBlank{item.imageUrl}
+02871                                         val canonicalSourceThread=cached.sourceThreadUrl.ifBlank{item.threadUrl}
+02872                                         canonicalIndex.bind(copy.id,sourceKey,cached.revision,canonicalSourceImage,canonicalSourceThread)
+02873                                         // A legacy canonical is authoritative at its real node;
+02874                                         // do not spawn a possibly stale source-key duplicate.
+02875                                     }
+02876                                 }else local?.let{reusable->
+02877                                     // Publish before cloning. The returned server snapshot may
+02878                                     // have changed grid while the local copy was being prepared.
+02879                                     val image=canonicalIndex.sourceImageUrl(reusable.id).ifBlank{item.imageUrl}
+02880                                     val thread=canonicalIndex.sourceThreadUrl(reusable.id).ifBlank{item.threadUrl}
+02881                                     val authoritative=canonicalCloud.publishIfAbsentBlocking(sourceKey,reusable,thread,image)
+02882                                         ?.getOrThrow() ?: error("אימות הפרסום ב-Firebase חרג מזמן ההמתנה")
+02883                                     authoritative.createLocalCopy(library,clueRegionStore).also{copy->
+02884                                         if(AnswerChecking.signature(reusable.crossword)==authoritative.gridSignature)
+-- 2868 2893 hit 2879 --
+02868                                     cached.createLocalCopy(library,clueRegionStore).also{copy->
+02869                                         answerOverrideStore.putAll(copy.id,cached.answerOverrides)
+02870                                         val canonicalSourceImage=cached.sourceImageUrl.ifBlank{item.imageUrl}
+02871                                         val canonicalSourceThread=cached.sourceThreadUrl.ifBlank{item.threadUrl}
+02872                                         canonicalIndex.bind(copy.id,sourceKey,cached.revision,canonicalSourceImage,canonicalSourceThread)
+02873                                         // A legacy canonical is authoritative at its real node;
+02874                                         // do not spawn a possibly stale source-key duplicate.
+02875                                     }
+02876                                 }else local?.let{reusable->
+02877                                     // Publish before cloning. The returned server snapshot may
+02878                                     // have changed grid while the local copy was being prepared.
+02879                                     val image=canonicalIndex.sourceImageUrl(reusable.id).ifBlank{item.imageUrl}
+02880                                     val thread=canonicalIndex.sourceThreadUrl(reusable.id).ifBlank{item.threadUrl}
+02881                                     val authoritative=canonicalCloud.publishIfAbsentBlocking(sourceKey,reusable,thread,image)
+02882                                         ?.getOrThrow() ?: error("אימות הפרסום ב-Firebase חרג מזמן ההמתנה")
+02883                                     authoritative.createLocalCopy(library,clueRegionStore).also{copy->
+02884                                         if(AnswerChecking.signature(reusable.crossword)==authoritative.gridSignature)
+02885                                             answerOverrideStore.putAll(copy.id,answerOverrideStore.get(reusable.id))
+02886                                         answerOverrideStore.putAll(copy.id,authoritative.answerOverrides)
+02887                                         val remoteImage=authoritative.sourceImageUrl.ifBlank{image}
+02888                                         val remoteThread=authoritative.sourceThreadUrl.ifBlank{thread}
+02889                                         canonicalIndex.bind(copy.id,sourceKey,authoritative.revision,remoteImage,remoteThread)
+02890                                     }
+02891                                 }
+02892                             }.onFailure{t->
+02893                                 DebugLog.w("CANONICAL","favorite-reuse-failed issue=${DebugLog.compactId(sourceKey)} reason=${t.javaClass.simpleName}")
+-- 2876 2901 hit 2887 --
+02876                                 }else local?.let{reusable->
+02877                                     // Publish before cloning. The returned server snapshot may
+02878                                     // have changed grid while the local copy was being prepared.
+02879                                     val image=canonicalIndex.sourceImageUrl(reusable.id).ifBlank{item.imageUrl}
+02880                                     val thread=canonicalIndex.sourceThreadUrl(reusable.id).ifBlank{item.threadUrl}
+02881                                     val authoritative=canonicalCloud.publishIfAbsentBlocking(sourceKey,reusable,thread,image)
+02882                                         ?.getOrThrow() ?: error("אימות הפרסום ב-Firebase חרג מזמן ההמתנה")
+02883                                     authoritative.createLocalCopy(library,clueRegionStore).also{copy->
+02884                                         if(AnswerChecking.signature(reusable.crossword)==authoritative.gridSignature)
+02885                                             answerOverrideStore.putAll(copy.id,answerOverrideStore.get(reusable.id))
+02886                                         answerOverrideStore.putAll(copy.id,authoritative.answerOverrides)
+02887                                         val remoteImage=authoritative.sourceImageUrl.ifBlank{image}
+02888                                         val remoteThread=authoritative.sourceThreadUrl.ifBlank{thread}
+02889                                         canonicalIndex.bind(copy.id,sourceKey,authoritative.revision,remoteImage,remoteThread)
+02890                                     }
+02891                                 }
+02892                             }.onFailure{t->
+02893                                 DebugLog.w("CANONICAL","favorite-reuse-failed issue=${DebugLog.compactId(sourceKey)} reason=${t.javaClass.simpleName}")
+02894                             }.getOrNull()
+02895                             if(reused!=null){
+02896                                 downloadedStore.record(reused.id,item);favoriteStore.markImported(seriesId,item.dateMillis);unopenedStore.markNew(reused.id)
+02897                                 val expected=reused.crossword.startNumbers(Direction.HORIZONTAL).size+reused.crossword.startNumbers(Direction.VERTICAL).size
+02898                                 imported+=FavoriteImported(reused,seriesId,expected,false)
+02899                                 favoriteStatus(seriesId,"נוסף לתשבצים שלי",FavoriteImportSignals.STATE_DONE)
+02900                                 autoImportLog("favorite=${series.title}; date=${item.dateMillis}; reused=decoded-cache; puzzle=${reused.id}")
+02901                                 continue
+-- 2981 3006 hit 2992 --
+02981                             }
+02982                             if(!claim.owned){
+02983                                 favoriteStatus(seriesId,"ממתין לפענוח במכשיר אחר…")
+02984                                 var shared:CanonicalPuzzleCloud.CachedPuzzle?=null
+02985                                 var waitAttempt=0
+02986                                 while(shared==null&&waitAttempt<8){
+02987                                     active();shared=canonicalCloud.fetchBlocking(sourceKey,2_000L)
+02988                                     if(shared==null){Thread.sleep(500L);waitAttempt++}
+02989                                 }
+02990                                 if(shared!=null){
+02991                                     val copy=shared!!.createLocalCopy(library,clueRegionStore)
+02992                                     val canonicalSourceImage=shared!!.sourceImageUrl.ifBlank{item.imageUrl}
+02993                                     val canonicalSourceThread=shared!!.sourceThreadUrl.ifBlank{item.threadUrl}
+02994                                     canonicalIndex.bind(copy.id,sourceKey,shared!!.revision,canonicalSourceImage,canonicalSourceThread)
+02995                                     downloadedStore.record(copy.id,item);favoriteStore.markImported(seriesId,item.dateMillis);unopenedStore.markNew(copy.id)
+02996                                     val expected=copy.crossword.startNumbers(Direction.HORIZONTAL).size+copy.crossword.startNumbers(Direction.VERTICAL).size
+02997                                     imported+=FavoriteImported(copy,seriesId,expected,false)
+02998                                     favoriteStatus(seriesId,"נוסף לתשבצים שלי",FavoriteImportSignals.STATE_DONE)
+02999                                     continue
+03000                                 }
+03001                                 failed++;favoriteStore.markFailure(seriesId,item.dateMillis)
+03002                                 favoriteStatus(seriesId,"הפענוח במכשיר האחר טרם הסתיים",FavoriteImportSignals.STATE_FAILED)
+03003                                 continue
+03004                             }
+03005                             ownsDecodeClaim=true
+03006                         }
+-- 3032 3057 hit 3043 --
+03032                             val bmp=selected.bitmap;chosenImageUrl=selected.imageUrl
+03033                             val prepared=choice.prepared
+03034                             autoImportLog("favorite=${series.title}; selected-image=${selected.imageUrl}; candidates=${loadedCandidates.size}; visual=${"%.2f".format(selected.visualScore)}; reason=${choice.selectionReason.replace(';',',').take(180)}")
+03035                             val regions=PuzzleRegions(prepared.points.map{Vec2(it.x,it.y)},prepared.horizontalRegion?.map{Vec2(it.x,it.y)},prepared.verticalRegion?.map{Vec2(it.x,it.y)})
+03036                             val record=library.create(CrosswordSession(prepared.crossword),prepared.title,regions)
+03037                             decodeMetadataStore.put(record.id,prepared.providerUsed,prepared.modelUsed,prepared.fallbackUsed,prepared.forcedRedecode,prepared.aiMode,prepared.reasoningPath,prepared.aiElapsedMs,prepared.aiUsage)
+03038                             val safeClueGeometry=sanitizedImportedClueGeometries(bmp,prepared)
+03039                             val safeClueRegions=sanitizedImportedClueBoxes(bmp,prepared)
+03040                             clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,chosenImageUrl)
+03041                             saveClueGeometryDiagnostics(record.id,bmp,prepared)
+03042                             downloadedStore.record(record.id,item);sourceKey?.let{canonicalIndex.bind(record.id,it,0L,chosenImageUrl,item.threadUrl)}
+03043                             library.writeSource(record.id){out->check(bmp.compress(Bitmap.CompressFormat.PNG,100,out))}
+03044                             if(sourceKey!=null){
+03045                                 canonicalCloud.publishIfAbsent(sourceKey,record,item.threadUrl,chosenImageUrl,clueRegions=safeClueRegions,clueGeometries=safeClueGeometry){published->
+03046                                     published.onSuccess{cached->canonicalIndex.bind(record.id,sourceKey,cached.revision,chosenImageUrl,item.threadUrl)}
+03047                                     canonicalCloud.releaseDecodeClaim(sourceKey)
+03048                                 }
+03049                                 ownsDecodeClaim=false
+03050                             }
+03051                             val expected=prepared.crossword.startNumbers(Direction.HORIZONTAL).size+prepared.crossword.startNumbers(Direction.VERTICAL).size
+03052                             val clues=prepared.crossword.clues.map{it.number to it.direction}.toSet().size
+03053                             favoriteStore.markImported(seriesId,item.dateMillis);unopenedStore.markNew(record.id)
+03054                             imported+=FavoriteImported(record,seriesId,expected,true)
+03055                             favoriteStatus(seriesId,"מביא פתרונות…")
+03056                             autoImportLog("favorite=${series.title}; title=${prepared.title}; grid=${prepared.crossword.rows}x${prepared.crossword.cols}; variant=${prepared.gridVariant}; clues=$clues/$expected; source=automatic-startup")
+03057                         }catch(e:Exception){
+-- 3236 3261 hit 3247 --
+03236     }
+03237 
+03238     private fun showMenu() {
+03239         val puzzleActions = mutableListOf<Pair<String, () -> Unit>>(
+03240             "הגדרות האפליקציה" to { showSettings() },
+03241             "עריכת טקסט ההגדרות" to { editClues() }
+03242         )
+03243         if(!activeDuelMode) {
+03244             puzzleActions += "חפש פתרונות" to { showSolutionSearchChoices() }
+03245         }
+03246         val cw=board.crossword
+03247         val sourceMissing=cw!=null && source==null && library.sourceFiles(cw.puzzleId).isEmpty() && canonicalIndex.sourceImageUrl(cw.puzzleId).isBlank()
+03248         if(sourceMissing || (cw!=null && isLocalStructuredSource(cw.puzzleId)))
+03249             puzzleActions += "צירוף תמונת מקור" to { attachSourceImage() }
+03250         if(cw!=null && settings.clueBelowMode==ClueBelowMode.SOURCE){
+03251             puzzleActions += "חתוך אזור ההגדרות" to { chooseSourceClueCrop() }
+03252             if(sourceClueCropStore.get(cw.puzzleId)!=null || hasGalleryPublisherDisplay(cw))
+03253                 puzzleActions += "ביטול חיתוך ההגדרות" to {
+03254                     if(hasGalleryPublisherDisplay(cw)) {
+03255                         withSource(displayOnly=true){bmp->
+03256                             if(bmp!=null){
+03257                                 sourceClueCropStore.clearBound(cw.puzzleId,LocalOcrImageIdentity.fingerprint(bmp))
+03258                                 sourceViewportStore.clear(cw.puzzleId)
+03259                                 loadClueSourceBelow()
+03260                             }
+03261                         }
+-- 3405 3430 hit 3416 --
+03405                         // An old failed first AI attempt may be retried only with
+03406                         // a fresh Firebase administrator-role verification.
+03407                         requireAdminForForcedRedecode()
+03408                     }else if(issue!=null){
+03409                         val aiAttempt=canonicalCloud.claimFirstAiAttemptBlocking(issue,5_000L)
+03410                             ?:error("לא ניתן לאמת הרשאת פענוח AI")
+03411                         if(!aiAttempt.owned)error("פענוח AI כבר נוסה עבור התשבץ הזה. פענוח מחדש זמין למנהל בלבד")
+03412                         aiAttemptClaimed=true
+03413                     }
+03414                 }){stage->post(id){busy(true,stage);importSession.stage(stage)}}
+03415                 selected=choice.selected
+03416                 pendingCanonicalImageUrl=choice.selected.imageUrl.takeIf{it.startsWith("https://")}.orEmpty()
+03417                 pendingCanonicalThreadUrl=item.threadUrl
+03418                 if(Thread.currentThread().isInterrupted)throw InterruptedException("import cancelled")
+03419                 WeeklyImageSelector.recycle(loadedCandidates,choice.selected)
+03420                 loadedCandidates=listOf(choice.selected)
+03421                 post(id){importSession.stage("שומר תשבץ…");commitFullAutoImport(id,choice.selected.bitmap,choice.prepared)}
+03422                 ownsClaim=false
+03423             }catch(e:Exception){
+03424                 val trace=importSession.currentTraceId
+03425                 if(ownsClaim&&issue!=null)canonicalCloud.releaseDecodeClaim(issue)
+03426                 WeeklyImageSelector.recycle(loadedCandidates,selected)
+03427                 if(e is InterruptedException || e is CancellationException){
+03428                     DebugLog.w("IMPORT","id=$trace interrupted")
+03429                     return@submit
+03430                 }
+-- 3442 3467 hit 3453 --
+03442                     WeeklyCrosswordModeration(applicationContext).markDecodeFailureBlocking(item,issue,reasonCode,e.message.orEmpty())
+03443                 }
+03444                 val userMessage=when{
+03445                     GeminiSmartOcr.isAiFailure(e)->GeminiSmartOcr.failureSummary(e)
+03446                     e is InvalidDecodeException->"הייבוא נכשל: ${e.message.orEmpty()}"
+03447                     else->"הייבוא לא הושלם: ${e.message.orEmpty()}"
+03448                 }
+03449                 val retryContext=if(wasForcedRedecode) ForcedRedecodeRetryContext(
+03450                     weeklyItem=item,
+03451                     suggestedTitle=suggestedTitle,
+03452                     issueKey=issue,
+03453                     sourceImageUrl=item.imageUrl.takeIf{it.startsWith("https://")}.orEmpty(),
+03454                     sourceThreadUrl=item.threadUrl
+03455                 ) else null
+03456                 post(id){
+03457                     finishMainImport();clearPendingCanonical();busy(false)
+03458                     if(retryContext!=null)showForcedRedecodeRetry(retryContext,userMessage) else toast(userMessage)
+03459                 }
+03460             }
+03461         }
+03462     }
+03463 
+03464     private fun loadImageAuto(suggestedTitle:String?, retryFile:File?=null, load:()->Bitmap) {
+03465         pendingCanonicalLocalBitmap=true
+03466         ScreenUi.hideKeyboard(board)
+03467         val id=++generation
+-- 3498 3523 hit 3509 --
+03498                 }
+03499                 DebugLog.e("IMPORT","id=$trace auto-image failed",e)
+03500                 val userMessage=when{
+03501                     GeminiSmartOcr.isAiFailure(e)->GeminiSmartOcr.failureSummary(e)
+03502                     e is InvalidDecodeException->"הייבוא נכשל: ${e.message.orEmpty()}"
+03503                     else->"הייבוא האוטומטי לא הושלם: ${e.message.orEmpty()}"
+03504                 }
+03505                 val retryContext=if(pendingForcedRedecode&&retryFile!=null) ForcedRedecodeRetryContext(
+03506                     localFile=retryFile,
+03507                     suggestedTitle=suggestedTitle,
+03508                     issueKey=pendingCanonicalIssueKey,
+03509                     sourceImageUrl=pendingCanonicalImageUrl,
+03510                     sourceThreadUrl=pendingCanonicalThreadUrl
+03511                 ) else null
+03512                 post(id) {
+03513                     finishMainImport();busy(false)
+03514                     if(retryContext!=null){
+03515                         loaded?.takeIf{it!==source && !it.isRecycled}?.let{runCatching{it.recycle()}}
+03516                         clearPendingCanonical()
+03517                         showForcedRedecodeRetry(retryContext,userMessage)
+03518                     }else{
+03519                         toast("$userMessage עובר למסלול הרגיל.")
+03520                         val bmp=loaded
+03521                         if(bmp!=null) {
+03522                             pendingImportedTitle=PuzzleLibrary.cleanTitle(suggestedTitle.orEmpty()).takeIf { it.isNotBlank() }
+03523                             val suggestion=GridDetector.suggestGridBounds(bmp)?.let { r -> BoxF(r.left.toFloat(),r.top.toFloat(),r.right.toFloat(),r.bottom.toFloat()) }
+-- 3537 3562 hit 3548 --
+03537      * used only for obtaining a stable grid reference, never as the final source choice.
+03538      */
+03539     private fun activeImportTraceId():String = importSession.currentTraceId.ifBlank { backgroundImportTraceId.ifBlank{"background"} }
+03540 
+03541     private fun savePendingSourceGeometrySnapshot(
+03542         bitmap:Bitmap,
+03543         crossword:Crossword,
+03544         points:List<PointF>,
+03545         geometries:Map<ClueEditorModel.Key,ClueGeometry>,
+03546         provider:String,
+03547         model:String,
+03548         sourceImageUrl:String,
+03549         status:String,
+03550         validationStatus:String
+03551     ){
+03552         val sourceKey=pendingCanonicalIssueKey?.takeIf{it.isNotBlank()}?:return
+03553         val expected=crossword.startNumbers(Direction.HORIZONTAL).size+crossword.startNumbers(Direction.VERTICAL).size
+03554         clueGeometryDebugStore.putSourceSnapshot(
+03555             sourceKey,geometries,bitmap.width,bitmap.height,points,provider,model,
+03556             expectedCount=expected,attempted=true,status=status,
+03557             validationStatus=validationStatus,sourceImageUrl=sourceImageUrl
+03558         )
+03559     }
+03560 
+03561     private fun prepareFullAutoCandidates(
+03562         candidates:List<WeeklyImageSelector.Candidate>,
+-- 3546 3571 hit 3557 --
+03546         provider:String,
+03547         model:String,
+03548         sourceImageUrl:String,
+03549         status:String,
+03550         validationStatus:String
+03551     ){
+03552         val sourceKey=pendingCanonicalIssueKey?.takeIf{it.isNotBlank()}?:return
+03553         val expected=crossword.startNumbers(Direction.HORIZONTAL).size+crossword.startNumbers(Direction.VERTICAL).size
+03554         clueGeometryDebugStore.putSourceSnapshot(
+03555             sourceKey,geometries,bitmap.width,bitmap.height,points,provider,model,
+03556             expectedCount=expected,attempted=true,status=status,
+03557             validationStatus=validationStatus,sourceImageUrl=sourceImageUrl
+03558         )
+03559     }
+03560 
+03561     private fun prepareFullAutoCandidates(
+03562         candidates:List<WeeklyImageSelector.Candidate>,
+03563         suggestedTitle:String?,
+03564         beforeAi:()->Unit = {},
+03565         stage:(String)->Unit = {}
+03566     ):FullAutoChoice{
+03567         require(candidates.isNotEmpty()){ "לא נמצאו תמונות מועמדות" }
+03568         if(pendingGalleryRecovery && candidates.none { GalleryPublisherPolicy.isApprovedMedia(it.imageUrl) }) {
+03569             DebugLog.w("GALLERY_RECOVERY","BLOCKED reason=publisher-not-verified groups-fallback-ai=false")
+03570             error("תמונת הארץ לא אומתה. לא מפעילים AI על Google Groups במסלול שחזור מהארץ.")
+03571         }
+-- 3743 3768 hit 3754 --
+03743         val detailed=try {
+03744             runBlocking { GeminiSmartOcr({ model, fallback -> stage(GeminiSmartOcr.modelStageText(model,fallback)) },pendingAiDecodeMode,stage,
+03745                     if(pendingForcedRedecode)pendingAiRunOptions else AiRunOptions.DEFAULT,
+03746                     allowGallerySingleMissing).recognizeFullImageDetailed(original,crossword) }
+03747         } catch(t:Throwable) {
+03748             val provider=if(pendingAiDecodeMode==AiDecodeMode.OPENAI_SOL)"OpenAI" else "Gemini"
+03749             val model=when(pendingAiDecodeMode){
+03750                 AiDecodeMode.OPENAI_SOL->OpenAiWorkerClient.MODEL
+03751                 AiDecodeMode.GEMINI_LITE->GeminiSmartOcr.FALLBACK_MODEL
+03752                 else->GeminiSmartOcr.PRIMARY_MODEL
+03753             }
+03754             savePendingSourceGeometrySnapshot(original,crossword,points,emptyMap(),provider,model,pendingCanonicalImageUrl,"AI request failed","failed:${t.javaClass.simpleName}")
+03755             throw t
+03756         }
+03757         DebugLog.i("AI_VISION","id=${activeImportTraceId()} provider=${detailed.providerUsed} model=${detailed.modelUsed} mode=${detailed.decodeMode.wireValue} fallback=${detailed.fallbackUsed} h=${detailed.parsed.horizontal.size}/${crossword.startNumbers(Direction.HORIZONTAL).size} v=${detailed.parsed.vertical.size}/${crossword.startNumbers(Direction.VERTICAL).size}")
+03758         val rawGeometry=if(detailed.clueGeometries.isNotEmpty())detailed.clueGeometries else detailed.clueBoxes.mapValues{ClueGeometry(it.value)}
+03759         savePendingSourceGeometrySnapshot(original,crossword,points,rawGeometry,detailed.providerUsed,detailed.modelUsed,pendingCanonicalImageUrl,
+03760             "one-pass partial ${rawGeometry.size}/${crossword.startNumbers(Direction.HORIZONTAL).size+crossword.startNumbers(Direction.VERTICAL).size}","pending-validation")
+03761         stage("מאמת פענוח…")
+03762         val partial=if(pendingForcedRedecode)
+03763             PartialClueReviewPolicy.fillForAdminCanonical(crossword,detailed.parsed,detailed.printedCounts)
+03764             else null
+03765         val accepted=partial ?: if(allowGallerySingleMissing)
+03766             GalleryRecoveryPolicy.fillSingleMissing(crossword,detailed.parsed,detailed.printedCounts) ?: detailed.parsed
+03767             else detailed.parsed
+03768         if(partial!=null)DebugLog.w("LOCAL_PARTIAL_REVIEW",
+-- 3748 3773 hit 3759 --
+03748             val provider=if(pendingAiDecodeMode==AiDecodeMode.OPENAI_SOL)"OpenAI" else "Gemini"
+03749             val model=when(pendingAiDecodeMode){
+03750                 AiDecodeMode.OPENAI_SOL->OpenAiWorkerClient.MODEL
+03751                 AiDecodeMode.GEMINI_LITE->GeminiSmartOcr.FALLBACK_MODEL
+03752                 else->GeminiSmartOcr.PRIMARY_MODEL
+03753             }
+03754             savePendingSourceGeometrySnapshot(original,crossword,points,emptyMap(),provider,model,pendingCanonicalImageUrl,"AI request failed","failed:${t.javaClass.simpleName}")
+03755             throw t
+03756         }
+03757         DebugLog.i("AI_VISION","id=${activeImportTraceId()} provider=${detailed.providerUsed} model=${detailed.modelUsed} mode=${detailed.decodeMode.wireValue} fallback=${detailed.fallbackUsed} h=${detailed.parsed.horizontal.size}/${crossword.startNumbers(Direction.HORIZONTAL).size} v=${detailed.parsed.vertical.size}/${crossword.startNumbers(Direction.VERTICAL).size}")
+03758         val rawGeometry=if(detailed.clueGeometries.isNotEmpty())detailed.clueGeometries else detailed.clueBoxes.mapValues{ClueGeometry(it.value)}
+03759         savePendingSourceGeometrySnapshot(original,crossword,points,rawGeometry,detailed.providerUsed,detailed.modelUsed,pendingCanonicalImageUrl,
+03760             "one-pass partial ${rawGeometry.size}/${crossword.startNumbers(Direction.HORIZONTAL).size+crossword.startNumbers(Direction.VERTICAL).size}","pending-validation")
+03761         stage("מאמת פענוח…")
+03762         val partial=if(pendingForcedRedecode)
+03763             PartialClueReviewPolicy.fillForAdminCanonical(crossword,detailed.parsed,detailed.printedCounts)
+03764             else null
+03765         val accepted=partial ?: if(allowGallerySingleMissing)
+03766             GalleryRecoveryPolicy.fillSingleMissing(crossword,detailed.parsed,detailed.printedCounts) ?: detailed.parsed
+03767             else detailed.parsed
+03768         if(partial!=null)DebugLog.w("LOCAL_PARTIAL_REVIEW",
+03769             "admin partial placeholders=${partial.horizontal.values.count(GalleryRecoveryPolicy::isPlaceholder)+partial.vertical.values.count(GalleryRecoveryPolicy::isPlaceholder)}; canonical-publish=pending; aiRequests=0")
+03770         try {
+03771             DecodeValidation.requireValid(crossword,accepted,detailed.printedCounts)
+03772         } catch(e:InvalidDecodeException) {
+03773             savePendingSourceGeometrySnapshot(original,crossword,points,rawGeometry,detailed.providerUsed,detailed.modelUsed,pendingCanonicalImageUrl,
+-- 3762 3787 hit 3773 --
+03762         val partial=if(pendingForcedRedecode)
+03763             PartialClueReviewPolicy.fillForAdminCanonical(crossword,detailed.parsed,detailed.printedCounts)
+03764             else null
+03765         val accepted=partial ?: if(allowGallerySingleMissing)
+03766             GalleryRecoveryPolicy.fillSingleMissing(crossword,detailed.parsed,detailed.printedCounts) ?: detailed.parsed
+03767             else detailed.parsed
+03768         if(partial!=null)DebugLog.w("LOCAL_PARTIAL_REVIEW",
+03769             "admin partial placeholders=${partial.horizontal.values.count(GalleryRecoveryPolicy::isPlaceholder)+partial.vertical.values.count(GalleryRecoveryPolicy::isPlaceholder)}; canonical-publish=pending; aiRequests=0")
+03770         try {
+03771             DecodeValidation.requireValid(crossword,accepted,detailed.printedCounts)
+03772         } catch(e:InvalidDecodeException) {
+03773             savePendingSourceGeometrySnapshot(original,crossword,points,rawGeometry,detailed.providerUsed,detailed.modelUsed,pendingCanonicalImageUrl,
+03774                 "one-pass failed ${rawGeometry.size}/${crossword.startNumbers(Direction.HORIZONTAL).size+crossword.startNumbers(Direction.VERTICAL).size}","failed:${e.reasonCode}")
+03775             throw e
+03776         }
+03777         if(accepted!==detailed.parsed)DebugLog.w("GALLERY_RECOVERY",
+03778             "admin-partial placeholders kept for canonical publication; no inferred OCR text")
+03779         ClueParser.applyParsed(accepted,crossword)
+03780 
+03781         val fallback="תשבץ "+java.text.SimpleDateFormat("dd/MM/yyyy HH:mm",java.util.Locale.getDefault()).format(java.util.Date())
+03782         val title=PuzzleLibrary.cleanTitle(cleanSuggested ?: detailed.detectedTitle.orEmpty()).ifBlank { fallback }
+03783         return FullAutoPrepared(points,crossword,accepted,title,guessed?.first,guessed?.second,located.variant,detailed.clueBoxes,detailed.providerUsed,detailed.modelUsed,detailed.fallbackUsed,pendingForcedRedecode,detailed.decodeMode,detailed.reasoningPath,detailed.aiElapsedMs,detailed.clueGeometries).copy(aiUsage=detailed.aiUsage)
+03784     }
+03785 
+03786     private fun validGeometrySubset(
+03787         original:Bitmap,
+-- 3795 3820 hit 3806 --
+03795             val verdict=if(trustedPhysicalRows && geometry.lines.isEmpty())
+03796                 ClueRegionValidation.validateNormalized(geometry.union,original.width,original.height,points,allowVerifiedPhysicalRow=true)
+03797             else ClueRegionValidation.validateGeometryNormalized(geometry,original.width,original.height,points)
+03798             if(verdict.usable)put(key,geometry)
+03799             else DebugLog.w("CLUE_REGION","geometry reject number=${key.number} dir=${key.direction} reason=${verdict.reason}")
+03800         }
+03801     }
+03802 
+03803     private fun canonicalGeometryForSource(
+03804         original:Bitmap,
+03805         prepared:FullAutoPrepared,
+03806         sourceImageUrl:String,
+03807         expected:Set<ClueEditorModel.Key>,
+03808         providerGeometry:Map<ClueEditorModel.Key,ClueGeometry>
+03809     ):Map<ClueEditorModel.Key,ClueGeometry> {
+03810         val issue=pendingCanonicalIssueKey?:return emptyMap()
+03811         val cached=runCatching{canonicalCloud.fetchBlocking(issue,2_500L)}.getOrNull()?:return emptyMap()
+03812         val currentUrl=sourceImageUrl.trim()
+03813         val storedUrl=cached.sourceImageUrl.trim()
+03814         val sameSource=currentUrl.isNotBlank() && storedUrl.isNotBlank() && currentUrl==storedUrl
+03815         if(!sameSource){
+03816             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored source-mismatch current=${DebugLog.compactId(currentUrl)} stored=${DebugLog.compactId(storedUrl)}")
+03817             return emptyMap()
+03818         }
+03819         if(cached.clueRegionSchema!=CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+03820             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored schema=${cached.clueRegionSchema.ifBlank{"legacy"}} required=${CanonicalPuzzleCloud.CLUE_REGION_SCHEMA}")
+-- 3801 3826 hit 3812 --
+03801     }
+03802 
+03803     private fun canonicalGeometryForSource(
+03804         original:Bitmap,
+03805         prepared:FullAutoPrepared,
+03806         sourceImageUrl:String,
+03807         expected:Set<ClueEditorModel.Key>,
+03808         providerGeometry:Map<ClueEditorModel.Key,ClueGeometry>
+03809     ):Map<ClueEditorModel.Key,ClueGeometry> {
+03810         val issue=pendingCanonicalIssueKey?:return emptyMap()
+03811         val cached=runCatching{canonicalCloud.fetchBlocking(issue,2_500L)}.getOrNull()?:return emptyMap()
+03812         val currentUrl=sourceImageUrl.trim()
+03813         val storedUrl=cached.sourceImageUrl.trim()
+03814         val sameSource=currentUrl.isNotBlank() && storedUrl.isNotBlank() && currentUrl==storedUrl
+03815         if(!sameSource){
+03816             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored source-mismatch current=${DebugLog.compactId(currentUrl)} stored=${DebugLog.compactId(storedUrl)}")
+03817             return emptyMap()
+03818         }
+03819         if(cached.clueRegionSchema!=CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+03820             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored schema=${cached.clueRegionSchema.ifBlank{"legacy"}} required=${CanonicalPuzzleCloud.CLUE_REGION_SCHEMA}")
+03821             return emptyMap()
+03822         }
+03823         // Rebuild full canonical geometry. Physical rows remain authoritative even
+03824         // when a cross-column clue intentionally has no safe single union box.
+03825         val trustedBoxes=cached.trustedClueRegions()
+03826         val trustedLines=cached.trustedClueRegionLines()
+-- 3802 3827 hit 3813 --
+03802 
+03803     private fun canonicalGeometryForSource(
+03804         original:Bitmap,
+03805         prepared:FullAutoPrepared,
+03806         sourceImageUrl:String,
+03807         expected:Set<ClueEditorModel.Key>,
+03808         providerGeometry:Map<ClueEditorModel.Key,ClueGeometry>
+03809     ):Map<ClueEditorModel.Key,ClueGeometry> {
+03810         val issue=pendingCanonicalIssueKey?:return emptyMap()
+03811         val cached=runCatching{canonicalCloud.fetchBlocking(issue,2_500L)}.getOrNull()?:return emptyMap()
+03812         val currentUrl=sourceImageUrl.trim()
+03813         val storedUrl=cached.sourceImageUrl.trim()
+03814         val sameSource=currentUrl.isNotBlank() && storedUrl.isNotBlank() && currentUrl==storedUrl
+03815         if(!sameSource){
+03816             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored source-mismatch current=${DebugLog.compactId(currentUrl)} stored=${DebugLog.compactId(storedUrl)}")
+03817             return emptyMap()
+03818         }
+03819         if(cached.clueRegionSchema!=CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+03820             DebugLog.i("AI_GEOMETRY_PASS","canonical geometry ignored schema=${cached.clueRegionSchema.ifBlank{"legacy"}} required=${CanonicalPuzzleCloud.CLUE_REGION_SCHEMA}")
+03821             return emptyMap()
+03822         }
+03823         // Rebuild full canonical geometry. Physical rows remain authoritative even
+03824         // when a cross-column clue intentionally has no safe single union box.
+03825         val trustedBoxes=cached.trustedClueRegions()
+03826         val trustedLines=cached.trustedClueRegionLines()
+03827         val canonicalGeometry=(trustedBoxes.keys+trustedLines.keys).associateWith { key ->
+-- 3851 3876 hit 3862 --
+03851      *    recovery call on the SAME provider/model; clue text/answers are never reread;
+03852      * 4. Canonical geometry may still fill missing rows but never replaces valid fresh rows.
+03853      */
+03854     /** 0.15.139: the AI transcribes ONLY. All new source-image crops are made on
+03855      * device using printed-line OCR geometry, with conservative 0.1.42 recovery.
+03856      * Existing trusted canonical/manual crops survive for unresolved keys.
+03857      * Old AI boxes are NOT used for positioning or publishing new crops.
+03858      */
+03859     private fun enrichClueGeometry(
+03860         original:Bitmap,
+03861         prepared:FullAutoPrepared,
+03862         sourceImageUrl:String,
+03863         stage:(String)->Unit
+03864     ):FullAutoPrepared {
+03865         val expected=(prepared.crossword.startNumbers(Direction.HORIZONTAL).map{ClueEditorModel.Key(it,Direction.HORIZONTAL)}+
+03866             prepared.crossword.startNumbers(Direction.VERTICAL).map{ClueEditorModel.Key(it,Direction.VERTICAL)}).toSet()
+03867         if(expected.isEmpty())return prepared
+03868         // The same local printed-row crop pass runs from both administrator menus.
+03869         val local=LocalOcrCropPass.run(this,original,prepared.crossword,prepared.points,stage)
+03870         val current=local.trusted
+03871         // Reuse only *source-matched* canonical geometry. Never restore AI
+03872         // positional estimates in a forced re-decode; they are not crop evidence.
+03873         val oldTrusted=canonicalGeometryForSource(original,prepared,sourceImageUrl,expected,emptyMap())
+03874         val combined=linkedMapOf<ClueEditorModel.Key,ClueGeometry>().apply{
+03875             putAll(oldTrusted)
+03876             putAll(current)
+-- 3862 3887 hit 3873 --
+03862         sourceImageUrl:String,
+03863         stage:(String)->Unit
+03864     ):FullAutoPrepared {
+03865         val expected=(prepared.crossword.startNumbers(Direction.HORIZONTAL).map{ClueEditorModel.Key(it,Direction.HORIZONTAL)}+
+03866             prepared.crossword.startNumbers(Direction.VERTICAL).map{ClueEditorModel.Key(it,Direction.VERTICAL)}).toSet()
+03867         if(expected.isEmpty())return prepared
+03868         // The same local printed-row crop pass runs from both administrator menus.
+03869         val local=LocalOcrCropPass.run(this,original,prepared.crossword,prepared.points,stage)
+03870         val current=local.trusted
+03871         // Reuse only *source-matched* canonical geometry. Never restore AI
+03872         // positional estimates in a forced re-decode; they are not crop evidence.
+03873         val oldTrusted=canonicalGeometryForSource(original,prepared,sourceImageUrl,expected,emptyMap())
+03874         val combined=linkedMapOf<ClueEditorModel.Key,ClueGeometry>().apply{
+03875             putAll(oldTrusted)
+03876             putAll(current)
+03877         }
+03878         val approved=validGeometrySubset(original,prepared.points,expected,combined)
+03879             .filterValues(ClueGeometryEvidencePolicy::canPublish)
+03880         val millis=local.elapsedMs
+03881         val count=local.ocrLineCount
+03882         val misses=(expected-approved.keys).size
+03883         val wraps=local.wrapped.size
+03884         val status="local-OCR accepted=${current.size} reused=${oldTrusted.size} total=${approved.size}/${expected.size} " +
+03885             "wrapped=$wraps missing=$misses OCR-lines=$count"
+03886         DebugLog.i("LOCAL_OCR_CROP","$status elapsedMs=$millis; modelCoordinates=false; aiRequests=0")
+03887         return prepared.copy(
+-- 3897 3922 hit 3908 --
+03897 
+03898     private fun saveClueGeometryDiagnostics(puzzleId:String, original:Bitmap, prepared:FullAutoPrepared) {
+03899         val geometries=if(prepared.clueGeometries.isNotEmpty())prepared.clueGeometries
+03900             else prepared.clueBoxes.mapValues { ClueGeometry(it.value) }
+03901         val expected=prepared.crossword.startNumbers(Direction.HORIZONTAL).size+prepared.crossword.startNumbers(Direction.VERTICAL).size
+03902         val provider=prepared.geometryProviderUsed.ifBlank{prepared.providerUsed}
+03903         val model=prepared.geometryModelUsed.ifBlank{prepared.modelUsed}
+03904         clueGeometryDebugStore.putSnapshot(
+03905             puzzleId,geometries,original.width,original.height,prepared.points,provider,model,
+03906             expectedCount=expected,attempted=prepared.geometryAttempted,status=prepared.geometryStatus,
+03907             validationStatus=if(geometries.size==expected && geometries.values.all(ClueGeometryEvidencePolicy::canPublish))
+03908                 "valid" else "partial-unverified",sourceImageUrl=if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original) else pendingCanonicalImageUrl
+03909         )
+03910         pendingCanonicalIssueKey?.takeIf{it.isNotBlank()}?.let { sourceKey ->
+03911             clueGeometryDebugStore.putSourceSnapshot(
+03912                 sourceKey,geometries,original.width,original.height,prepared.points,provider,model,
+03913                 expectedCount=expected,attempted=prepared.geometryAttempted,status=prepared.geometryStatus,
+03914                 validationStatus=if(geometries.size==expected && geometries.values.all(ClueGeometryEvidencePolicy::canPublish))
+03915                     "valid" else "partial-unverified",sourceImageUrl=if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original) else pendingCanonicalImageUrl
+03916             )
+03917         }
+03918     }
+03919 
+03920     private fun sanitizedImportedClueGeometries(original:Bitmap,prepared:FullAutoPrepared):Map<ClueEditorModel.Key,ClueGeometry> {
+03921         val raw=if(prepared.clueGeometries.isNotEmpty())prepared.clueGeometries
+03922             else prepared.clueBoxes.mapValues{ClueGeometry(it.value)}
+-- 3904 3929 hit 3915 --
+03904         clueGeometryDebugStore.putSnapshot(
+03905             puzzleId,geometries,original.width,original.height,prepared.points,provider,model,
+03906             expectedCount=expected,attempted=prepared.geometryAttempted,status=prepared.geometryStatus,
+03907             validationStatus=if(geometries.size==expected && geometries.values.all(ClueGeometryEvidencePolicy::canPublish))
+03908                 "valid" else "partial-unverified",sourceImageUrl=if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original) else pendingCanonicalImageUrl
+03909         )
+03910         pendingCanonicalIssueKey?.takeIf{it.isNotBlank()}?.let { sourceKey ->
+03911             clueGeometryDebugStore.putSourceSnapshot(
+03912                 sourceKey,geometries,original.width,original.height,prepared.points,provider,model,
+03913                 expectedCount=expected,attempted=prepared.geometryAttempted,status=prepared.geometryStatus,
+03914                 validationStatus=if(geometries.size==expected && geometries.values.all(ClueGeometryEvidencePolicy::canPublish))
+03915                     "valid" else "partial-unverified",sourceImageUrl=if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original) else pendingCanonicalImageUrl
+03916             )
+03917         }
+03918     }
+03919 
+03920     private fun sanitizedImportedClueGeometries(original:Bitmap,prepared:FullAutoPrepared):Map<ClueEditorModel.Key,ClueGeometry> {
+03921         val raw=if(prepared.clueGeometries.isNotEmpty())prepared.clueGeometries
+03922             else prepared.clueBoxes.mapValues{ClueGeometry(it.value)}
+03923         return linkedMapOf<ClueEditorModel.Key,ClueGeometry>().apply {
+03924             raw.forEach { (key,geometry) ->
+03925                 val verdict=ClueRegionValidation.validateGeometryNormalized(geometry,original.width,original.height,prepared.points)
+03926                 if(verdict.usable && ClueGeometryEvidencePolicy.canPublish(geometry))put(key,geometry)
+03927                 else DebugLog.w("CLUE_REGION","import geometry reject number=${key.number} dir=${key.direction} reason=${verdict.reason} evidence=${geometry.evidence.wire}")
+03928             }
+03929         }
+-- 3952 3977 hit 3963 --
+03952                 horizontal=prepared.horizontalRegion?.map { Vec2(it.x,it.y) },
+03953                 vertical=prepared.verticalRegion?.map { Vec2(it.x,it.y) }
+03954             )
+03955             val record=library.create(CrosswordSession(prepared.crossword),prepared.title,regions)
+03956             check(library.load(record.id)?.id==record.id){"Imported puzzle did not persist to local library"}
+03957             DebugLog.i("LIBRARY_IMPORT","persisted id=${DebugLog.compactId(record.id)} forced=${prepared.forcedRedecode} title=${record.title}")
+03958             decodeMetadataStore.put(record.id,prepared.providerUsed,prepared.modelUsed,prepared.fallbackUsed,prepared.forcedRedecode,prepared.aiMode,prepared.reasoningPath,prepared.aiElapsedMs,prepared.aiUsage)
+03959             val safeClueGeometry=sanitizedImportedClueGeometries(original,prepared)
+03960             val safeClueRegions=sanitizedImportedClueBoxes(original,prepared)
+03961             clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,
+03962                 if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original)
+03963                 else pendingCanonicalImageUrl.ifBlank{LocalOcrImageIdentity.fingerprint(original)})
+03964             saveClueGeometryDiagnostics(record.id,original,prepared)
+03965             downloadedStore.recordFromTitle(record.id,record.title)
+03966             val canonicalIssueBeforeBind=pendingCanonicalIssueKey
+03967             val canonicalImageBeforeBind=pendingCanonicalImageUrl
+03968             val canonicalThreadBeforeBind=pendingCanonicalThreadUrl
+03969             val forcedCanonicalRefresh=prepared.forcedRedecode && !canonicalIssueBeforeBind.isNullOrBlank()
+03970             if(prepared.forcedRedecode && !forcedCanonicalRefresh)
+03971                 throw IllegalStateException("לא נמצא מזהה מקור לפענוח מחדש קנוני; לא ניתן לפרסם אוטומטית")
+03972             val localReview=prepared.crossword.clues.any{GalleryRecoveryPolicy.isPlaceholder(it.text)}
+03973             // Until Firebase confirms the transaction, even a fully decoded
+03974             // administrator correction is a recoverable unpublished local copy.
+03975             // This survives process death / APK replacement without another AI call.
+03976             if(forcedCanonicalRefresh)getSharedPreferences("higi_local_review",MODE_PRIVATE)
+03977                 .edit().putBoolean(record.id,true)
+-- 3956 3981 hit 3967 --
+03956             check(library.load(record.id)?.id==record.id){"Imported puzzle did not persist to local library"}
+03957             DebugLog.i("LIBRARY_IMPORT","persisted id=${DebugLog.compactId(record.id)} forced=${prepared.forcedRedecode} title=${record.title}")
+03958             decodeMetadataStore.put(record.id,prepared.providerUsed,prepared.modelUsed,prepared.fallbackUsed,prepared.forcedRedecode,prepared.aiMode,prepared.reasoningPath,prepared.aiElapsedMs,prepared.aiUsage)
+03959             val safeClueGeometry=sanitizedImportedClueGeometries(original,prepared)
+03960             val safeClueRegions=sanitizedImportedClueBoxes(original,prepared)
+03961             clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,
+03962                 if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original)
+03963                 else pendingCanonicalImageUrl.ifBlank{LocalOcrImageIdentity.fingerprint(original)})
+03964             saveClueGeometryDiagnostics(record.id,original,prepared)
+03965             downloadedStore.recordFromTitle(record.id,record.title)
+03966             val canonicalIssueBeforeBind=pendingCanonicalIssueKey
+03967             val canonicalImageBeforeBind=pendingCanonicalImageUrl
+03968             val canonicalThreadBeforeBind=pendingCanonicalThreadUrl
+03969             val forcedCanonicalRefresh=prepared.forcedRedecode && !canonicalIssueBeforeBind.isNullOrBlank()
+03970             if(prepared.forcedRedecode && !forcedCanonicalRefresh)
+03971                 throw IllegalStateException("לא נמצא מזהה מקור לפענוח מחדש קנוני; לא ניתן לפרסם אוטומטית")
+03972             val localReview=prepared.crossword.clues.any{GalleryRecoveryPolicy.isPlaceholder(it.text)}
+03973             // Until Firebase confirms the transaction, even a fully decoded
+03974             // administrator correction is a recoverable unpublished local copy.
+03975             // This survives process death / APK replacement without another AI call.
+03976             if(forcedCanonicalRefresh)getSharedPreferences("higi_local_review",MODE_PRIVATE)
+03977                 .edit().putBoolean(record.id,true)
+03978                 .putBoolean("source-upload-pending:${record.id}",pendingCanonicalLocalBitmap).apply()
+03979             // bindPendingCanonical() clears pending import flags. Snapshot source
+03980             // identity BEFORE that call so a selected local bitmap is never
+03981             // mistaken for the existing remote URL.
+-- 3989 4014 hit 4000 --
+03989                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single start issue=${DebugLog.compactId(issueKey)} puzzle=${DebugLog.compactId(record.id)} localSource=$wasLocalImage")
+03990                 fun publishWithSource(confirmedUrl:String,uploaded:Boolean){
+03991                     canonicalCloud.refreshDecodedForAdmin(
+03992                         issueKey,CrosswordCatalog.issueKeyFromSourceKey(issueKey),
+03993                         canonicalThreadBeforeBind,confirmedUrl,
+03994                         record,safeClueRegions,safeClueGeometry,settings.displayName,
+03995                         callback = { result -> runOnUiThread {
+03996                             // Release the claim after the complete cloud transaction.
+03997                             canonicalCloud.releaseDecodeClaim(issueKey)
+03998                             result.onSuccess { cached ->
+03999                                 canonicalIndex.bind(record.id,cached.issueKey,cached.revision,
+04000                                     cached.sourceImageUrl.ifBlank{confirmedUrl},
+04001                                     cached.sourceThreadUrl.ifBlank{canonicalThreadBeforeBind})
+04002                                 getSharedPreferences("higi_local_review",MODE_PRIVATE).edit()
+04003                                     .remove(record.id).remove("source-upload-pending:${record.id}").apply()
+04004                                 runCatching {
+04005                                     library.load(record.id)?.let { current ->
+04006                                         current.crossword.clues.forEach { clue ->
+04007                                             cached.clues[ClueEditorModel.Key(clue.number,clue.direction)]?.let { clue.text=it }
+04008                                         }
+04009                                         library.saveSession(current.session)
+04010                                     }
+04011                                 }.onFailure { DebugLog.w("ADMIN_REDECODE_CANONICAL","local-sync-failed reason=${it.javaClass.simpleName}") }
+04012                                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single committed issue=${DebugLog.compactId(issueKey)} revision=${cached.revision} uploaded=$uploaded")
+04013                                 if(board.crossword?.puzzleId==record.id){
+04014                                     library.load(record.id)?.let { syncCanonicalPuzzle(it,cached) }
+-- 4012 4037 hit 4023 --
+04012                                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single committed issue=${DebugLog.compactId(issueKey)} revision=${cached.revision} uploaded=$uploaded")
+04013                                 if(board.crossword?.puzzleId==record.id){
+04014                                     library.load(record.id)?.let { syncCanonicalPuzzle(it,cached) }
+04015                                     toast("הפענוח ותמונת המקור פורסמו לכל המשתמשים")
+04016                                 }
+04017                             }.onFailure { error ->
+04018                                 DebugLog.w("ADMIN_REDECODE_CANONICAL","single publish-failed issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04019                                 if(board.crossword?.puzzleId==record.id)
+04020                                     toast("הפענוח נשמר מקומית אך לא פורסם: ${error.message.orEmpty().take(120)}")
+04021                             }
+04022                         }},allowSourceReplacement=uploaded,
+04023                         previousSourceImageUrl=if(uploaded)canonicalImageBeforeBind else ""
+04024                     )
+04025                 }
+04026                 if(wasLocalImage){
+04027                     if(BuildConfig.HIGI_DRY_BUILD){
+04028                         canonicalCloud.releaseDecodeClaim(issueKey)
+04029                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","DRY local-only; upload and canonical publication blocked")
+04030                         toast("DRY: התמונה והפענוח נשמרו במכשיר בלבד; הקנוני לא השתנה")
+04031                     }else{
+04032                         // PNG encoding runs on a worker, not on the Android UI thread.
+04033                         executor.execute {
+04034                             CanonicalSourceImageStorage.upload(applicationContext,issueKey,original){ uploaded ->
+04035                                 runOnUiThread {
+04036                                     uploaded.onSuccess { stored ->
+04037                                         // Rebind LOCAL OCR geometry only after upload
+-- 4040 4065 hit 4051 --
+04040                                         publishWithSource(stored.url,true)
+04041                                     }.onFailure { error ->
+04042                                         canonicalCloud.releaseDecodeClaim(issueKey)
+04043                                         DebugLog.w("CANONICAL_SOURCE_UPLOAD","local-only issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04044                                         if(board.crossword?.puzzleId==record.id)
+04045                                             toast("תמונת המקור לא עלתה לענן; הפענוח נשאר מקומי בלבד. לא בוצע פרסום קנוני")
+04046                                     }
+04047                                 }
+04048                             }
+04049                         }
+04050                     }
+04051                 }else publishWithSource(canonicalImageBeforeBind,false)
+04052             }else if(!forcedCanonicalRefresh && !localReview)publishCanonicalIfComplete(record.id)
+04053             pendingImportedTitle=null
+04054             suppressNextAutoSolutionLookup=true
+04055             activatePuzzle(record)
+04056             source=original
+04057             sourceCorners=prepared.points
+04058             hRegion=prepared.horizontalRegion
+04059             vRegion=prepared.verticalRegion
+04060             lastReview=prepared.parsed
+04061             persistSource(original,prepared.crossword)
+04062             refreshLibrary()
+04063 
+04064             val expected=prepared.crossword.startNumbers(Direction.HORIZONTAL).size+
+04065                 prepared.crossword.startNumbers(Direction.VERTICAL).size
+-- 4313 4338 hit 4324 --
+04313         val warningDetails = warningList.take(4).joinToString("\n") { "• $it" }
+04314         val text="\u05de\u05d0\u05d5\u05d6\u05df: ${h.size}/${he.size}\n\u05de\u05d0\u05d5\u05e0\u05da: ${v.size}/${ve.size}\n\n"+
+04315             "\u05d7\u05e1\u05e8\u05d5\u05ea \u05de\u05d0\u05d5\u05d6\u05df: ${(he-h).sorted().joinToString(", ")}\n\u05d7\u05e1\u05e8\u05d5\u05ea \u05de\u05d0\u05d5\u05e0\u05da: ${(ve-v).sorted().joinToString(", ")}\n\n"+
+04316             "\u05d9\u05e9 \u05dc\u05d1\u05d3\u05d5\u05e7 \u05d2\u05dd \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea \u05e9\u05d6\u05d5\u05d4\u05d5; \u05e1\u05e4\u05d9\u05e8\u05d4 \u05d0\u05d9\u05e0\u05d4 \u05d1\u05d3\u05d9\u05e7\u05ea \u05d3\u05d9\u05d5\u05e7.\n" +
+04317             "\u05d0\u05d6\u05d4\u05e8\u05d5\u05ea \u05e4\u05e2\u05e0\u05d5\u05d7: ${warningList.size}" +
+04318             if (warningDetails.isNotBlank()) "\n\n$warningDetails" else ""
+04319         val scroll=ScrollView(this).apply { addView(textView(text)) }
+04320         lateinit var d:PanelDialog
+04321         d=PanelDialog(this,"\u05d1\u05d3\u05d9\u05e7\u05ea \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea",scroll,listOf("\u05d4\u05de\u05e9\u05da" to { d.dismiss() },"\u05e2\u05e8\u05d9\u05db\u05d4" to { d.dismiss(); editClues() },"\u05e1\u05d9\u05de\u05d5\u05df" to { d.dismiss(); rescanClues() }))
+04322         show(d)
+04323     }
+04324     private fun showSourceImage() {
+04325         val cw=board.crossword?:return
+04326         ScreenUi.hideKeyboard(board)
+04327         withSource(displayOnly=true) { bitmap ->
+04328             if(board.crossword!==cw)return@withSource
+04329             if(bitmap==null) {
+04330                 toast(if(isLocalStructuredSource(cw.puzzleId))
+04331                     PrintedStructuredSource.userFacingStatus(cw.puzzleId) else
+04332                     "תמונת המקור אינה שמורה לתשבץ הזה.")
+04333                 return@withSource
+04334             }
+04335             show(SourceImageDialog(this,bitmap))
+04336         }
+04337     }
+04338 
+-- 4354 4379 hit 4365 --
+04354         }
+04355     }
+04356 
+04357     /**
+04358      * Read-only compatibility for OCR crops first saved by 0.15.139, before the
+04359      * source-identity provenance marker existed. The stored rows MUST match the
+04360      * trusted OCR diagnostic snapshot on the identical source bitmap. This does
+04361      * not restore, replace, or publish any geometry; an explicit correction wins.
+04362      */
+04363     private fun locallyOcrAnchoredForDisplay(cw:Crossword,bitmap:Bitmap,key:ClueEditorModel.Key,
+04364         legacySnapshot:ClueGeometryDebugStore.Snapshot?,knownSourceIdentity:String?=null):Boolean {
+04365         val url=knownSourceIdentity ?: canonicalIndex.sourceImageUrl(cw.puzzleId).ifBlank {
+04366             runCatching{LocalOcrImageIdentity.fingerprint(bitmap)}.getOrDefault("")
+04367         }
+04368         if(clueRegionStore.isLocalOcrAnchored(cw.puzzleId,key,url))return true
+04369         if(clueRegionStore.hasManualOverride(cw.puzzleId,key))return false
+04370         if(canonicalForEditor?.second?.clueRegionEditRevisions?.containsKey(key)==true)return false
+04371         val snapshot=legacySnapshot?:return false
+04372         if(snapshot.appVersion!="0.15.139" || snapshot.sourceWidth!=bitmap.width || snapshot.sourceHeight!=bitmap.height)return false
+04373         val imageIdentity=LocalOcrGeometryAuthority.sourceIdentity(snapshot.sourceImageUrl)
+04374         if(imageIdentity.isBlank() || imageIdentity!=LocalOcrGeometryAuthority.sourceIdentity(url))return false
+04375         val item=snapshot.items.firstOrNull{it.key==key && it.usable &&
+04376             it.evidence==ClueGeometryEvidence.LOCAL_OCR_ANCHORED.wire}?:return false
+04377         val stored=clueRegionStore.getVerifiedRows(cw.puzzleId,key)
+04378         if(stored.size!=item.lines.size || stored.isEmpty())return false
+04379         return stored.zip(item.lines).all{(a,b)->
+-- 4362 4387 hit 4373 --
+04362      */
+04363     private fun locallyOcrAnchoredForDisplay(cw:Crossword,bitmap:Bitmap,key:ClueEditorModel.Key,
+04364         legacySnapshot:ClueGeometryDebugStore.Snapshot?,knownSourceIdentity:String?=null):Boolean {
+04365         val url=knownSourceIdentity ?: canonicalIndex.sourceImageUrl(cw.puzzleId).ifBlank {
+04366             runCatching{LocalOcrImageIdentity.fingerprint(bitmap)}.getOrDefault("")
+04367         }
+04368         if(clueRegionStore.isLocalOcrAnchored(cw.puzzleId,key,url))return true
+04369         if(clueRegionStore.hasManualOverride(cw.puzzleId,key))return false
+04370         if(canonicalForEditor?.second?.clueRegionEditRevisions?.containsKey(key)==true)return false
+04371         val snapshot=legacySnapshot?:return false
+04372         if(snapshot.appVersion!="0.15.139" || snapshot.sourceWidth!=bitmap.width || snapshot.sourceHeight!=bitmap.height)return false
+04373         val imageIdentity=LocalOcrGeometryAuthority.sourceIdentity(snapshot.sourceImageUrl)
+04374         if(imageIdentity.isBlank() || imageIdentity!=LocalOcrGeometryAuthority.sourceIdentity(url))return false
+04375         val item=snapshot.items.firstOrNull{it.key==key && it.usable &&
+04376             it.evidence==ClueGeometryEvidence.LOCAL_OCR_ANCHORED.wire}?:return false
+04377         val stored=clueRegionStore.getVerifiedRows(cw.puzzleId,key)
+04378         if(stored.size!=item.lines.size || stored.isEmpty())return false
+04379         return stored.zip(item.lines).all{(a,b)->
+04380             kotlin.math.abs(a.left-b.left)*bitmap.width<=1.5f &&
+04381             kotlin.math.abs(a.right-b.right)*bitmap.width<=1.5f &&
+04382             kotlin.math.abs(a.top-b.top)*bitmap.height<=1.5f &&
+04383             kotlin.math.abs(a.bottom-b.bottom)*bitmap.height<=1.5f
+04384         }
+04385     }
+04386 
+04387     /**
