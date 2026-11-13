@@ -144,6 +144,8 @@ def publish(token, endpoint, target_dir):
     current, tag = get_rules(token, endpoint)
     if digest(current) != m['live_sha256'] or (m['etag'] and m['etag'] != tag):
         raise RuntimeError('Firebase rules changed after backup; publish aborted')
+    if not tag:
+        raise RuntimeError('Rules endpoint did not return a usable ETag; refusing non-conditional publish')
     result = put_rules(token, endpoint, candidate, tag)
     print('Firebase REST publish returned status:', result)
     actual, _ = get_rules(token, endpoint)
