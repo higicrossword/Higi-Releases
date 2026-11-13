@@ -93,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 cloud-tools/v203-clue-save-details.py "$RUNNER_TEMP/higi-v203-audit/source/HebrewCrosswordApp_v0.15.175" > cloud-tools/v203-clue-save-details.txt
-      - name: Inspect v204 image viewer, import and canonical auth details
+      - name: Inspect v204 canonical image details (corrected)
         shell: bash
         run: |
           set -euo pipefail
