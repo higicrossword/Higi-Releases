@@ -1,0 +1,384 @@
+=== MainActivity 4550 4660 ===
+04550                         else {
+04551                             ClueEditorModel.apply(cw,changed)
+04552                             lastReview=null; board.refresh(); rebuildCluesBelowIfNeeded(); if(save()) publishCanonicalClueChanges(cw,changed)
+04553                         }
+04554                     }.setNegativeButton("ביטול",null).show()
+04555                 return@withSource
+04556             }
+04557 
+04558             val snappedRows=if(clueRegionStore.hasManualOverride(cw.puzzleId,key))emptyMap()
+04559                 else snappedCachedClueRows(cw,bitmap)
+04560             fun effectivePhysicalRows():List<BoxF> = snappedRows[key] ?: cachedCluePhysicalRows(cw,bitmap,key)
+04561 
+04562             fun showAssistFor(exactPixels:BoxF,usePhysicalRows:Boolean=true,initialSelection:BoxF?=null){
+04563                 val physicalRows=if(usePhysicalRows)effectivePhysicalRows() else emptyList()
+04564                 val exactPlan=if(physicalRows.isEmpty()) runCatching{
+04565                     ClueImageFocus.exactPlan(exactPixels,bitmap.width.toFloat(),bitmap.height.toFloat())
+04566                 }.getOrElse{
+04567                     DebugLog.w("CLUE_REGION","rejected oversized/invalid verified box number=${key.number} dir=${key.direction}")
+04568                     toast("אזור ההגדרה שנמצא אינו תקין; יש לסמן אותו מחדש.")
+04569                     return
+04570                 } else null
+04571                 val selection=exactPlan?.selection?:exactPixels
+04572                 val focus=exactPlan?.focus?:exactPixels
+04573                 DebugLog.i("CLUE_REGION","open number=${key.number} dir=${key.direction} source=${if(physicalRows.isNotEmpty())"verified-physical-rows" else if(focus.width>=bitmap.width*.90f)"verified-clue-span" else "verified-tight"} focus=${focus.left},${focus.top},${focus.right},${focus.bottom} rows=${physicalRows.size}")
+04574                 val topPaddingCap=if(physicalRows.isNotEmpty()){
+04575                     val allKeys=Direction.values().flatMap { d -> cw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
+04576                     val persistedRows=allKeys.asSequence().filter{it!=key}
+04577                         .flatMap{clueRegionStore.getVerifiedRows(cw.puzzleId,it).asSequence()}
+04578                         .map{ClueRegionStore.toPixels(it,bitmap.width,bitmap.height)}.toList()
+04579                     val otherVerifiedRows=if(persistedRows.isNotEmpty())persistedRows else
+04580                         clueGeometryDebugStore.getSnapshot(cw.puzzleId)?.items.orEmpty()
+04581                             .filter{it.key!=key && it.evidence==ClueGeometryEvidence.PIXEL_ALIGNED.wire && it.lines.isNotEmpty()}
+04582                             .flatMap{it.lines}
+04583                             .map{ClueRegionStore.toPixels(it,bitmap.width,bitmap.height)}
+04584                     PhysicalRowDisplayPadding.capForPreviousRows(physicalRows,otherVerifiedRows)
+04585                 }else null
+04586                 val baseline=clueEditBaseline(cw,key,row.text)
+04587                 val dlg=ClueAssistDialog(this,bitmap,selection,focus,row,row.text,
+04588                     { points,done -> done(validateManualClueRegion(bitmap,points)) },
+04589                     { draft,selected,done -> saveSingleClueCanonical(cw,key,draft,selected,baseline,done) },
+04590                     physicalRows,topPaddingCap,initialSelection,
+04591                     localOcrAnchoredRows=physicalRows.isNotEmpty() &&
+04592                         locallyOcrAnchoredForDisplay(cw,bitmap,key,clueGeometryDebugStore.getSnapshot(cw.puzzleId)))
+04593                 show(dlg)
+04594             }
+04595 
+04596             fun manualFallback(reason:String){
+04597                 DebugLog.w("CLUE_LOCATOR","number=${key.number} dir=${key.direction} failed=${DebugLog.sanitize(reason)}")
+04598                 AlertDialog.Builder(this)
+04599                     .setTitle("לא אותרה ההגדרה במקור")
+04600                     .setMessage("האפליקציה לא תציג אזור משוער או הגדרה אחרת. אפשר לסמן ידנית את ההגדרה המדויקת בתמונה.")
+04601                     .setNegativeButton("ביטול",null)
+04602                     .setPositiveButton("סמן ידנית"){_,_->
+04603                         val full=BoxF(0f,0f,bitmap.width.toFloat(),bitmap.height.toFloat())
+04604                         // The area of all known printed clues is a VIEW/EDIT hint only.
+04605                         // This must never become a trusted crop without manual validation.
+04606                         val focused=clueSourceArea(bitmap,cw).takeIf { proposed ->
+04607                             proposed.width >= 8f && proposed.height >= 8f &&
+04608                             (proposed.width < full.width*.98f || proposed.height < full.height*.98f)
+04609                         } ?: full
+04610                         val crop=CropDialog(this,bitmap,focused,"סמן רק את ההגדרה ${key.number} ${ClueEditorDialog.label(key.direction)}",null,
+04611                             onConfirm={points->
+04612                                 val normalized=ClueRegionStore.fromPoints(points,bitmap.width,bitmap.height)
+04613                                     ?.takeIf{ClueRegionValidation.usableNormalized(it,bitmap.width,bitmap.height,sourceCorners)}
+04614                                 if(normalized==null)toast("הסימון אינו מתאים לאזור של הגדרה אחת. סמן רק את טקסט ההגדרה.")
+04615                                 else {
+04616                                     // This path merely opens the editor at the manually
+04617                                     // chosen region. Nothing is committed until its Save.
+04618                                     showAssistFor(ClueRegionStore.toPixels(normalized,bitmap.width,bitmap.height),false,normalized)
+04619                                 }
+04620                             })
+04621                         show(crop)
+04622                     }.show()
+04623             }
+04624 
+04625             fun validateConflictAndShow(exact:BoxF,usePhysicalRows:Boolean){
+04626                 // Verified physical-row membership is more precise than the old
+04627                 // guessed Across/Down half-page regions. Never reject it because a
+04628                 // newspaper places both directions in the same physical column.
+04629                 if(clueRegionStore.hasManualOverride(cw.puzzleId,key) || usePhysicalRows || !directionRegionConflict(key,exact)){
+04630                     showAssistFor(exact,usePhysicalRows)
+04631                     return
+04632                 }
+04633                 // A clue is never sent to Gemini/OpenAI again after the single full-puzzle decode.
+04634                 // A conflicting saved region is handled locally so opening/editing a clue cannot
+04635                 // silently spend another AI request.
+04636                 DebugLog.w("CLUE_LOCATOR","number=${key.number} dir=${key.direction} batch-region-conflict ai=false; manual-repair")
+04637                 manualFallback("הקואורדינטות השמורות מתנגשות עם אזור הכיוון")
+04638             }
+04639 
+04640             val storedRows=effectivePhysicalRows()
+04641             if(storedRows.isNotEmpty()){
+04642                 val union=BoxF(storedRows.minOf{it.left},storedRows.minOf{it.top},storedRows.maxOf{it.right},storedRows.maxOf{it.bottom})
+04643                 showAssistFor(union,true)
+04644             }else locateVerifiedClueRegion(cw,bitmap,key,row.text){result->
+04645                 result.fold(onSuccess={validateConflictAndShow(it,false)},onFailure={manualFallback(it.message.orEmpty())})
+04646             }
+04647         }
+04648     }
+04649 
+04650     /** Validation only. Selecting a source rectangle must NOT save it locally or canonically. */
+04651     private fun validateManualClueRegion(bitmap:Bitmap,points:List<PointF>):Result<BoxF>{
+04652         val normalized=ClueRegionStore.fromPoints(points,bitmap.width,bitmap.height)
+04653             ?:return Result.failure(IllegalArgumentException("הסימון אינו מלבן תקין. לא בוצעה שמירה."))
+04654         val verdict=ClueRegionValidation.validateNormalized(normalized,bitmap.width,bitmap.height,sourceCorners)
+04655         if(!verdict.usable){
+04656             DebugLog.w("CLUE_MANUAL_REGION","rejected reason=${verdict.reason} width=${"%.3f".format(java.util.Locale.US,normalized.width)} height=${"%.3f".format(java.util.Locale.US,normalized.height)}")
+04657             return Result.failure(IllegalArgumentException(ClueManualRegionPolicy.message(verdict.reason)))
+04658         }
+04659         return Result.success(normalized)
+04660     }
+=== MainActivity 5460 5730 ===
+05460                     discoveredNodeKey=cached.storageNodeKey){updated->
+05461                     updated.onSuccess{rev->if(rev>0L)canonicalIndex.setRevision(record.id,rev)}
+05462                 }
+05463             }
+05464         }
+05465     }
+05466 
+05467     /** Immutable lightweight metadata used only for incoming shared-clue notices. */
+05468     private fun sharedClueAlertState(cached:CanonicalPuzzleCloud.CachedPuzzle) =
+05469         SharedClueUpdateAlerts.State(
+05470             cached.revision,cached.clues,cached.clueEditRevisions,
+05471             cached.clueRegionEditRevisions,cached.clueEditActors,
+05472             cached.lastEditedBy,cached.lastEditedByName
+05473         )
+05474 
+05475     private fun syncCanonicalPuzzle(record:SavedPuzzle,
+05476                                     resolvedCanonical:CanonicalPuzzleCloud.CachedPuzzle?=null) {
+05477         val epoch=++canonicalWatchEpoch
+05478         canonicalWatch?.close(); canonicalWatch=null
+05479         if(isLocalStructuredSource(record.id)){
+05480             DebugLog.i("CANONICAL","local-structured-watch-skipped puzzle=${DebugLog.compactId(record.id)}")
+05481             return
+05482         }
+05483         // An already verified open can use its snapshot without another network
+05484         // call. An unverified shared join waits for the watch to supply one.
+05485         canonicalForEditor=resolvedCanonical?.let { record.id to it }
+05486         val issue=canonicalIndex.issueKeyFor(record)?:return
+05487         val publishedMissing=java.util.concurrent.atomic.AtomicBoolean(false)
+05488         // Initial Firebase ValueEventListener snapshot synchronizes state; it is
+05489         // not a new edit made while this user was solving. Never alert on it.
+05490         var receivedInitialCanonicalSnapshot=false
+05491         canonicalWatch=canonicalCloud.watchCompatible(
+05492             issue,
+05493             CrosswordCatalog.issueKeyFromSourceKey(issue),
+05494             canonicalIndex.sourceThreadUrl(record.id),
+05495             canonicalIndex.sourceImageUrl(record.id),
+05496             resolvedCanonical
+05497         ){result->
+05498             if(canonicalWatchEpoch!=epoch)return@watchCompatible
+05499             val cached=result.getOrNull()
+05500             if(cached==null){
+05501                 if(result.isFailure) DebugLog.w("CANONICAL","live-watch-failed issue=${DebugLog.compactId(issue)} error=${result.exceptionOrNull()?.javaClass?.simpleName}")
+05502                 if(result.isSuccess && publishedMissing.compareAndSet(false,true))publishCanonicalIfComplete(record.id)
+05503                 return@watchCompatible
+05504             }
+05505             runOnUiThread sync@{
+05506                 if(isFinishing||isDestroyed || canonicalWatchEpoch!=epoch ||
+05507                     board.crossword?.puzzleId!=record.id)return@sync
+05508                 val localRevision=canonicalIndex.revision(record.id)
+05509                 // A changed canonical grid cannot be merged as mere text/geometry.
+05510                 // For an unstarted old favourite automatically reopen from the
+05511                 // authoritative source; if any letters were entered, open a new
+05512                 // corrected copy while retaining the earlier local record.
+05513                 val localGrid=board.crossword?.takeIf{it.puzzleId==record.id}?:record.crossword
+05514                 val gridMatches=AnswerChecking.signature(localGrid)==cached.gridSignature
+05515                 val previous=canonicalForEditor?.takeIf{it.first==record.id &&
+05516                     it.second.gridSignature==cached.gridSignature}?.second
+05517                 val alreadyWatching=receivedInitialCanonicalSnapshot
+05518                 if(gridMatches){
+05519                     receivedInitialCanonicalSnapshot=true
+05520                     if(previous==null || cached.revision>=previous.revision)canonicalForEditor=record.id to cached
+05521                 }
+05522                 if(AnswerChecking.signature(localGrid)!=cached.gridSignature){
+05523                     val opened=board.crossword?.puzzleId==record.id
+05524                     val decision=CanonicalGridAutoRepair.decide(record,cached.rows,cached.cols,
+05525                         cached.gridSignature,cached.revision,localRevision)
+05526                     if(cached.revision<=localRevision && localRevision>0L){
+05527                         DebugLog.i("CANONICAL","ignored-stale-grid-snapshot local=${localGrid.rows}x${localGrid.cols} remote=${cached.rows}x${cached.cols} revision=${cached.revision} localRevision=$localRevision")
+05528                         return@sync
+05529                     }
+05530                     val attemptKey="${record.id}:${cached.revision}"
+05531                     if(opened && !isBusy && !mainImportActive && !pendingForcedRedecode &&
+05532                         sharingState.roomForPuzzle(record.id)==null &&
+05533                         decision!=CanonicalGridAutoRepair.Decision.KEEP &&
+05534                         canonicalOpenRepairAttempts.add(attemptKey)){
+05535                         if(save()){
+05536                             DebugLog.i("CANONICAL","live-grid-repair local=${localGrid.rows}x${localGrid.cols} remote=${cached.rows}x${cached.cols} revision=${cached.revision}")
+05537                             canonicalWatchEpoch++
+05538                             canonicalWatch?.close(); canonicalWatch=null
+05539                             board.interactive=false
+05540                             openPuzzle(record.id)
+05541                         }else canonicalOpenRepairAttempts.remove(attemptKey)
+05542                         return@sync
+05543                     }
+05544                     DebugLog.w("CANONICAL","grid-replaced-remotely local=${localGrid.rows}x${localGrid.cols} remote=${cached.rows}x${cached.cols} revision=${cached.revision} action=await-automatic-open")
+05545                     return@sync
+05546                 }
+05547                 // Geometry coordinates belong to the exact source attachment used by
+05548                 // the canonical decode.  Older copies could be bound to another image
+05549                 // from the same thread, which made clue crops differ between phones.
+05550                 // If both bindings are known and point at different attachments, drop
+05551                 // only the stale local bitmap so the canonical source is fetched next.
+05552                 val previousSourceUrl=canonicalIndex.sourceImageUrl(record.id)
+05553                 val canonicalSourceUrl=cached.sourceImageUrl
+05554                 val previousIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(previousSourceUrl).ifBlank{previousSourceUrl.substringBefore('?')}
+05555                 val canonicalIdentity=WeeklyCrosswordsFetcher.attachmentIdentity(canonicalSourceUrl).ifBlank{canonicalSourceUrl.substringBefore('?')}
+05556                 if(previousIdentity.isNotBlank()&&canonicalIdentity.isNotBlank()&&previousIdentity!=canonicalIdentity){
+05557                     if(runCatching{library.clearSource(record.id)}.getOrDefault(false)){
+05558                         sourceViewportStore.clear(record.id)
+05559                         sourceClueCropStore.clear(record.id)
+05560                         if(board.crossword?.puzzleId==record.id)source=null
+05561                         DebugLog.i("CLUE_REGION","discarded local source with non-canonical attachment identity")
+05562                     }
+05563                 }
+05564                 // Geometry has its own revision so unrelated answer/clue edits do not
+05565                 // erase a later manual local region.  An admin re-decode, however,
+05566                 // replaces the whole canonical geometry snapshot and therefore removes
+05567                 // stale boxes that were rejected by the new decode.
+05568                 if(cached.clueRegionSchema==CanonicalPuzzleCloud.CLUE_REGION_SCHEMA && cached.clueRegionsRevision>clueRegionStore.canonicalRegionRevision(record.id)){
+05569                     val regionCw=board.crossword?.takeIf{it.puzzleId==record.id}?:record.crossword
+05570                     val regionKeys=Direction.values().flatMap { d -> regionCw.startNumbers(d).map { ClueEditorModel.Key(it,d) } }
+05571                     val previousGeometryRevision=clueRegionStore.canonicalRegionRevision(record.id)
+05572                     clueRegionStore.replaceVerifiedGeometryFromCanonical(record.id,regionKeys,cached.trustedClueRegions(),cached.trustedClueRegionLines(),
+05573                         cached.clueRegionsRevision,cached.sourceImageUrl,cached.clueRegionEditRevisions.keys)
+05574                     val canonicalCorrections=cached.clueRegionEditRevisions.filterValues{it>previousGeometryRevision}.keys
+05575                     clueRegionStore.clearManualOverrides(record.id,canonicalCorrections)
+05576                     DebugLog.i("CLUE_REGION","canonical geometry applied revision=${cached.clueRegionsRevision} schema=${cached.clueRegionSchema} boxes=${cached.trustedClueRegions().size} rows=${cached.trustedClueRegionLines().size} unverified=${(cached.clueRegions.keys+cached.clueRegionLines.keys).toSet().size-(cached.trustedClueRegions().keys+cached.trustedClueRegionLines().keys).toSet().size}")
+05577                 }else if((cached.clueRegions.isNotEmpty()||cached.clueRegionLines.isNotEmpty()) && cached.clueRegionSchema!=CanonicalPuzzleCloud.CLUE_REGION_SCHEMA){
+05578                     DebugLog.i("CLUE_REGION","canonical geometry ignored legacy schema=${cached.clueRegionSchema.ifBlank{"legacy"}} boxes=${cached.clueRegions.size} rows=${cached.clueRegionLines.size}")
+05579                 }
+05580                 if(cached.revision<=localRevision && localRevision>0L){
+05581                     canonicalIndex.bind(record.id,issue,localRevision,cached.sourceImageUrl,cached.sourceThreadUrl)
+05582                     // An unchanged canonical revision may still provide the first
+05583                     // usable source URL for a crop-less local crossword.
+05584                     enqueueMissingCanonicalCrops(record)
+05585                     return@sync
+05586                 }
+05587                 val cw=board.crossword?:return@sync
+05588                 if(cw.puzzleId!=record.id)return@sync
+05589                 // Canonical revisions may correct clue wording and/or verified answers.
+05590                 // User letters/progress are never overwritten.
+05591                 val before=canonicalClueMap(cw)
+05592                 val beforeAnswers=reference?.answers.orEmpty().associate {
+05593                     ClueEditorModel.Key(it.number,it.direction) to CrosswordSession.normalize(it.answer)
+05594                 }
+05595                 ClueEditorModel.apply(cw,cached.clues)
+05596                 val changed=cached.clues.keys.filter { key -> before[key] != cached.clues[key] }
+05597                 if(changed.isNotEmpty())DebugLog.i("CANONICAL","live-clue-applied issue=${DebugLog.compactId(issue)} revision=${cached.revision} changes=${changed.joinToString { "${it.number}:${it.direction}" }}")
+05598                 // The active record's reference is already in memory. Do not
+05599                 // synchronously read puzzle.bin (fsync/IO lock) while painting.
+05600                 val current=reference?.takeIf{it.puzzleId==cw.puzzleId&&it.gridSignature==AnswerChecking.signature(cw)}
+05601                 val currentExplanations=current?.answers.orEmpty().associate{
+05602                     ClueEditorModel.Key(it.number,it.direction) to it.explanation
+05603                 }
+05604                 // A canonical revision may contain an old imported/base answer set.  Never
+05605                 // replay that entire set over a newer local 14across import.  Fill only
+05606                 // missing base answers, then apply explicit shared answer corrections.
+05607                 val remoteChanges=if(current==null)cached.answers else cached.answerOverrides
+05608                 val changedAnswers=remoteChanges.keys.filter { key -> beforeAnswers[key] != remoteChanges[key] }
+05609                 var referenceForPersistence:ReferenceSet?=null
+05610                 if(cached.answers.isNotEmpty()){
+05611                     val merged=linkedMapOf<ClueEditorModel.Key,String>()
+05612                     current?.answers.orEmpty().forEach{merged[ClueEditorModel.Key(it.number,it.direction)]=CrosswordSession.normalize(it.answer)}
+05613                     if(current==null)cached.answers.forEach{(key,answer)->merged[key]=CrosswordSession.normalize(answer)}
+05614                     else cached.answers.forEach{(key,answer)->if(key !in merged)merged[key]=CrosswordSession.normalize(answer)}
+05615                     cached.answerOverrides.forEach{(key,answer)->merged[key]=CrosswordSession.normalize(answer)}
+05616                     answerOverrideStore.putAll(cw.puzzleId,cached.answerOverrides)
+05617                     val valid=merged.mapNotNull{(key,answer)->
+05618                         val explanation=if(key in cached.answerOverrides) "" else cached.answerExplanations[key].orEmpty().ifBlank{currentExplanations[key].orEmpty()}
+05619                         if(answer.isNotBlank()&&CompoundClues.referenceAnswerLengthMatches(cw,key,answer)) ReferenceAnswer(key.number,key.direction,answer,explanation) else null
+05620                     }
+05621                     if(valid.isNotEmpty()){
+05622                         val next=ReferenceSet(cw.puzzleId,AnswerChecking.signature(cw),
+05623                             cached.answerSourceTitle.ifBlank{current?.sourceTitle?:"פתרונות משותפים"},
+05624                             cached.answerSourceUrl.ifBlank{current?.sourceUrl.orEmpty()},valid)
+05625                         reference=next
+05626                         referenceForPersistence=next
+05627                     }
+05628                 }
+05629                 // File writes use fsync and can stall the UI at the exact moment a
+05630                 // remote clue update arrives. Persist on the existing background
+05631                 // executor, merging into the latest disk state (never an old letter
+05632                 // snapshot). onPause() also saves the current board as usual.
+05633                 // Persist the FULL latest canonical clue set when a new revision
+05634                 // arrives. If rev N is superseded before its queued write runs,
+05635                 // rev N+1 still carries all edits from N (not only its own delta).
+05636                 val canonicalClues=cached.clues.toMap()
+05637                 val refDelta=referenceForPersistence
+05638                 val remoteOverrideKeys=cached.answerOverrides.keys.toSet()
+05639                 if(canonicalClues.isNotEmpty() || refDelta!=null){
+05640                     runCatching {
+05641                         executor.execute {
+05642                             if(canonicalIndex.revision(record.id)>cached.revision)return@execute
+05643                             runCatching {
+05644                                 library.mergeCanonicalPresentation(record.id,cached.gridSignature,
+05645                                     canonicalClues,refDelta,remoteOverrideKeys)
+05646                             }.onSuccess { persisted ->
+05647                                 // Record the revision ONLY after its full local snapshot is durable.
+05648                                 // If the process dies during async IO, the next open must retry
+05649                                 // this revision rather than mistakenly consider it applied.
+05650                                 if(persisted && canonicalIndex.revision(record.id)<=cached.revision)
+05651                                     canonicalIndex.bind(record.id,issue,cached.revision,
+05652                                         cached.sourceImageUrl,cached.sourceThreadUrl)
+05653                             }.onFailure { error ->
+05654                                 DebugLog.w("CANONICAL","live-persist-failed issue=${DebugLog.compactId(issue)} error=${error.javaClass.simpleName}")
+05655                             }
+05656                         }
+05657                     }.onFailure { error ->
+05658                         DebugLog.w("CANONICAL","live-persist-queue-failed issue=${DebugLog.compactId(issue)} error=${error.javaClass.simpleName}")
+05659                     }
+05660                 } else {
+05661                     canonicalIndex.bind(record.id,issue,cached.revision,cached.sourceImageUrl,cached.sourceThreadUrl)
+05662                 }
+05663                 lastReview=null;board.refresh();rebuildCluesBelowIfNeeded()
+05664                 // The source URL may arrive after first open. Retry only if this
+05665                 // canonical snapshot still lacks trustworthy source-image crops.
+05666                 enqueueMissingCanonicalCrops(record)
+05667                 val myUid=sharing.currentUid().orEmpty()
+05668                 // A single canonical snapshot may coalesce changes from different
+05669                 // editors. Attribute each clue using its own committed author stamp,
+05670                 // not lastEditedByName (which may refer to an answer or another clue).
+05671                 val clueAlert=SharedClueUpdateAlerts.message(
+05672                     previous?.let(::sharedClueAlertState),sharedClueAlertState(cached),
+05673                     myUid,alreadyWatching && sharing.roomForPuzzle(record.id)!=null && !activeDuelMode
+05674                 )
+05675                 if(clueAlert!=null)toast(clueAlert)
+05676                 else if(alreadyWatching && localRevision>0L &&
+05677                     cached.lastEditedBy.isNotBlank() && cached.lastEditedBy!=myUid) {
+05678                     when {
+05679                         changedAnswers.size==1 -> {
+05680                             val first=changedAnswers.first(); val direction=if(first.direction==Direction.HORIZONTAL)"מאוזן" else "מאונך"
+05681                             toast("פתרון ${first.number} $direction עודכן")
+05682                         }
+05683                         changedAnswers.size>1 -> toast("עודכנו ${changedAnswers.size} פתרונות בתשבץ")
+05684                     }
+05685                 }
+05686             }
+05687         }
+05688     }
+05689 
+05690     private fun publishCanonicalClueChanges(cw:Crossword,changes:Map<ClueEditorModel.Key,String>) {
+05691         val record=runCatching{library.load(cw.puzzleId)}.getOrNull()?:return
+05692         val issue=canonicalIndex.issueKeyFor(record)?:return
+05693         // Publisher's structured clues are imported locally; never create or edit
+05694         // production Canonical records merely because a local user edits a clue.
+05695         if(issue.startsWith("INTEL:")||issue.startsWith("HIGAYON:")||issue.startsWith("ISRAEL_HAYOM:")||issue.startsWith("ACROSS14:"))return
+05696         fun canonicalFailure(error:Throwable){
+05697             DebugLog.w("CANONICAL", "clue-update-ui issue=${DebugLog.compactId(issue)} count=${changes.size} error=${error.javaClass.simpleName}")
+05698             toast("השינוי נשמר במכשיר, אך השמירה במאגר המשותף נכשלה")
+05699         }
+05700         fun update(canonical:CanonicalPuzzleCloud.CachedPuzzle){
+05701             canonicalCloud.updateClues(canonical.issueKey,changes,settings.displayName,
+05702                 expectedGridSignature=AnswerChecking.signature(record.crossword),
+05703                 discoveredNodeKey=canonical.storageNodeKey){result->
+05704                 result.fold(
+05705                     onSuccess={revision->canonicalIndex.setRevision(cw.puzzleId,revision)},
+05706                     onFailure=::canonicalFailure
+05707                 )
+05708             }
+05709         }
+05710         if(CanonicalPuzzleCloud.isCompleteRecord(record)){
+05711             canonicalForLocalEdit(issue,record){result->
+05712                 result.fold(
+05713                     onSuccess={cached->
+05714                         if(cached.gridSignature!=AnswerChecking.signature(record.crossword)){
+05715                             canonicalFailure(IllegalStateException("הרשת עודכנה על ידי מנהל. אין לשמור הגדרות של רשת ישנה"))
+05716                         }else{
+05717                             canonicalIndex.bind(record.id,issue,cached.revision,cached.sourceImageUrl,cached.sourceThreadUrl)
+05718                             update(cached)
+05719                         }
+05720                     },
+05721                     onFailure=::canonicalFailure
+05722                 )
+05723             }
+05724         }
+05725     }
+05726 
+05727     private fun maybeAutoImportSolutions(force:Boolean=false, notifyMissing:Boolean=false, explanationKey:ClueEditorModel.Key?=null, afterExplanationRefresh:(()->Unit)?=null) {
+05728         if(activeDuelMode){afterExplanationRefresh?.invoke();return}
+05729         val cw=board.crossword?:return
+05730         if(!settings.autoImportSolutions && !force) return
