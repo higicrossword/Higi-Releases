@@ -9,7 +9,7 @@ on:
         default: audit
         options: [audit, publish]
       confirmation:
-        description: 'For publish enter exactly PUBLISH-0.15.205'
+        description: 'For publish without Firebase ETag enter PUBLISH-NONATOMIC-0.15.205 (acknowledges small concurrency risk)'
         type: string
         required: false
 permissions:
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           [[ "$OPERATION" = 'audit' || "$OPERATION" = 'publish' ]]
           if [[ "$OPERATION" = 'publish' ]]; then
-            [[ "$CONFIRMATION" = 'PUBLISH-0.15.205' ]] || { echo 'BLOCKED: explicit confirmation required'; exit 1; }
+            [[ "$CONFIRMATION" = 'PUBLISH-NONATOMIC-0.15.205' ]] || { echo 'BLOCKED: explicit no-ETag publishing confirmation required'; exit 1; }
           fi
           echo "Requested $OPERATION for higi-8b169"
       - uses: actions/checkout@v4
