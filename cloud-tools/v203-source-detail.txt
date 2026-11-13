@@ -1,0 +1,992 @@
+=== FILE AdminPuzzleMenu.kt LINES 18 ===
+--- LINES 1 55 ---
+00001 package com.example.hebrewcrossword
+00002 
+00003 /** The same per-puzzle administrator commands in the weekly and saved-puzzle menus. */
+00004 object AdminPuzzleMenu {
+00005     data class Action(val id:Int, val title:String)
+00006     val actions = listOf(
+00007         Action(1,"הסר מהרשימה לכולם"),
+00008         Action(2,"החלף תמונה מהטלפון"),
+00009         Action(3,"החלף תמונה מהאתר"),
+00010         Action(4,"הוסף פתרונות"),
+00011         Action(5,"פענח מחדש מהמקור (Debug)"),
+00012         Action(6,"הצג תמונת פענוח"),
+00013         Action(7,"בדיקת AI: מודלים / קריאה נוכחית-חדשה"),
+00014         Action(8,"ניסוי: תמלול הגדרות בלבד (Gemini)"),
+00015         Action(9,"יצירת חיתוכי OCR מחדש (בדיקת מנהל)")
+00016     )
+00017     fun has(id:Int):Boolean = actions.any{it.id==id}
+00018 }
+=== FILE CanonicalSourceImageStorage.kt LINES 96 ===
+--- LINES 1 130 ---
+00001 package com.example.hebrewcrossword
+00002 
+00003 import android.content.Context
+00004 import android.graphics.Bitmap
+00005 import com.google.firebase.FirebaseApp
+00006 import com.google.firebase.auth.FirebaseAuth
+00007 import com.google.firebase.storage.FirebaseStorage
+00008 import com.google.firebase.storage.StorageMetadata
+00009 import java.io.ByteArrayOutputStream
+00010 import java.net.URI
+00011 import java.security.MessageDigest
+00012 
+00013 /**
+00014  * Admin-controlled source-image storage for canonical re-decodes.
+00015  * A crop must not be shared until the exact bitmap on which it was calculated is
+00016  * available to every client at the canonical source URL.
+00017  *
+00018  * Requires the separately reviewed Firebase Storage rules supplied with v0.15.176.
+00019  * The DRY variant never uploads or modifies any Firebase data.
+00020  */
+00021 object CanonicalSourceImageStorage {
+00022     data class Uploaded(val url:String,val sha256:String,val bytes:Int)
+00023     private const val ROOT="higi/canonical-sources/v1"
+00024     private const val MAX_BYTES=16*1024*1024
+00025 
+00026     fun isManagedUrl(url:String):Boolean = runCatching {
+00027         val parsed=URI(url.trim())
+00028         parsed.scheme=="https" && parsed.host=="firebasestorage.googleapis.com" &&
+00029             parsed.rawPath.orEmpty().contains("/o/higi%2Fcanonical-sources%2Fv1%2F") &&
+00030             parsed.rawQuery.orEmpty().contains("alt=media")
+00031     }.getOrDefault(false)
+00032 
+00033     fun upload(
+00034         context:Context,
+00035         issueKey:String,
+00036         bitmap:Bitmap,
+00037         callback:(Result<Uploaded>)->Unit
+00038     ) {
+00039         if(BuildConfig.HIGI_DRY_BUILD) {
+00040             callback(Result.failure(IllegalStateException("גרסת DRY אינה מעלה תמונות לענן")))
+00041             return
+00042         }
+00043         if(issueKey.isBlank() || bitmap.isRecycled || bitmap.width<100 || bitmap.height<100) {
+00044             callback(Result.failure(IllegalArgumentException("תמונת מקור או מזהה תשבץ אינם תקינים")))
+00045             return
+00046         }
+00047         // Compression is lossless: the canonical crop coordinates remain tied to
+00048         // these exact pixels. Do not transcode to JPEG or resize after OCR.
+00049         val bytes=runCatching { ByteArrayOutputStream().use { out ->
+00050             check(bitmap.compress(Bitmap.CompressFormat.PNG,100,out))
+00051             out.toByteArray()
+00052         } }.getOrElse { callback(Result.failure(it));return }
+00053         if(bytes.isEmpty() || bytes.size>MAX_BYTES) {
+00054             callback(Result.failure(IllegalArgumentException("תמונת המקור גדולה מדי לשמירה בענן (מגבלה: 16MB)")))
+00055             return
+00056         }
+00057         val imageHash=sha256(bytes)
+00058         val issueHash=sha256(issueKey.toByteArray(Charsets.UTF_8))
+00059         val path="$ROOT/$issueHash/$imageHash.png"
+00060         AdminAccess(context).loadRole { role ->
+00061             if(role==AdminAccess.Role.NONE) {
+00062                 callback(Result.failure(SecurityException("העלאת תמונה קנונית מותרת למנהל בלבד")))
+00063                 return@loadRole
+00064             }
+00065             val app=runCatching { FirebaseApp.getInstance() }.getOrElse {
+00066                 callback(Result.failure(it));return@loadRole
+00067             }
+00068             if(FirebaseAuth.getInstance(app).currentUser==null) {
+00069                 callback(Result.failure(SecurityException("לא נמצאה הזדהות Firebase")))
+00070                 return@loadRole
+00071             }
+00072             val storage=runCatching { FirebaseStorage.getInstance(app) }.getOrElse {
+00073                 callback(Result.failure(it));return@loadRole
+00074             }
+00075             val ref=storage.reference.child(path)
+00076             val metadata=StorageMetadata.Builder().setContentType("image/png").build()
+00077             ref.putBytes(bytes,metadata).addOnSuccessListener {
+00078                 ref.downloadUrl.addOnSuccessListener { uri ->
+00079                     val url=uri.toString()
+00080                     if(!isManagedUrl(url)) {
+00081                         callback(Result.failure(IllegalStateException("כתובת התמונה בענן אינה מזוהה")))
+00082                     }else {
+00083                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","success sha256=$imageHash bytes=${bytes.size} issue=${DebugLog.compactId(issueKey)}")
+00084                         callback(Result.success(Uploaded(url,imageHash,bytes.size)))
+00085                     }
+00086                 }.addOnFailureListener { callback(Result.failure(it)) }
+00087             }.addOnFailureListener { error ->
+00088                 DebugLog.w("CANONICAL_SOURCE_UPLOAD","failed ${error.javaClass.simpleName}: ${DebugLog.sanitize(error.message.orEmpty())}")
+00089                 callback(Result.failure(error))
+00090             }
+00091         }
+00092     }
+00093 
+00094     private fun sha256(bytes:ByteArray):String=MessageDigest.getInstance("SHA-256")
+00095         .digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+00096 }
+=== FILE RecentCrosswordsActivity.kt LINES 2284 ===
+--- LINES 55 115 ---
+00055         private const val OLDER_SEARCH_DAYS=90
+00056     }
+00057     private val executor=Executors.newSingleThreadExecutor()
+00058     // Archive requests must never block normal weekly refreshes or imports.
+00059     private val archiveExecutor=Executors.newSingleThreadExecutor()
+00060     private var archiveFuture:Future<*>?=null
+00061     @Volatile private var archiveCancelled=false
+00062     private var archiveRunning=false
+00063     private val structuredExecutor=Executors.newSingleThreadExecutor()
+00064     // Bound optional PressReader index requests instead of spawning a new thread
+00065     // for every Refresh press. This executor never blocks explicit imports.
+00066     private val israelIndexExecutor=Executors.newSingleThreadExecutor()
+00067     private val structuredOffers=mutableListOf<StructuredNewPuzzleOffer>()
+00068     private var latestIntelIssue:Int?=null
+00069     private var structuredBusy=false
+00070     private var structuredRefreshGeneration=0
+00071     private var newPuzzleQuery=""
+00072     private val searchHandler=android.os.Handler(android.os.Looper.getMainLooper())
+00073     private val searchRefresh=Runnable { if(::list.isInitialized && !isDestroyed)rebuildUnifiedRows() }
+00074     private val libraryExecutor=Executors.newSingleThreadExecutor()
+00075     private var libraryRefreshPending=false
+00076     private var libraryRefreshAgain=false
+00077     private lateinit var unifiedAdapter:Adapter
+00078     private var unifiedRows:List<UnifiedNewPuzzleRow> = emptyList()
+00079     private lateinit var searchField:EditText
+00080     private lateinit var progress:ProgressBar
+00081     private lateinit var message:TextView
+00082     private lateinit var list:ListView
+00083     private lateinit var refresh:Button
+00084     private lateinit var olderSearch:Button
+00085     private var israelArchiveBusy=false
+00086     private lateinit var showAllCheck:CheckBox
+00087     private var rawItems:List<WeeklyCrosswordsFetcher.Item> = emptyList()
+00088     private var displayRawItems:List<WeeklyCrosswordsFetcher.Item> = emptyList()
+00089     private var items:List<WeeklyCrosswordsFetcher.Item> = emptyList()
+00090     private lateinit var cache:WeeklyCrosswordsCache
+00091     private lateinit var library:PuzzleLibrary
+00092     private lateinit var downloaded:DownloadedCrosswordsStore
+00093     private lateinit var canonicalCloud:CanonicalPuzzleCloud
+00094     private lateinit var canonicalIndex:CanonicalPuzzleIndex
+00095     private lateinit var answerOverrideStore:AnswerOverrideStore
+00096     private lateinit var clueRegionStore:ClueRegionStore
+00097     private lateinit var moderation:WeeklyCrosswordModeration
+00098     private var moderationState=WeeklyCrosswordModeration.State(false,emptySet(),emptyMap())
+00099     private var adminMode=false
+00100     private var adminModeInitialized=false
+00101     private lateinit var modeRow:LinearLayout
+00102     private lateinit var normalModeTab:MaterialButton
+00103     private lateinit var adminModeTab:MaterialButton
+00104     private lateinit var batchRow:LinearLayout
+00105     private lateinit var batchSelectButton:MaterialButton
+00106     private lateinit var batchRunButton:MaterialButton
+00107     private var batchSelectMode=false
+00108     private var batchRunning=false
+00109     private var adminAiTestRunning=false
+00110     // A saved puzzle may no longer be in the rolling weekly feed. Keep its UUID authoritative.
+00111     private val savedAdminId:String by lazy { intent.getStringExtra(EXTRA_SAVED_ADMIN_PUZZLE_ID).orEmpty() }
+00112     private val savedAdminAction:Int by lazy { intent.getIntExtra(EXTRA_SAVED_ADMIN_ACTION,-1) }
+00113     private var savedActionLaunched=false
+00114     private data class SavedAdminTarget(
+00115         val entry:PuzzleLibrary.Entry,
+--- LINES 1200 1405 ---
+01200             }
+01201             matches.forEach{record->
+01202                 library.writeSource(record.id){out->check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out))}
+01203                 library.setRegions(record.id,PuzzleRegions())
+01204                 clueRegionStore.deletePuzzle(record.id)
+01205                 SourceClueCropStore(this).clear(record.id)
+01206                 SourceViewportStore(this).clear(record.id)
+01207                 if(newSourceKey!=null){
+01208                     canonicalIndex.bind(record.id,newSourceKey,canonicalIndex.revision(record.id),imageUrl,threadUrl,canonicalIndex.parserSchema(record.id))
+01209                 } else {
+01210                     canonicalIndex.bindSource(record.id,imageUrl,threadUrl)
+01211                 }
+01212             }
+01213             DebugLog.i("ADMIN_SOURCE","issue=${DebugLog.compactId(issue)} localCopies=${matches.size} image=${if(imageUrl.startsWith("https://"))"remote" else "local"}")
+01214             matches.size
+01215         } finally { bitmap.recycle() }
+01216     }
+01217 
+01218     private fun askRedecodeAfterReplacement(raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item,localFile:File?){
+01219         AlertDialog.Builder(this)
+01220             .setTitle("תמונת המקור הוחלפה")
+01221             .setMessage("לפענח מחדש את ההגדרות לפי התמונה החדשה?")
+01222             .setNegativeButton("לא — רק החלף תמונה",null)
+01223             .setPositiveButton("כן — פענח מחדש"){_,_->
+01224                 chooseRedecodeMode { mode,options ->
+01225                     if(localFile!=null)forceRedecodeLocalImage(raw,localFile,mode,options) else forceRedecode(raw,effective,mode,options)
+01226                 }
+01227             }.show()
+01228     }
+01229 
+01230     private fun forceRedecodeLocalImage(raw:WeeklyCrosswordsFetcher.Item,file:File,mode:AiDecodeMode,options:AiRunOptions){
+01231         val sourceKey=CrosswordCatalog.sourceKey(raw)
+01232         DebugLog.i("IMPORT","forced-redecode=true source=local-admin-image issue=${DebugLog.compactId(sourceKey)}")
+01233         val out=Intent()
+01234             .putExtra(EXTRA_IMAGE_PATH,file.absolutePath)
+01235             .putExtra(EXTRA_PUZZLE_TITLE,WeeklyCrosswordsFetcher.displayTitle(raw))
+01236             .putExtra(EXTRA_ISSUE_KEY,sourceKey)
+01237             // The improved bitmap remains local, but the canonical keeps the public
+01238             // source URL so every device resolves the same logical crossword.
+01239             .putExtra(EXTRA_SOURCE_IMAGE_URL,raw.imageUrl.takeIf{it.startsWith("https://")}.orEmpty())
+01240             .putExtra(EXTRA_SOURCE_THREAD_URL,raw.threadUrl)
+01241             .putExtra(EXTRA_FORCE_REDECODE,true)
+01242             .putExtra(EXTRA_AI_DECODE_MODE,mode.wireValue)
+01243         putAiOptions(out,options)
+01244         setResult(Activity.RESULT_OK,out)
+01245         finish()
+01246     }
+01247 
+01248     private fun clearLocalPhoneOverride(raw:WeeklyCrosswordsFetcher.Item){
+01249         val key=WeeklyCrosswordModeration.overrideKey(raw)
+01250         localOverridePrefs.getString(key,null)?.let{runCatching{File(it).delete()}}
+01251         localOverridePrefs.edit().remove(key).apply()
+01252     }
+01253 
+01254     private fun restoreWithdrawn(raw:WeeklyCrosswordsFetcher.Item){
+01255         val hash=withdrawnHash(raw)?:run{toastAdmin("לא נמצא מזהה מחיקה לתשבץ");return}
+01256         val clearFailure=moderationState.decodeFailures.containsKey(hash)
+01257         AlertDialog.Builder(this)
+01258             .setTitle("שחזר לכולם")
+01259             .setMessage("להחזיר את התשבץ לרשימת התשבצים הזמינים לכל המשתמשים?")
+01260             .setNegativeButton("ביטול",null)
+01261             .setPositiveButton("שחזר לכולם"){_,_->
+01262                 moderation.restoreByHash(hash,clearFailure){ok->runOnUiThread{
+01263                     if(isDestroyed)return@runOnUiThread
+01264                     if(ok)reloadModeration("התשבץ שוחזר לכולם") else toastAdmin("השחזור נכשל")
+01265                 }}
+01266             }.show()
+01267     }
+01268 
+01269     private fun showAdminMenu(anchor:View,raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item){
+01270         if(!moderationState.admin||!adminMode)return
+01271         if(isAdminWithdrawn(raw)){
+01272             PopupMenu(this,anchor).apply{
+01273                 menu.add(0,100,0,"שחזר לכולם")
+01274                 menu.add(0,6,1,"הצג תמונת פענוח")
+01275                 menu.add(0,7,2,"בדיקת AI: מודלים / קריאה נוכחית-חדשה")
+01276                 menu.add(0,8,3,"ניסוי: תמלול הגדרות בלבד (Gemini)")
+01277                 menu.add(0,9,4,"יצירת חיתוכי OCR מחדש (בדיקת מנהל)")
+01278                 setOnMenuItemClickListener{m->
+01279                     when(m.itemId){
+01280                         100->restoreWithdrawn(raw)
+01281                         6->openClueRegionInspector(raw,effective)
+01282                         7->confirmAdminAiPromptDiagnostic(raw,effective)
+01283                         8->confirmAdminVerbatimTranscription(raw,effective)
+01284                     9->openAdminOcrRecrop(raw,effective)
+01285                     }
+01286                     true
+01287                 }
+01288                 show()
+01289             }
+01290             return
+01291         }
+01292         PopupMenu(this,anchor).apply{
+01293             AdminPuzzleMenu.actions.forEachIndexed{index,action->menu.add(0,action.id,index,action.title)}
+01294             setOnMenuItemClickListener{m->runAdminMenuAction(m.itemId,raw,effective);true}
+01295             show()
+01296         }
+01297     }
+01298 
+01299     private fun runAdminMenuAction(
+01300         actionId:Int, raw:WeeklyCrosswordsFetcher.Item, effective:WeeklyCrosswordsFetcher.Item
+01301     ){
+01302         if(!moderationState.admin||!adminMode||!AdminPuzzleMenu.has(actionId))return
+01303         when(actionId){
+01304                     1->{
+01305                         val sourceKey=CrosswordCatalog.sourceKey(raw)
+01306                         if(sourceKey==null)toastAdmin("לא נמצא מזהה לתשבץ") else AlertDialog.Builder(this@RecentCrosswordsActivity)
+01307                             .setTitle("הסרת תשבץ")
+01308                             .setMessage("להסיר את התשבץ מרשימת השבוע? משתמשים אחרים לא יוכלו לייבא אותו יותר.")
+01309                             .setNegativeButton("ביטול",null).setPositiveButton("הסר"){_,_->
+01310                                 moderation.withdraw(raw){ok->runOnUiThread{
+01311                                     if(ok){moderationState=moderationState.copy(withdrawn=moderationState.withdrawn+WeeklyCrosswordModeration.key(sourceKey));refreshDisplayedItems();toastAdmin("התשבץ הוסר מהרשימה לכולם")}
+01312                                     else toastAdmin("ההסרה נכשלה. בדוק הרשאת מנהל ב-Firebase.")
+01313                                 }}
+01314                             }.show()
+01315                     }
+01316                     2->{pendingAdminItem=raw;adminPhoneImagePicker.launch("image/*")}
+01317                     3->{
+01318                         pendingAdminItem=raw
+01319                         runCatching {
+01320                             adminSiteImagePicker.launch(Intent(this@RecentCrosswordsActivity,ManualGroupsActivity::class.java).apply{
+01321                                 putExtra(ManualGroupsActivity.EXTRA_START_URL,effective.threadUrl.ifBlank{raw.threadUrl})
+01322                             })
+01323                         }.onFailure{pendingAdminItem=null;toastAdmin("לא ניתן לפתוח את בוחר תמונת האתר: ${it.message.orEmpty()}")}
+01324                     }
+01325                     4->{
+01326                         pendingAdminItem=raw
+01327                         val o=moderation.solutionOverride(raw,moderationState)
+01328                         adminSolutionsPicker.launch(Intent(this@RecentCrosswordsActivity,SolutionsActivity::class.java).apply{
+01329                             o?.solutionUrl?.takeIf{it.isNotBlank()}?.let{putExtra(SolutionsActivity.EXTRA_URL,it)}
+01330                         })
+01331                     }
+01332                     5->chooseRedecodeMode { mode,options -> forceRedecode(raw,effective,mode,options) }
+01333                     6->openClueRegionInspector(raw,effective)
+01334                     7->confirmAdminAiPromptDiagnostic(raw,effective)
+01335                     8->confirmAdminVerbatimTranscription(raw,effective)
+01336                     9->openAdminOcrRecrop(raw,effective)
+01337         }
+01338     }
+01339 
+01340     /** Execute an administrator action against the EXACT UUID selected in "התשבצים שלי".
+01341      * A puzzle need not be present in the rolling weekly cache.  Destructive
+01342      * issue-wide actions are blocked unless its original Canonical source can be
+01343      * matched without guessing; local inspection and diagnostics still work.
+01344      */
+01345     private fun resolveSavedAdminTarget():SavedAdminTarget?{
+01346         if(!PuzzleLibrary.validId(savedAdminId))return null
+01347         val record=library.load(savedAdminId)?:return null
+01348         val entry=PuzzleLibrary.Entry(savedAdminId,record)
+01349         val storedKey=canonicalIndex.issueKey(savedAdminId)
+01350         val thread=canonicalIndex.sourceThreadUrl(savedAdminId)
+01351         val image=canonicalIndex.sourceImageUrl(savedAdminId)
+01352         val date=WeeklyCrosswordsFetcher.titleDateMillis(record.title)?:0L
+01353         val cached=storedKey?.let{key->cache.load(365).items.firstOrNull{CrosswordCatalog.sourceKey(it)==key}}
+01354         val raw=cached?:WeeklyCrosswordsFetcher.Item(record.title,date,thread,image)
+01355         val verified=storedKey!=null && CrosswordCatalog.sourceKey(raw)==storedKey &&
+01356             raw.dateMillis>0 && raw.imageUrl.startsWith("https://") && raw.threadUrl.startsWith("https://")
+01357         val localSource=library.sourceFiles(savedAdminId).firstOrNull{it.isFile&&it.length()>0L}
+01358         val localUri=localSource?.let{"file://${it.absolutePath}"}.orEmpty()
+01359         val effective=if(localUri.isNotBlank())raw.copy(
+01360             imageUrl=localUri,
+01361             attachmentLabel="תמונת המקור השמורה",
+01362             candidateImageUrls=listOf(localUri),
+01363             candidateLabels=listOf("תמונת המקור השמורה"),
+01364             candidateScores=listOf(1000)
+01365         ) else raw
+01366         return SavedAdminTarget(entry,record,raw,effective,verified,storedKey)
+01367     }
+01368 
+01369     private fun executeSavedAdminAction(){
+01370         if(!moderationState.admin || !adminMode || !AdminPuzzleMenu.has(savedAdminAction)){
+01371             toastAdmin("אין הרשאה לפעולה זו");finish();return
+01372         }
+01373         val target=resolveSavedAdminTarget()
+01374         if(target==null){toastAdmin("התשבץ השמור אינו זמין");finish();return}
+01375         activeSavedTarget=target
+01376         message.text="ניהול: ${target.record.title.take(110)}"
+01377         DebugLog.i("ADMIN_LIBRARY_ACTION","selected puzzle=${DebugLog.compactId(target.entry.id)} action=$savedAdminAction " +
+01378             "verifiedRemote=${target.remoteVerified} sourcePresent=${target.effective.imageUrl.isNotBlank()}")
+01379         when(savedAdminAction){
+01380             1,2,3,4->{
+01381                 if(!target.remoteVerified){
+01382                     AlertDialog.Builder(this)
+01383                         .setTitle("חסרים נתוני מקור מאומתים")
+01384                         .setMessage("התשבץ השמור אינו מקושר למקור השבועי המקורי באופן מאומת. " +
+01385                             "לא ניתן לבצע פעולה שמשנה תשבצים של משתמשים אחרים בלי לזהות במדויק את הרשומה. " +
+01386                             "ניתן להשתמש בפענוח מחדש, בבדיקת תמונת הפענוח ובניסויי AI מקומיים.")
+01387                         .setPositiveButton("סגור",null).show()
+01388                 }else runAdminMenuAction(savedAdminAction,target.raw,target.raw)
+01389             }
+01390             5->chooseRedecodeMode{mode,options->runSavedAdminRedecode(target.entry,mode,options)}
+01391             6->openClueRegionInspector(target.raw,target.effective)
+01392             9->openAdminOcrRecrop(target.raw,target.effective)
+01393             7,8->{
+01394                 if(target.effective.imageUrl.isBlank()){
+01395                     toastAdmin("לא נמצאה תמונת מקור לתשבץ הזה")
+01396                 }else if(savedAdminAction==7){
+01397                     confirmAdminAiPromptDiagnostic(target.raw,target.effective)
+01398                 }else confirmAdminVerbatimTranscription(target.raw,target.effective)
+01399             }
+01400         }
+01401     }
+01402 
+01403     /** Existing saved-puzzle runner redetects the grid, preserves progress, and
+01404      * publishes only after validation/atomic Canonical refresh. */
+01405     private fun runSavedAdminRedecode(entry:PuzzleLibrary.Entry,mode:AiDecodeMode,options:AiRunOptions){
+--- LINES 1410 1540 ---
+01410             val outcome=AdminLibraryRedecodeRunner.run(this,entry,mode=mode,options=options){stage->
+01411                 runOnUiThread{if(!isDestroyed)message.text=stage}
+01412             }
+01413             runOnUiThread{
+01414                 if(isDestroyed)return@runOnUiThread
+01415                 progress.visibility=View.INVISIBLE
+01416                 message.text=if(outcome.success)"פענוח מחדש הסתיים" else "פענוח מחדש נכשל"
+01417                 AlertDialog.Builder(this)
+01418                     .setTitle(if(outcome.success)"הפענוח מחדש הצליח" else "הפענוח מחדש נכשל")
+01419                     .setMessage(outcome.detail)
+01420                     .setPositiveButton("סגור"){_,_->finish()}
+01421                     .show()
+01422             }
+01423         }
+01424     }
+01425 
+01426     private fun findAdminRecord(raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item):SavedPuzzle?{
+01427         activeSavedTarget?.let{return library.load(it.entry.id)}
+01428         val sourceKey=CrosswordCatalog.sourceKey(effective) ?: CrosswordCatalog.sourceKey(raw)
+01429         var record=sourceKey?.let { canonicalIndex.findComplete(it,library) }
+01430         if(record==null){
+01431             val issue=CrosswordCatalog.issueKey(raw)
+01432             if(issue!=null){
+01433                 record=library.list().entries.mapNotNull{it.puzzle}.firstOrNull { local ->
+01434                     val bound=canonicalIndex.issueKeyFor(local).orEmpty()
+01435                     CrosswordCatalog.issueKeyFromTitle(local.title)==issue ||
+01436                         bound==issue || CrosswordCatalog.issueKeyFromSourceKey(bound)==issue
+01437                 }
+01438             }
+01439         }
+01440         return record
+01441     }
+01442 
+01443     /** Full-page, verbatim clues only; does not depend on a detected grid. */
+01444     private fun confirmAdminVerbatimTranscription(raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item){
+01445         if(!moderationState.admin||!adminMode)return
+01446         if(adminAiTestRunning){toastAdmin("בדיקת AI כבר מתבצעת");return}
+01447         val models=AdminAiPromptDiagnostic.ModelChoice.entries.filter{
+01448             it.provider==AdminAiPromptDiagnostic.Provider.GEMINI
+01449         }
+01450         val checked=BooleanArray(models.size) // No models selected by default.
+01451         AlertDialog.Builder(this)
+01452             .setTitle("ניסוי Gemini — תמלול הגדרות בלבד")
+01453             .setMultiChoiceItems(models.map{it.displayName}.toTypedArray(),checked){_,idx,on->
+01454                 if(idx in checked.indices)checked[idx]=on
+01455             }
+01456             .setNegativeButton("ביטול",null)
+01457             .setPositiveButton("הרץ תמלול"){_,_->
+01458                 val selected=models.filterIndexed{idx,_->checked[idx]}
+01459                 if(selected.isEmpty())toastAdmin("יש לבחור לפחות מודל Gemini אחד")
+01460                 else startAdminVerbatimTranscription(effective,selected)
+01461             }
+01462             .show()
+01463     }
+01464 
+01465     private fun startAdminVerbatimTranscription(
+01466         effective:WeeklyCrosswordsFetcher.Item,
+01467         models:List<AdminAiPromptDiagnostic.ModelChoice>
+01468     ){
+01469         if(!moderationState.admin||!adminMode||adminAiTestRunning||models.isEmpty())return
+01470         adminAiTestRunning=true
+01471         progress.visibility=View.VISIBLE
+01472         message.text="ניסוי תמלול הגדרות — ${models.size} קריאות…"
+01473         executor.execute{
+01474             val result=runCatching{
+01475                 AdminVerbatimClueDiagnostic.run(cacheDir,effective,models){idx,total,model->
+01476                     runOnUiThread{if(!isDestroyed)message.text="תמלול $idx/$total — $model"}
+01477                 }
+01478             }
+01479             runOnUiThread{
+01480                 if(isDestroyed)return@runOnUiThread
+01481                 adminAiTestRunning=false
+01482                 progress.visibility=View.INVISIBLE
+01483                 result.onSuccess{summary->
+01484                     val details=summary.runs.joinToString("\n"){
+01485                         "${it.model}: ${it.clues.size} הגדרות" +
+01486                             (if(it.error.isNotBlank())" — ${it.error.take(70)}" else "")
+01487                     }
+01488                     message.text="ניסוי תמלול הסתיים — ${summary.succeeded}/${summary.requested}"
+01489                     val exportContent=LinearLayout(this).apply{
+01490                         orientation=LinearLayout.VERTICAL
+01491                         layoutDirection=View.LAYOUT_DIRECTION_RTL
+01492                         setPadding(dp(14),dp(8),dp(14),dp(6))
+01493                     }
+01494                     exportContent.addView(ScrollView(this).apply{
+01495                         addView(TextView(this@RecentCrosswordsActivity).apply{
+01496                             text="${summary.succeeded}/${summary.requested} קריאות הצליחו.\n$details\n\n" +
+01497                                 "ה-CSV מכיל את הטקסט הגולמי ואת סדר המספרים שנמצא. " +
+01498                                 "ההשוואה אינה אימות מול תמונת המקור."
+01499                             textSize=14f;setPadding(dp(4),dp(4),dp(4),dp(4))
+01500                         })
+01501                     },LinearLayout.LayoutParams(-1,dp(220)))
+01502                     val exportActions=LinearLayout(this).apply{
+01503                         orientation=LinearLayout.HORIZONTAL;layoutDirection=View.LAYOUT_DIRECTION_RTL
+01504                     }
+01505                     val csvButton=UiKit.button(this,"שמור CSV"){
+01506                         AdminAiPromptDiagnostic.saveCsvToDownloads(this,summary.csv)
+01507                             .onSuccess{name->toastAdmin("נשמר ב-Download: $name")}
+01508                             .onFailure{e->toastAdmin("שמירת CSV נכשלה: ${e.message.orEmpty().take(80)}")}
+01509                     }
+01510                     val zipButton=UiKit.button(this,"שמור ZIP"){
+01511                         AdminAiPromptDiagnostic.saveZipToDownloads(this,summary.zip)
+01512                             .onSuccess{name->toastAdmin("נשמר ב-Download: $name")}
+01513                             .onFailure{e->toastAdmin("שמירת ZIP נכשלה: ${e.message.orEmpty().take(80)}")}
+01514                     }
+01515                     exportActions.addView(csvButton,LinearLayout.LayoutParams(0,dp(54),1f))
+01516                     exportActions.addView(zipButton,LinearLayout.LayoutParams(0,dp(54),1f))
+01517                     exportContent.addView(exportActions)
+01518                     AlertDialog.Builder(this)
+01519                         .setTitle("תוצאות תמלול הגדרות בלבד")
+01520                         .setView(exportContent)
+01521                         .setNegativeButton("סגור",null)
+01522                         .show()
+01523                 }.onFailure{e->
+01524                     DebugLog.e("AI_VERBATIM","administrator transcription failed",e)
+01525                     message.text="ניסוי תמלול נכשל"
+01526                     toastAdmin("ניסוי תמלול נכשל: ${e.message.orEmpty().take(130)}")
+01527                 }
+01528             }
+01529         }
+01530     }
+01531 
+01532     private fun confirmAdminAiPromptDiagnostic(raw:WeeklyCrosswordsFetcher.Item,effective:WeeklyCrosswordsFetcher.Item){
+01533         if(!moderationState.admin||!adminMode)return
+01534         if(adminAiTestRunning){toastAdmin("בדיקת AI כבר מתבצעת");return}
+01535         val models=AdminAiPromptDiagnostic.ModelChoice.entries.toList()
+01536         val checked=BooleanArray(models.size) // No model preselected; avoid accidental paid calls.
+01537         AlertDialog.Builder(this)
+01538             .setTitle("בדיקת AI — בחר מודלים")
+01539             .setMultiChoiceItems(models.map{it.displayName}.toTypedArray(),checked){_,which,isChecked->
+01540                 if(which in checked.indices)checked[which]=isChecked
+--- LINES 2150 2220 ---
+02150                 deletedPreviously -> 0xffffe4e6.toInt()
+02151                 else -> Color.TRANSPARENT
+02152             }
+02153             val row=LinearLayout(this@RecentCrosswordsActivity).apply{
+02154                 orientation=LinearLayout.HORIZONTAL;layoutDirection=View.LAYOUT_DIRECTION_LTR;gravity=Gravity.CENTER_VERTICAL
+02155                 setPadding(dp(8),dp(8),dp(8),dp(8));isClickable=true;isFocusable=true
+02156                 background=UiKit.rounded(if(importKey==selectedImportKey)0xffe6ddff.toInt() else stateColor,dp(12).toFloat())
+02157                 alpha=if(selectedImportKey!=null&&importKey!=selectedImportKey).64f else 1f
+02158                 isEnabled=!withdrawn&&!batchRunning&&(selectedImportKey==null||importKey==selectedImportKey)
+02159                 setOnClickListener{if(isEnabled){selectRow(raw,item)}}
+02160             }
+02161             val actionSlot=FrameLayout(this@RecentCrosswordsActivity).apply{
+02162                 layoutParams=LinearLayout.LayoutParams(dp(66),dp(58)).apply{marginEnd=dp(8)}
+02163             }
+02164             val more=UiKit.button(this@RecentCrosswordsActivity,"⋮"){}.apply{
+02165                 textSize=25f;contentDescription="פעולות ניהול לתשבץ";setPadding(0,0,0,0)
+02166                 visibility=if(moderationState.admin&&adminMode&&!batchSelectMode&&!batchRunning)View.VISIBLE else View.INVISIBLE
+02167                 isEnabled=moderationState.admin&&adminMode&&!batchSelectMode&&!batchRunning
+02168                 setOnClickListener{if(isEnabled)showAdminMenu(this,raw,item)}
+02169             }
+02170             actionSlot.addView(more,FrameLayout.LayoutParams(dp(58),dp(58),Gravity.CENTER))
+02171             row.addView(actionSlot)
+02172             val textBox=LinearLayout(this@RecentCrosswordsActivity).apply{
+02173                 orientation=LinearLayout.VERTICAL;layoutDirection=View.LAYOUT_DIRECTION_RTL;gravity=Gravity.CENTER_VERTICAL
+02174                 isClickable=true;isFocusable=true;isEnabled=!withdrawn&&!batchRunning&&selectedImportKey==null
+02175                 setOnClickListener{if(isEnabled){selectRow(raw,item)}}
+02176             }
+02177             textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02178                 text=if(model is UnifiedNewPuzzleRow.IsraelHayom || model is UnifiedNewPuzzleRow.FourteenAcrossIssue)
+02179                     model.title else WeeklyCrosswordsFetcher.displayTitle(item)
+02180                 textSize=17f;gravity=Gravity.RIGHT;maxLines=2
+02181                 isClickable=true;isFocusable=true;isEnabled=!withdrawn&&!batchRunning&&selectedImportKey==null
+02182                 setOnClickListener{if(isEnabled){selectRow(raw,item)}}
+02183             })
+02184             if(model is UnifiedNewPuzzleRow.FourteenAcrossIssue)textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02185                 text="14Across — רשת והגדרות · Google Groups — תמונה וחיתוכים מקומיים ללא AI"
+02186                 textSize=12f;gravity=Gravity.RIGHT;alpha=.72f
+02187             })
+02188             if(model is UnifiedNewPuzzleRow.IsraelHayom)textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02189                 text="PressReader / JSON \u05EA\u05D7\u05D9\u05DC\u05D4 \u00B7 Google Groups / AI \u05DB\u05D2\u05D9\u05D1\u05D5\u05D9"
+02190                 textSize=12f;gravity=Gravity.RIGHT;alpha=.72f
+02191             })
+02192             if(withdrawn)textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02193                 text="נמחק מכולם";textSize=14f;gravity=Gravity.RIGHT;setTextColor(0xff9f1239.toInt())
+02194                 setTypeface(typeface,android.graphics.Typeface.BOLD)
+02195             })
+02196             if(alreadyDownloaded)textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02197                 text=if(model is UnifiedNewPuzzleRow.IsraelHayom || model is UnifiedNewPuzzleRow.FourteenAcrossIssue)
+02198                     "כבר נמצא בתשבצים שלי · לא ייווצר עותק נוסף ללא בדיקת התאמה" else
+02199                     "כבר נמצא בתשבצים שלי • בחירה תיצור עותק חדש"
+02200                 textSize=13f;gravity=Gravity.RIGHT;setTextColor(0xff2e7d32.toInt())
+02201             })
+02202             if(!alreadyDownloaded && deletedPreviously)textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02203                 text="נמחק מהתשבצים שלי";textSize=13f;gravity=Gravity.RIGHT;setTextColor(0xffb91c1c.toInt())
+02204             })
+02205             val decodeFailure=moderation.failureFor(raw,moderationState)
+02206             if(!alreadyDownloaded && decodeFailure!=null){
+02207                 val galleryAdminRecovery=GalleryRecoveryPolicy.canRetryFailure(
+02208                     GalleryPublisherPolicy.isGallery(item.title),moderationState.admin,true)
+02209                 textBox.addView(TextView(this@RecentCrosswordsActivity).apply{
+02210                     text=if(galleryAdminRecovery)"הפענוח הקודם נכשל · אפשר לנסות שחזור ממקור הארץ" else "הפענוח נכשל – לא ניתן להעלאה";textSize=13f;gravity=Gravity.RIGHT;setTextColor(0xffc62828.toInt())
+02211                 })
+02212                 // Failure recovery is deliberately administrator-only.  Make the retry
+02213                 // visible next to the failure instead of hiding it behind the ⋮ menu.
+02214                 if(moderationState.admin&&adminMode&&!batchSelectMode&&!batchRunning)textBox.addView(
+02215                     UiKit.button(this@RecentCrosswordsActivity,if(galleryAdminRecovery)"נסה שחזור מהארץ" else "פענח מחדש"){
+02216                         if(galleryAdminRecovery)download(raw,item)
+02217                         else chooseRedecodeMode { mode,options -> forceRedecode(raw,item,mode,options) }
+02218                     }.apply{contentDescription="נסה לשחזר את ${WeeklyCrosswordsFetcher.displayTitle(item)}"},
+02219                     LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(44)).apply{topMargin=dp(4)}
+02220                 )
+=== FILE CanonicalPuzzleCloud.kt LINES 1901 ===
+--- LINES 605 710 ---
+00605      * exactly that record or publish a new canonical when none exists.
+00606      */
+00607     fun refreshDecodedForAdmin(
+00608         sourceKey:String,
+00609         legacyIssueKey:String?,
+00610         sourceThreadUrl:String,
+00611         sourceImageUrl:String,
+00612         record:SavedPuzzle,
+00613         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+00614         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+00615         editorName:String,
+00616         callback:(Result<CachedPuzzle>)->Unit = {},
+00617         recoverLocalReview:Boolean = false,
+00618         allowSourceReplacement:Boolean = false,
+00619         previousSourceImageUrl:String = ""
+00620     ){
+00621         // A changed source image is never an implicit side effect of re-decoding.
+00622         // The only allowed replacement is an image uploaded by the admin to
+00623         // this app's versioned, content-addressed Firebase Storage namespace.
+00624         if(allowSourceReplacement && !CanonicalSourceImageStorage.isManagedUrl(sourceImageUrl)){
+00625             callback(Result.failure(SecurityException("תמונת המקור לא הועלתה לאחסון מאומת")))
+00626             return
+00627         }
+00628         if(BuildConfig.HIGI_DRY_BUILD){
+00629             callback(Result.failure(IllegalStateException("גרסת DRY אינה מפרסמת פענוחים למאגר הקנוני")))
+00630             return
+00631         }
+00632         if(sourceKey.isBlank()){
+00633             callback(Result.failure(IllegalArgumentException("לא נמצא מזהה Canonical לתשבץ")));return
+00634         }
+00635         if(!isAdminPublishableRecord(record)){
+00636             callback(Result.failure(IllegalArgumentException("אין רשת והגדרות מזוהות לשמירה קנונית")));return
+00637         }
+00638         // Do not let a non-admin invoke the partial-source publication path, even
+00639         // when Firebase would allow an ordinary FIRST canonical publication.
+00640         AdminAccess(context).loadRole { role ->
+00641             if(role==AdminAccess.Role.NONE){
+00642                 callback(Result.failure(SecurityException("פענוח מחדש קנוני למנהל בלבד")))
+00643                 return@loadRole
+00644             }
+00645         // Resolve the EXISTING record against the old image, not against the
+00646         // newly uploaded URL. Legacy physical aliases require this identity.
+00647         val lookupImage=if(allowSourceReplacement)previousSourceImageUrl else sourceImageUrl
+00648         fetchCompatible(sourceKey,legacyIssueKey,sourceThreadUrl,lookupImage){fetched->
+00649             if(fetched.isFailure){callback(Result.failure(fetched.exceptionOrNull()!!));return@fetchCompatible}
+00650             val existing=fetched.getOrNull()
+00651             if(existing==null){
+00652                 if(allowSourceReplacement){
+00653                     callback(Result.failure(IllegalStateException("לא נמצאה רשומת קנוני קיימת להחלפת התמונה. לא נוצר תשבץ נוסף")))
+00654                     return@fetchCompatible
+00655                 }
+00656                 publishIfAbsent(
+00657                     sourceKey,record,sourceThreadUrl,sourceImageUrl,editorName,
+00658                     clueRegions=clueRegions,clueGeometries=clueGeometries,
+00659                     adminPartialAllowed=true,recoveredLocalCopy=recoverLocalReview,callback=callback
+00660                 )
+00661             }else{
+00662                 // Automatic migration must not overwrite a newer same-issue
+00663                 // image with stale local source geometry. Explicit admin
+00664                 // re-decode remains allowed to select a different source.
+00665                 if(recoverLocalReview){
+00666                     val publishedImage=WeeklyCrosswordsFetcher.attachmentIdentity(existing.sourceImageUrl)
+00667                     val localImage=WeeklyCrosswordsFetcher.attachmentIdentity(sourceImageUrl)
+00668                     if(publishedImage.isNotBlank() && localImage.isNotBlank() && publishedImage!=localImage){
+00669                         callback(Result.failure(IllegalStateException("תמונת המקור הקנונית השתנתה; העותק המקומי נשמר ולא נדרס")))
+00670                         return@fetchCompatible
+00671                     }
+00672                 }
+00673                 DebugLog.i(
+00674                     "CANONICAL",
+00675                     "admin-refresh found issue=${DebugLog.compactId(existing.issueKey)} node=${DebugLog.compactId(existing.storageNodeKey)} physical-route=true"
+00676                 )
+00677                 updateDecodedForAdminAtNode(existing.issueKey,existing.storageNodeKey,record,
+00678                     clueRegions,clueGeometries,editorName,callback,recoverLocalReview,
+00679                     replacementUrl=sourceImageUrl.takeIf{allowSourceReplacement},
+00680                     expectedSourceUrl=sourceImageUrl,
+00681                     previousSourceUrl=previousSourceImageUrl.takeIf{allowSourceReplacement})
+00682             }
+00683         }
+00684         }
+00685     }
+00686 
+00687     /**
+00688      * User clue corrections are canonical. The transaction preserves the grid and
+00689      * answers, changes only clue text, and increments a monotonic revision.
+00690      */
+00691     fun updateClues(
+00692         issueKey: String,
+00693         values: Map<ClueEditorModel.Key, String>,
+00694         editorName: String,
+00695         expectedGridSignature: String? = null,
+00696         discoveredNodeKey: String? = null,
+00697         callback: (Result<Long>) -> Unit = {}
+00698     ) {
+00699         if (issueKey.isBlank() || values.isEmpty()) { callback(Result.success(0L)); return }
+00700         val clean = values.mapValues { canonicalText(it.value) }.filterValues { it.isNotBlank() }
+00701         if (clean.isEmpty()) { callback(Result.failure(IllegalArgumentException("אין טקסט הגדרה לשמירה"))); return }
+00702         authenticated({ uid, d ->
+00703             val ref = d.getReference("canonicalPuzzles/${CanonicalNodeRoute.resolve(issueKey,discoveredNodeKey)}")
+00704             ref.runTransaction(object : Transaction.Handler {
+00705                 override fun doTransaction(data: MutableData): Transaction.Result {
+00706                     if (data.value == null) return Transaction.abort()
+00707                     if (data.child("issueKey").value != issueKey ||
+00708                         (data.child("schema").value as? Number)?.toInt() != SCHEMA ||
+00709                         (data.child("parserSchema").value as? Number)?.toInt() != PARSER_SCHEMA) return Transaction.abort()
+00710                     if(expectedGridSignature!=null && data.child("gridSignature").value!=expectedGridSignature)
+--- LINES 1318 1480 ---
+01318         issueKey:String,
+01319         record:SavedPuzzle,
+01320         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+01321         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry> = emptyMap(),
+01322         editorName:String,
+01323         callback:(Result<CachedPuzzle>)->Unit = {}
+01324     ) = updateDecodedForAdminAtNode(issueKey, null, record, clueRegions, clueGeometries, editorName, callback)
+01325 
+01326     private fun updateDecodedForAdminAtNode(
+01327         issueKey:String,
+01328         discoveredNodeKey:String?,
+01329         record:SavedPuzzle,
+01330         clueRegions:Map<ClueEditorModel.Key,BoxF>,
+01331         clueGeometries:Map<ClueEditorModel.Key,ClueGeometry>,
+01332         editorName:String,
+01333         callback:(Result<CachedPuzzle>)->Unit,
+01334         recoverLocalReview:Boolean=false,
+01335         replacementUrl:String?=null,
+01336         expectedSourceUrl:String="",
+01337         previousSourceUrl:String?=null
+01338     ){
+01339         if(issueKey.isBlank()||!isAdminPublishableRecord(record)){
+01340             callback(Result.failure(IllegalArgumentException("לא ניתן לעדכן קנוני בלי רשת והגדרות מזוהות")));return
+01341         }
+01342         val cw=record.crossword
+01343         val newSignature=AnswerChecking.signature(cw)
+01344         val newBlocked=buildString(cw.rows*cw.cols){for(r in 0 until cw.rows)for(c in 0 until cw.cols)append(if(cw.cell(r,c).blocked)'#' else '.')}
+01345         val newClues=linkedMapOf<String,String>()
+01346         cw.clues.forEach{clue->newClues[SharingCodec.key(clue.number,clue.direction)]=canonicalText(clue.text)}
+01347         val newRegions=linkedMapOf<String,String>()
+01348         val trustworthy=clueGeometries.filterValues(ClueGeometryEvidencePolicy::canPublish)
+01349         clueRegions.forEach{(key,box)->
+01350             if(key !in trustworthy)return@forEach
+01351             val left=box.left.coerceIn(0f,1f);val top=box.top.coerceIn(0f,1f)
+01352             val right=box.right.coerceIn(0f,1f);val bottom=box.bottom.coerceIn(0f,1f)
+01353             if(right-left>=.01f&&bottom-top>=.006f)newRegions[SharingCodec.key(key.number,key.direction)]="$left,$top,$right,$bottom"
+01354         }
+01355         val newLines=linkedMapOf<String,String>()
+01356         trustworthy.forEach { (key,geometry) ->
+01357             val encoded=encodeLines(geometry.lines)
+01358             if(encoded.isNotBlank())newLines[SharingCodec.key(key.number,key.direction)]=encoded
+01359         }
+01360         val newGeometryKeys=(newRegions.keys+newLines.keys).toSet()
+01361         val newEvidence=trustworthy.mapKeys{(key,_)->SharingCodec.key(key.number,key.direction)}
+01362             .mapValues{(_,geo)->geo.evidence.wire}
+01363         authenticated({uid,d->
+01364             val physicalNodeKey=CanonicalNodeRoute.resolve(issueKey,discoveredNodeKey)
+01365             val ref=d.getReference("canonicalPuzzles/$physicalNodeKey")
+01366 
+01367             // A Realtime Database transaction starts from the client's local cache.
+01368             // In administrator batch re-decode that exact child is often not cached yet,
+01369             // so the first doTransaction() can receive null even though fetchCompatible()
+01370             // just found the record on the server.  Prime the exact child first and keep
+01371             // its server value as a one-shot bootstrap for that initial cache-null call.
+01372             ref.get().addOnSuccessListener { preflight ->
+01373                 if(!preflight.exists()){
+01374                     DebugLog.w("CANONICAL","admin-refresh preflight node=${DebugLog.compactId(physicalNodeKey)} exists=false")
+01375                     callback(Result.failure(IllegalStateException("התשבץ עדיין לא קיים במאגר המשותף")))
+01376                     return@addOnSuccessListener
+01377                 }
+01378                 if(preflight.child("issueKey").value!=issueKey ||
+01379                     (preflight.child("schema").value as? Number)?.toInt()!=SCHEMA ||
+01380                     (preflight.child("parserSchema").value as? Number)?.toInt()!=PARSER_SCHEMA){
+01381                     callback(Result.failure(IllegalStateException("רשומת Canonical אינה תואמת לגרסה הנוכחית")))
+01382                     return@addOnSuccessListener
+01383                 }
+01384                 val prefetchedValue=preflight.value
+01385                 if(prefetchedValue==null){
+01386                     callback(Result.failure(IllegalStateException("לא ניתן לטעון את רשומת Canonical לעדכון")))
+01387                     return@addOnSuccessListener
+01388                 }
+01389                 DebugLog.i("CANONICAL","admin-refresh preflight node=${DebugLog.compactId(physicalNodeKey)} exists=true")
+01390 
+01391                 var rejectReason="התשבץ עדיין לא קיים במאגר המשותף"
+01392                 var invocation=0
+01393                 ref.runTransaction(object:Transaction.Handler{
+01394                     override fun doTransaction(data:MutableData):Transaction.Result{
+01395                         invocation++
+01396                         if(data.value==null){
+01397                             // Seed only the very first local-cache-null invocation. If the
+01398                             // server subsequently retries us with null, the record was really
+01399                             // deleted concurrently and must not be resurrected from the seed.
+01400                             when(CanonicalTransactionCachePolicy.action(invocation,prefetchedValue!=null)){
+01401                                 CanonicalTransactionCachePolicy.NullAction.BOOTSTRAP_PREFETCH->{
+01402                                     data.value=prefetchedValue
+01403                                     DebugLog.w("CANONICAL","admin-refresh tx-cache-null node=${DebugLog.compactId(physicalNodeKey)} bootstrap=preflight")
+01404                                 }
+01405                                 CanonicalTransactionCachePolicy.NullAction.ABORT_AS_DELETED->{
+01406                                     rejectReason="התשבץ נמחק מהמאגר המשותף במהלך העדכון"
+01407                                     return Transaction.abort()
+01408                                 }
+01409                             }
+01410                         }
+01411                         if(data.child("issueKey").value!=issueKey ||
+01412                             (data.child("schema").value as? Number)?.toInt()!=SCHEMA ||
+01413                             (data.child("parserSchema").value as? Number)?.toInt()!=PARSER_SCHEMA){rejectReason="רשומת Canonical אינה תואמת לגרסה הנוכחית";return Transaction.abort()}
+01414                         val oldRows=(data.child("rows").value as? Number)?.toInt()
+01415                         val oldCols=(data.child("cols").value as? Number)?.toInt()
+01416                         val oldBlocked=data.child("blocked").value as? String
+01417                         val oldSignature=data.child("gridSignature").value as? String
+01418                         val gridChanged=oldRows!=cw.rows||oldCols!=cw.cols||oldBlocked!=newBlocked||oldSignature!=newSignature
+01419                         val oldImageUrl=data.child("sourceImageUrl").value as? String ?: ""
+01420                         if(replacementUrl!=null && previousSourceUrl!=null &&
+01421                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01422                                 LocalOcrGeometryAuthority.sourceIdentity(previousSourceUrl)){
+01423                             rejectReason="תמונת הקנוני השתנתה במכשיר אחר; ההעלאה החדשה לא פורסמה"
+01424                             return Transaction.abort()
+01425                         }
+01426                         val sourceChanged=replacementUrl!=null &&
+01427                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01428                                 LocalOcrGeometryAuthority.sourceIdentity(replacementUrl)
+01429                         // Never publish source-relative crop geometry derived from
+01430                         // another image, even if both have an identical 11x11 grid.
+01431                         val unapprovedSourceMismatch=replacementUrl==null &&
+01432                             expectedSourceUrl.isNotBlank() && oldImageUrl.isNotBlank() &&
+01433                             LocalOcrGeometryAuthority.sourceIdentity(oldImageUrl)!=
+01434                                 LocalOcrGeometryAuthority.sourceIdentity(expectedSourceUrl)
+01435                         if(unapprovedSourceMismatch){
+01436                             rejectReason="תמונת המקור שונה מהקנוני; נדרשת העלאה מאומתת לפני שמירת החיתוכים"
+01437                             return Transaction.abort()
+01438                         }
+01439                         // Preserve only deliberate human edits, never the earlier AI snapshot.
+01440                         // Older records without an origin marker are treated conservatively as manual.
+01441                         val previousTexts=data.child("clues").children.mapNotNull { child ->
+01442                             val key=child.key; val value=child.value as? String
+01443                             if(key!=null && value!=null)key to value else null
+01444                         }.toMap()
+01445                         val previousEditRevisions=data.child("clueEdits").children.mapNotNull { child ->
+01446                             val key=child.key; val stamp=(child.value as? Number)?.toLong()?:0L
+01447                             if(key!=null && stamp>0L)key to stamp else null
+01448                         }.toMap()
+01449                         val previousActors=data.child("clueEditActors").children.mapNotNull { child ->
+01450                             child.key?.let { it to child.value }
+01451                         }.toMap()
+01452                         val previousOrigins=previousEditRevisions.keys.associateWith { key ->
+01453                             data.child("clueEditActors").child(key).child("origin").value as? String ?: ""
+01454                         }
+01455                         val approvedBefore=data.child("clueApprovals").children.mapNotNull {child->
+01456                             child.key?.takeIf{ child.child("approved").value==true }
+01457                         }.toSet()
+01458                         val protectedText=AdminCanonicalMergeV172.manualTextKeys(
+01459                             previousEditRevisions,previousOrigins,previousTexts.keys)+approvedBefore
+01460                         val keepPriorForPartial=newClues.keys.filterTo(linkedSetOf()) { key ->
+01461                             GalleryRecoveryPolicy.isPlaceholder(newClues[key].orEmpty()) &&
+01462                                 previousTexts[key]?.let { !GalleryRecoveryPolicy.isPlaceholder(it) }==true
+01463                         }
+01464                         // A 0.15.172 local-review copy already contains edits made while
+01465                         // Firebase was blocked. Its previous unmarked local text is the
+01466                         // only durable copy of those repairs; never discard it on migration.
+01467                         val recoveredText=if(recoverLocalReview)newClues.keys.filterTo(linkedSetOf()) { key ->
+01468                             !GalleryRecoveryPolicy.isPlaceholder(newClues[key].orEmpty()) && key !in protectedText
+01469                         }else emptySet()
+01470                         val protectedGeometry=approvedBefore + data.child("clueRegionEdits").children.mapNotNull { it.key }.toSet() +
+01471                             data.child("clueRegionEvidence").children.mapNotNull { child ->
+01472                                 child.key?.takeIf { child.value==ClueGeometryEvidence.MANUAL.wire }
+01473                             }
+01474                         val protectedAnswers=data.child("answerEdits").children.any()
+01475                         if(gridChanged && (protectedText.isNotEmpty()||protectedGeometry.isNotEmpty()||protectedAnswers)){
+01476                             rejectReason="קיימים תיקונים ידניים ברשת הישנה; לא ניתן להעביר אותם בבטחה לרשת החדשה. הקנוני לא שונה."
+01477                             DebugLog.w("CANONICAL","admin-refresh grid-change guarded manualClues=${protectedText.size} manualRegions=${protectedGeometry.size} manualAnswers=$protectedAnswers")
+01478                             return Transaction.abort()
+01479                         }
+01480                         if(sourceChanged && protectedGeometry.isNotEmpty()){
+=== FILE MainActivity.kt LINES 6006 ===
+--- LINES 3950 4075 ---
+03950             val regions=PuzzleRegions(
+03951                 grid=prepared.points.map { Vec2(it.x,it.y) },
+03952                 horizontal=prepared.horizontalRegion?.map { Vec2(it.x,it.y) },
+03953                 vertical=prepared.verticalRegion?.map { Vec2(it.x,it.y) }
+03954             )
+03955             val record=library.create(CrosswordSession(prepared.crossword),prepared.title,regions)
+03956             check(library.load(record.id)?.id==record.id){"Imported puzzle did not persist to local library"}
+03957             DebugLog.i("LIBRARY_IMPORT","persisted id=${DebugLog.compactId(record.id)} forced=${prepared.forcedRedecode} title=${record.title}")
+03958             decodeMetadataStore.put(record.id,prepared.providerUsed,prepared.modelUsed,prepared.fallbackUsed,prepared.forcedRedecode,prepared.aiMode,prepared.reasoningPath,prepared.aiElapsedMs,prepared.aiUsage)
+03959             val safeClueGeometry=sanitizedImportedClueGeometries(original,prepared)
+03960             val safeClueRegions=sanitizedImportedClueBoxes(original,prepared)
+03961             clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,
+03962                 if(pendingCanonicalLocalBitmap) LocalOcrImageIdentity.fingerprint(original)
+03963                 else pendingCanonicalImageUrl.ifBlank{LocalOcrImageIdentity.fingerprint(original)})
+03964             saveClueGeometryDiagnostics(record.id,original,prepared)
+03965             downloadedStore.recordFromTitle(record.id,record.title)
+03966             val canonicalIssueBeforeBind=pendingCanonicalIssueKey
+03967             val canonicalImageBeforeBind=pendingCanonicalImageUrl
+03968             val canonicalThreadBeforeBind=pendingCanonicalThreadUrl
+03969             val forcedCanonicalRefresh=prepared.forcedRedecode && !canonicalIssueBeforeBind.isNullOrBlank()
+03970             if(prepared.forcedRedecode && !forcedCanonicalRefresh)
+03971                 throw IllegalStateException("לא נמצא מזהה מקור לפענוח מחדש קנוני; לא ניתן לפרסם אוטומטית")
+03972             val localReview=prepared.crossword.clues.any{GalleryRecoveryPolicy.isPlaceholder(it.text)}
+03973             // Until Firebase confirms the transaction, even a fully decoded
+03974             // administrator correction is a recoverable unpublished local copy.
+03975             // This survives process death / APK replacement without another AI call.
+03976             if(forcedCanonicalRefresh)getSharedPreferences("higi_local_review",MODE_PRIVATE)
+03977                 .edit().putBoolean(record.id,true)
+03978                 .putBoolean("source-upload-pending:${record.id}",pendingCanonicalLocalBitmap).apply()
+03979             // bindPendingCanonical() clears pending import flags. Snapshot source
+03980             // identity BEFORE that call so a selected local bitmap is never
+03981             // mistaken for the existing remote URL.
+03982             val sourceWasLocalBeforeBind=pendingCanonicalLocalBitmap
+03983             val manualSolutionsApplied=bindPendingCanonical(record.id)
+03984             // Admin correction is published only after a successful, source-accurate
+03985             // image upload. A local correction with no cloud image stays local.
+03986             if(forcedCanonicalRefresh){
+03987                 val issueKey=canonicalIssueBeforeBind!!
+03988                 val wasLocalImage=sourceWasLocalBeforeBind
+03989                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single start issue=${DebugLog.compactId(issueKey)} puzzle=${DebugLog.compactId(record.id)} localSource=$wasLocalImage")
+03990                 fun publishWithSource(confirmedUrl:String,uploaded:Boolean){
+03991                     canonicalCloud.refreshDecodedForAdmin(
+03992                         issueKey,CrosswordCatalog.issueKeyFromSourceKey(issueKey),
+03993                         canonicalThreadBeforeBind,confirmedUrl,
+03994                         record,safeClueRegions,safeClueGeometry,settings.displayName,
+03995                         callback = { result -> runOnUiThread {
+03996                             // Release the claim after the complete cloud transaction.
+03997                             canonicalCloud.releaseDecodeClaim(issueKey)
+03998                             result.onSuccess { cached ->
+03999                                 canonicalIndex.bind(record.id,cached.issueKey,cached.revision,
+04000                                     cached.sourceImageUrl.ifBlank{confirmedUrl},
+04001                                     cached.sourceThreadUrl.ifBlank{canonicalThreadBeforeBind})
+04002                                 getSharedPreferences("higi_local_review",MODE_PRIVATE).edit()
+04003                                     .remove(record.id).remove("source-upload-pending:${record.id}").apply()
+04004                                 runCatching {
+04005                                     library.load(record.id)?.let { current ->
+04006                                         current.crossword.clues.forEach { clue ->
+04007                                             cached.clues[ClueEditorModel.Key(clue.number,clue.direction)]?.let { clue.text=it }
+04008                                         }
+04009                                         library.saveSession(current.session)
+04010                                     }
+04011                                 }.onFailure { DebugLog.w("ADMIN_REDECODE_CANONICAL","local-sync-failed reason=${it.javaClass.simpleName}") }
+04012                                 DebugLog.i("ADMIN_REDECODE_CANONICAL","single committed issue=${DebugLog.compactId(issueKey)} revision=${cached.revision} uploaded=$uploaded")
+04013                                 if(board.crossword?.puzzleId==record.id){
+04014                                     library.load(record.id)?.let { syncCanonicalPuzzle(it,cached) }
+04015                                     toast("הפענוח ותמונת המקור פורסמו לכל המשתמשים")
+04016                                 }
+04017                             }.onFailure { error ->
+04018                                 DebugLog.w("ADMIN_REDECODE_CANONICAL","single publish-failed issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04019                                 if(board.crossword?.puzzleId==record.id)
+04020                                     toast("הפענוח נשמר מקומית אך לא פורסם: ${error.message.orEmpty().take(120)}")
+04021                             }
+04022                         }},allowSourceReplacement=uploaded,
+04023                         previousSourceImageUrl=if(uploaded)canonicalImageBeforeBind else ""
+04024                     )
+04025                 }
+04026                 if(wasLocalImage){
+04027                     if(BuildConfig.HIGI_DRY_BUILD){
+04028                         canonicalCloud.releaseDecodeClaim(issueKey)
+04029                         DebugLog.i("CANONICAL_SOURCE_UPLOAD","DRY local-only; upload and canonical publication blocked")
+04030                         toast("DRY: התמונה והפענוח נשמרו במכשיר בלבד; הקנוני לא השתנה")
+04031                     }else{
+04032                         // PNG encoding runs on a worker, not on the Android UI thread.
+04033                         executor.execute {
+04034                             CanonicalSourceImageStorage.upload(applicationContext,issueKey,original){ uploaded ->
+04035                                 runOnUiThread {
+04036                                     uploaded.onSuccess { stored ->
+04037                                         // Rebind LOCAL OCR geometry only after upload
+04038                                         // confirms the exact source image hash.
+04039                                         clueRegionStore.putVerifiedGeometryAll(record.id,safeClueGeometry,stored.url)
+04040                                         publishWithSource(stored.url,true)
+04041                                     }.onFailure { error ->
+04042                                         canonicalCloud.releaseDecodeClaim(issueKey)
+04043                                         DebugLog.w("CANONICAL_SOURCE_UPLOAD","local-only issue=${DebugLog.compactId(issueKey)} reason=${DebugLog.sanitize(error.message.orEmpty())}")
+04044                                         if(board.crossword?.puzzleId==record.id)
+04045                                             toast("תמונת המקור לא עלתה לענן; הפענוח נשאר מקומי בלבד. לא בוצע פרסום קנוני")
+04046                                     }
+04047                                 }
+04048                             }
+04049                         }
+04050                     }
+04051                 }else publishWithSource(canonicalImageBeforeBind,false)
+04052             }else if(!forcedCanonicalRefresh && !localReview)publishCanonicalIfComplete(record.id)
+04053             pendingImportedTitle=null
+04054             suppressNextAutoSolutionLookup=true
+04055             activatePuzzle(record)
+04056             source=original
+04057             sourceCorners=prepared.points
+04058             hRegion=prepared.horizontalRegion
+04059             vRegion=prepared.verticalRegion
+04060             lastReview=prepared.parsed
+04061             persistSource(original,prepared.crossword)
+04062             refreshLibrary()
+04063 
+04064             val expected=prepared.crossword.startNumbers(Direction.HORIZONTAL).size+
+04065                 prepared.crossword.startNumbers(Direction.VERTICAL).size
+04066             val foundClues=prepared.crossword.clues.map { it.number to it.direction }.toSet().size
+04067             if(prepared.crossword.clues.any { GalleryRecoveryPolicy.isPlaceholder(it.text) }){
+04068                 autoImportLog("partial clues: canonical admin refresh pending; manual correction allowed")
+04069                 DebugLog.i("ADMIN_PARTIAL","local puzzle ready; canonical publication runs in background")
+04070                 finishMainImport();busy(false)
+04071                 toast("התשבץ נפתח; הגדרות חסרות מסומנות באדום. הפענוח מתפרסם למאגר המשותף.")
+04072                 return
+04073             }
+04074             if(manualSolutionsApplied){
+04075                 reference = library.load(record.id)?.reference
