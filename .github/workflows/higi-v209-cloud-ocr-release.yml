@@ -32,6 +32,24 @@ jobs:
           distribution: temurin
           java-version: '17'
       # Ubuntu runner already has Android SDK and cmdline-tools; avoid deprecated sdkmanager 'tools' package.
+      - name: Enable KVM acceleration for this ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::Host does not expose /dev/kvm; do not attempt 15-minute software emulation"
+            exit 1
+          fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # udev changes can be delayed; CI runner is disposable and access is local only.
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo chmod 0666 /dev/kvm
+          fi
+          test -r /dev/kvm && test -w /dev/kvm
+          ls -l /dev/kvm
+          echo "::notice::KVM hardware acceleration is accessible"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
@@ -147,8 +165,11 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          ram-size: 2048M
+          disable-linux-hw-accel: false
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 420
           script: bash "$GITHUB_WORKSPACE/cloud-tests/v209/emulator-ocr-run.sh"
       - name: Compare real Android OCR output to prior v208 proposal counts
         shell: bash
