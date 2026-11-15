@@ -48,7 +48,7 @@ class HigiCloudOcrRegressionTest {
             var state="FAILED"
             var reason=""
             try {
-                require(file.matches(Regex("[0-9]{8}\\.jpg")))
+                require(file.matches(Regex("[0-9]{6}\\.jpg")))
                 val image=assets.open("higi-fixtures/$file").use { BitmapFactory.decodeStream(it) }
                     ?:error("Bitmap decode failed")
                 bitmap=image
