@@ -153,6 +153,33 @@ class HigiCloudOcrRegressionTest {
                         candidates.putAll(result.trusted)
                         result.previewOnly.forEach { (k,g)->candidates.putIfAbsent(k,g) }
                         proposed=candidates.size
+                        // Compare against the last SHA-verified WIP emulator fixture run.
+                        // These are review-only candidate counts, NOT approved crops.
+                        val baseline=mapOf(
+                            "11-11-26" to 16, "09-11-26" to 16, "04-11-26" to 16,
+                            "02-11-26" to 16, "28-10-26" to 16, "26-10-26" to 16,
+                            "21-10-26" to 16, "19-10-26" to 16, "14-10-26" to 14,
+                            "12-10-26" to 16, "07-10-26" to 15, "05-10-26" to 16,
+                            "30-09-26" to 16, "23-09-26" to 16, "16-09-26" to 16,
+                            "14-09-26" to 15, "09-09-26" to 14, "07-09-26" to 16,
+                            "02-09-26" to 16
+                        )
+                        check(proposed>=baseline.getValue(date)) {
+                            "Candidate regression on $date: $proposed before=${baseline.getValue(date)}"
+                        }
+                        val missingRecovery=when(date){
+                            "14-10-26" -> setOf("H1","V1")
+                            "07-10-26" -> setOf("V3")
+                            "14-09-26" -> setOf("V2")
+                            "09-09-26" -> setOf("V10","V12")
+                            else -> emptySet<String>()
+                        }
+                        check(missingRecovery.all { sourceAnchors.previews.containsKey(it) }) {
+                            "Still missing independently anchored OCR clues on $date: " +
+                                missingRecovery.filterNot{sourceAnchors.previews.containsKey(it)}
+                        }
+                        if(missingRecovery.isNotEmpty())
+                            check(proposed==16) { "Incomplete 16/16 recovery on $date: $proposed" }
                         verified=result.trusted.size
                         review=result.previewOnly.size
                         repaired=result.repairBefore.size
