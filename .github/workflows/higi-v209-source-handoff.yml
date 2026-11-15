@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-v209-source-handoff.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   export:
     runs-on: ubuntu-latest
