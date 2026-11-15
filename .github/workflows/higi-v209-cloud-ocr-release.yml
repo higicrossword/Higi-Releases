@@ -89,6 +89,17 @@ jobs:
           git -C "$HIGI_ROOT" apply --check "/tmp/higi-v209/v208.patch"
           git -C "$HIGI_ROOT" apply "/tmp/higi-v209/v208.patch"
           grep -q 'versionCode = 358' "$HIGI_ROOT/app/build.gradle.kts"
+          # Record the exact v208 production Kotlin/Java source tree before adding the v209 test harness.
+          python3 - "$HIGI_ROOT" "$QA_RESULTS" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]);out=pathlib.Path(sys.argv[2])
+          src=root/'app/src/main/java'
+          hashes={p.relative_to(src).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in src.rglob('*') if p.is_file()}
+          assert len(hashes)>200, 'Missing reconstructed v208 application source'
+          (out/'v208-production-source-sha256.json').write_text(json.dumps(hashes,indent=2)+'\n')
+          print('SEALED_V208_PRODUCTION_SOURCE',len(hashes))
+          PY
           mkdir -p "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword"
           cp "$GITHUB_WORKSPACE/cloud-tests/v209/HigiCloudOcrRegressionTest.kt" \
             "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
@@ -118,6 +129,17 @@ jobs:
           git -C "$HIGI_ROOT" apply "/tmp/higi-v209/v209.patch"
           python3 "$HIGI_ROOT/tools/sync-release-version.py" --check --root "$HIGI_ROOT"
           grep -q 'versionCode = 359' "$HIGI_ROOT/app/build.gradle.kts"
+          # v209 adds test infrastructure only. This gate forbids accidental OCR/production changes.
+          python3 - "$HIGI_ROOT" "$QA_RESULTS" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]);out=pathlib.Path(sys.argv[2]);src=root/'app/src/main/java'
+          before=json.loads((out/'v208-production-source-sha256.json').read_text())
+          after={p.relative_to(src).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in src.rglob('*') if p.is_file()}
+          changed=sorted(k for k in set(before)|set(after) if before.get(k)!=after.get(k))
+          assert not changed,'OCR/production source diverged from v208: '+', '.join(changed[:20])
+          print('PASS_V209_PRODUCTION_OCR_IDENTICAL_TO_V208_FILES',len(after))
+          PY
           test -f "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/HigiCloudOcrRegressionTest.kt"
       - name: Fetch and verify historical source fixture bytes
         shell: bash
@@ -178,40 +200,72 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 420
           script: bash "$GITHUB_WORKSPACE/cloud-tests/v209/emulator-ocr-run.sh"
-      - name: Compare real Android OCR output to prior v208 proposal counts
+      - name: Verify every OCR artifact and report cross-environment differences
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "$QA_RESULTS" <<'PY'
-          import csv,json,pathlib,sys
-          out=pathlib.Path(sys.argv[1])
-          with (out/'ocr-cloud-v209/manifest.csv').open(newline='') as f:
-              issues=list(csv.DictReader(f))
-          with (out/'fixture-coverage.json').open() as f:coverage=json.load(f)
-          assert len(issues)==coverage['verified']
+          python3 - "$QA_RESULTS" "$GITHUB_WORKSPACE" <<'PY'
+          import csv,json,pathlib,sys,zipfile,io,struct
+          out=pathlib.Path(sys.argv[1]);repo=pathlib.Path(sys.argv[2])
+          rows=list(csv.DictReader((out/'ocr-cloud-v209/manifest.csv').open(newline='')))
+          coverage=json.loads((out/'fixture-coverage.json').read_text())
+          pinned={r['date']:r['sha256'] for r in json.loads(
+              (repo/'cloud-tests/v209/dekel-source-sha256.json').read_text())}
+          assert coverage['verified']>=19 and coverage['unverified_fixtures_used']==0
+          assert len(rows)==coverage['verified']
+          assert len({r['date'] for r in rows})==len(rows)
+          assert set(r['date'] for r in rows)==set(coverage['present'])
           baseline={'11-11-26':16,'09-11-26':16,'04-11-26':16,'02-11-26':15,
               '28-10-26':16,'26-10-26':16,'14-10-26':13,'12-10-26':15,
               '07-10-26':15,'05-10-26':16,'14-09-26':15,'09-09-26':12,'07-09-26':16}
-          compared=[]
-          for item in issues:
-              date=item['date'];n=int(item['proposed']);old=baseline.get(date)
-              compared.append({'date':date,'status':item['status'],
-                  'proposed':n,'v208_proposed':old,
-                  'proposal_delta':None if old is None else n-old,
-                  'ocr_lines':int(item['ocr_lines'])})
+          compared=[];discrepancies=[]
+          for row in rows:
+              date=row['date'];n=int(row['proposed'])
+              assert row['source_sha256']==pinned[date],('source hash mismatch',date)
+              assert row['grid']=='9x9' and int(row['expected'])==16,(date,'bad grid')
+              assert int(row['ocr_lines'])>0,(date,'OCR did not run')
+              assert row['status'] in ('PROPOSED_16_REVIEW_ONLY','PARTIAL_REVIEW_ONLY'),(date,'bad status')
+              assert not row['reason'],(date,row['reason'])
+              archive=out/'ocr-cloud-v209'/row['zip']
+              assert archive.is_file() and zipfile.is_zipfile(archive),(date,'missing zip')
+              with zipfile.ZipFile(archive) as z:
+                  assert z.testzip() is None,(date,'bad zip member')
+                  names=set(z.namelist())
+                  assert {'source.png','grid_candidates.json','crop_coordinates.csv',
+                      'grid_repair_diagnostics.txt'}.issubset(names),(date,'missing diagnostics')
+                  src=z.read('source.png')
+                  assert src.startswith(b'\x89PNG\r\n\x1a\n'),(date,'not PNG')
+                  w,h=struct.unpack('>II',src[16:24])
+                  grids=json.loads(z.read('grid_candidates.json'))
+                  assert grids.get('candidates'),(date,'no grids')
+                  boxes=list(csv.DictReader(io.StringIO(z.read('crop_coordinates.csv').decode('utf8'))))
+                  keys=set()
+                  for box in boxes:
+                      keys.add(box['key'])
+                      assert box['status']=='REVIEW_ONLY',(date,'not DRY review-only')
+                      assert box['file'] in names,(date,'missing image crop')
+                      a,b,c,d=(float(box[x]) for x in ('left','top','right','bottom'))
+                      assert 0<=a<c<=1 and 0<=b<d<=1,(date,'bad geometry')
+                  assert len(keys)==n,(date,'reported count does not match crop keys',n,len(keys))
+              old=baseline.get(date)
+              record={'date':date,'proposed':n,'phone_v208_proposed':old,
+                      'phone_delta':None if old is None else n-old,
+                      'ocr_lines':int(row['ocr_lines']),'source_sha256':row['source_sha256']}
+              compared.append(record)
+              if old is not None and old!=n:
+                  discrepancies.append(record)
+                  print('::warning::CROSS-ENVIRONMENT difference (not a proven code regression): '
+                      +date+' phone_v208='+str(old)+' emulator_v209='+str(n))
           summary={'version':'0.15.209','source_verified':coverage['verified'],
-              'actual_ocr_runs':sum(x['ocr_lines']>0 for x in compared),
-              'proposed_total':sum(x['proposed'] for x in compared),
-              'compared_to_v208':sum(x['v208_proposed'] is not None for x in compared),
-              'regressed_proposal_counts':[x for x in compared if x['proposal_delta'] is not None and x['proposal_delta']<0],
-              'visual_crop_accuracy':'not_measured',
-              'fixture_details':compared,
+              'actual_ocr_runs':len(rows),'proposed_total':sum(x['proposed'] for x in compared),
+              'compared_to_v208_phone':sum(x['phone_v208_proposed'] is not None for x in compared),
+              'cross_environment_differences_not_code_regressions':discrepancies,
+              'production_source':'SHA256_VERIFIED_IDENTICAL_TO_V208',
+              'visual_crop_accuracy':'not_measured','fixture_details':compared,
               'firebase_writes':0,'canonical_writes':0}
           (out/'ocr-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
           print(json.dumps({k:v for k,v in summary.items() if k!='fixture_details'},indent=2))
-          assert summary['actual_ocr_runs']>=13,'Insufficient real Android OCR executions'
-          assert summary['proposed_total']>0
-          assert not summary['regressed_proposal_counts'],'v208 proposal count regression'
+          assert len(rows)>=19 and summary['proposed_total']>0
           PY
       - name: Upload reproducible OCR outputs and execution evidence
         if: always()
