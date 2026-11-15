@@ -6,3 +6,4 @@
   "patchSha256": "69158ae8177ce08e5d9919a77614a9fc2802692a6c6f27444ee73219f12622dc",
   "notes": "Higi 0.15.206 DRY: administrator OCR review full-image overlay of all proposed crops, ZIP export of overview, individual source-pixel crop PNGs, segment PNGs and coordinates CSV to Android Downloads. No extra OCR or AI, no automatic approval, no Canonical/Firebase changes; v205 behavior preserved."
 }
+
