@@ -26,9 +26,11 @@ class HigiCloudOcrRegressionTest {
         val entries=assets.open("higi-fixtures/manifest.tsv").bufferedReader().use { it.readLines() }
             .filter { it.isNotBlank() }.map { it.split('\t') }
         require(entries.size in 13..20 && entries.all { it.size==3 }) { "Fixture coverage invalid" }
-        val folder=File(context.getExternalFilesDir(null),"ocr-cloud-v209")
-        if(folder.exists())folder.deleteRecursively()
-        check(folder.mkdirs()) { "Cannot create cloud-only output folder" }
+        // Always use internal app storage. External app storage can be unmounted on CI emulators.
+        // Export results with adb exec-out run-as (debug-only); no public storage permissions needed.
+        val folder=File(context.filesDir,"ocr-cloud-v209")
+        if (folder.exists()) check(folder.deleteRecursively()) { "Cannot reset cloud output folder: ${folder.absolutePath}" }
+        check(folder.isDirectory || folder.mkdirs()) { "Cannot create cloud-only output folder: ${folder.absolutePath}" }
         var ocrRan=0
         var proposedTotal=0
         val manifest=StringBuilder("date,source_sha256,grid,expected,proposed,ocr_lines,verified,review,repair_before,status,reason,zip\n")
