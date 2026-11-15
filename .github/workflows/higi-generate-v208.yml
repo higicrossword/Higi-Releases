@@ -1,0 +1,122 @@
+name: Higi 0.15.208 - DRY OCR automatic discovery and conservative repair
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-generate-v208.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v208-patch-generation
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct pinned v207 and verify v208 OCR patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.208-DRY.json
+          WORK="$RUNNER_TEMP/higi-v208"
+          mkdir -p "$WORK/source"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$WORK/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $WORK/base.zip" | sha256sum --check
+          unzip -q "$WORK/base.zip" -d "$WORK/source"
+          ROOT="$WORK/source/HebrewCrosswordApp_v0.15.175"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi builder' -c user.email='higi-builder@users.noreply.github.com' commit -qm 'pinned v175'
+          python3 - "$GITHUB_WORKSPACE" "$WORK" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          base=pathlib.Path(sys.argv[1]); work=pathlib.Path(sys.argv[2])
+          v207=lzma.decompress(base64.b64decode((base/'cloud-patches/v0.15.207-from-v0.15.175.patch.xz.b64').read_text().strip(),validate=True))
+          assert hashlib.sha256(v207).hexdigest()=='c29eafe0da349c91ffa9eb6a597299e91c3c7edd5f73dc0fea4eb50ca56dc5dc'
+          (work/'v207.patch').write_bytes(v207)
+          PY
+          git -C "$ROOT" apply --check "$WORK/v207.patch"
+          git -C "$ROOT" apply "$WORK/v207.patch"
+          grep -q 'versionCode = 357' "$ROOT/app/build.gradle.kts"
+          python3 -m pip install --quiet brotli
+          python3 - "$GITHUB_WORKSPACE" "$WORK" <<'PY'
+          import base64,brotli,hashlib,pathlib,sys
+          base=pathlib.Path(sys.argv[1]);work=pathlib.Path(sys.argv[2])
+          data=base64.b64decode((base/'cloud-tools/higi-v208-from-v207.patch.br.b64').read_text().strip(),validate=True)
+          raw=brotli.decompress(data)
+          expected='75ed39cf786d89e9239f67c6f3df9ed46a8a71876aae6af94f113dfabc3b02fe'
+          assert hashlib.sha256(raw).hexdigest()==expected
+          assert raw.startswith(b'diff --git')
+          (work/'v208-overlay.patch').write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$WORK/v208-overlay.patch"
+          git -C "$ROOT" apply "$WORK/v208-overlay.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          python3 - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+          root=Path(sys.argv[1])
+          p=root/'app/src/main/java/com/example/hebrewcrossword'
+          a=(p/'AdminOcrSeriesBatchActivity.kt').read_text()
+          b=(p/'AdminOcrRecropActivity.kt').read_text()
+          c=(p/'AdminOcrBatchExportV206.kt').read_text()
+          d=(p/'OcrWeeklyCropRepairV208.kt').read_text()
+          e=(p/'HigiLocalOcrCropEngine.kt').read_text()
+          assert 'WeeklyCrosswordsFetcher.fetchArchiveWindow' in a
+          assert 'WeeklyCrosswordsFetcher.fetchFavorites' in a
+          assert 'distinctBy' in (p/'CrosswordCatalog.kt').read_text() or 'byIssue' in a
+          assert 'GridDetector.locate' in b and 'EXTRA_BATCH_REMOTE' in b
+          assert 'AdminOcrGridCandidatesV208.collect' in b
+          assert 'grid_candidates.json' in c and 'repair_before/' in c
+          assert 'V208_CROP_REPAIR_REVIEW_ONLY' in d
+          assert 'OcrWeeklyCropRepairV208.inspect' in e
+          assert 'NO Canonical write' in d
+          assert 'versionCode = 358' in (root/'app/build.gradle.kts').read_text()
+          print('PASS v208 OCR DRY-only source gates')
+          PY
+          git -C "$ROOT" diff --check
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --binary HEAD > "$WORK/v208.patch"
+          test -s "$WORK/v208.patch"
+          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$WORK/v208.patch"
+          git -C "$ROOT" apply "$WORK/v208.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          python3 - "$WORK/v208.patch" "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          base=pathlib.Path(sys.argv[2])
+          name='cloud-patches/v0.15.208-from-v0.15.175.patch.xz.b64'
+          manifest=base/'cloud-releases/v0.15.208-DRY.json'
+          assert not (base/name).exists() and not manifest.exists()
+          (base/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={
+            'channel':'dry','version':'0.15.208','versionCode':358,
+            'patchFile':name,'patchSha256':hashlib.sha256(raw).hexdigest(),
+            'notes':'Administrator DRY OCR automatic 90-day source discovery for selected series, bounded 20-puzzle de-duplicated batch, recorded grid candidates, review-only conservative crop repair with before/after images, and consolidated diagnostic ZIP. No AI, no Canonical or Firebase write, no automatic approval. Existing v207 local batch preserved.'
+          }
+          manifest.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('Prepared Higi v208 DRY patch',cfg['patchSha256'])
+          PY
+      - name: Commit verified source patch and trigger gated Android APK build
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-patches/v0.15.208-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.208-DRY.json
+          git commit -m 'Stage Higi 0.15.208 DRY automatic OCR discovery and crop repair review'
+          git push origin HEAD:main
