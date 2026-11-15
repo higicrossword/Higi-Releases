@@ -2,7 +2,10 @@ name: Higi 0.15.209 - real Android OCR emulator gate and DRY release
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/higi-v209-cloud-ocr-release.yml']
+    paths:
+      - '.github/workflows/higi-v209-cloud-ocr-release.yml'
+      - 'cloud-tests/v209/HigiCloudOcrRegressionTest.kt'
+      - 'cloud-tests/v209/dekel-source-sha256.json'
   workflow_dispatch:
 permissions:
   contents: write
