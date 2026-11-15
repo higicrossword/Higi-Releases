@@ -99,7 +99,7 @@ class HigiCloudOcrRegressionTest {
                             AdminOcrBatchExportV206.BatchDetails(
                                 candidateGrids,result.repairBefore.mapValues{(_,g)->g.lines},diagnostics)
                         ).getOrThrow()
-                        zipName="${date.replace('-','')}.zip"
+                        zipName="${date.replace("-", "")}.zip"
                         z.copyTo(File(folder,zipName),overwrite=true)
                         state=if(proposed==16)"PROPOSED_16_REVIEW_ONLY" else "PARTIAL_REVIEW_ONLY"
                     }
