@@ -16,7 +16,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: higicrossword/Higi-Releases
-      HIGI_ROOT: ${{ runner.temp }}/higi-v209/HebrewCrosswordApp_v0.15.175
+      HIGI_ROOT: /tmp/higi-v209/HebrewCrosswordApp_v0.15.175
       QA_RESULTS: ${{ github.workspace }}/ocr-results-v209
     steps:
       - uses: actions/checkout@v4
@@ -36,19 +36,19 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e cloud-releases/v0.15.209-DRY.json
-          mkdir -p "$RUNNER_TEMP/higi-v209" "$QA_RESULTS"
+          mkdir -p "/tmp/higi-v209" "$QA_RESULTS"
           curl --silent --show-error --fail --location --retry 3 \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/octet-stream" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            --output "$RUNNER_TEMP/higi-v209/base.zip" \
+            --output "/tmp/higi-v209/base.zip" \
             "https://api.github.com/repos/$REPO/releases/assets/720424907"
-          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $RUNNER_TEMP/higi-v209/base.zip" | sha256sum -c -
-          unzip -q "$RUNNER_TEMP/higi-v209/base.zip" -d "$RUNNER_TEMP/higi-v209"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-v209/base.zip" | sha256sum -c -
+          unzip -q "/tmp/higi-v209/base.zip" -d "/tmp/higi-v209"
           git -C "$HIGI_ROOT" init -q
           git -C "$HIGI_ROOT" add -A
           git -C "$HIGI_ROOT" -c user.name='Higi builder' -c user.email='higi-builder@users.noreply.github.com' commit -qm 'pinned v175'
-          python3 - "$GITHUB_WORKSPACE" "$RUNNER_TEMP/higi-v209" <<'PY'
+          python3 - "$GITHUB_WORKSPACE" "/tmp/higi-v209" <<'PY'
           import base64,hashlib,json,lzma,pathlib,sys
           repo=pathlib.Path(sys.argv[1]);work=pathlib.Path(sys.argv[2])
           obj=json.loads((repo/'cloud-releases/v0.15.208-DRY.json').read_text())
@@ -57,8 +57,8 @@ jobs:
           assert hashlib.sha256(data).hexdigest()==obj['patchSha256']
           (work/'v208.patch').write_bytes(data)
           PY
-          git -C "$HIGI_ROOT" apply --check "$RUNNER_TEMP/higi-v209/v208.patch"
-          git -C "$HIGI_ROOT" apply "$RUNNER_TEMP/higi-v209/v208.patch"
+          git -C "$HIGI_ROOT" apply --check "/tmp/higi-v209/v208.patch"
+          git -C "$HIGI_ROOT" apply "/tmp/higi-v209/v208.patch"
           grep -q 'versionCode = 358' "$HIGI_ROOT/app/build.gradle.kts"
           mkdir -p "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword"
           cp "$GITHUB_WORKSPACE/cloud-tests/v209/HigiCloudOcrRegressionTest.kt" \
@@ -81,12 +81,12 @@ jobs:
           python3 "$HIGI_ROOT/tools/sync-release-version.py" --check --root "$HIGI_ROOT"
           git -C "$HIGI_ROOT" add -N -A
           git -C "$HIGI_ROOT" diff --check
-          git -C "$HIGI_ROOT" diff --binary HEAD > "$RUNNER_TEMP/higi-v209/v209.patch"
-          test -s "$RUNNER_TEMP/higi-v209/v209.patch"
+          git -C "$HIGI_ROOT" diff --binary HEAD > "/tmp/higi-v209/v209.patch"
+          test -s "/tmp/higi-v209/v209.patch"
           git -C "$HIGI_ROOT" reset --hard -q HEAD
           git -C "$HIGI_ROOT" clean -fdq
-          git -C "$HIGI_ROOT" apply --check "$RUNNER_TEMP/higi-v209/v209.patch"
-          git -C "$HIGI_ROOT" apply "$RUNNER_TEMP/higi-v209/v209.patch"
+          git -C "$HIGI_ROOT" apply --check "/tmp/higi-v209/v209.patch"
+          git -C "$HIGI_ROOT" apply "/tmp/higi-v209/v209.patch"
           python3 "$HIGI_ROOT/tools/sync-release-version.py" --check --root "$HIGI_ROOT"
           grep -q 'versionCode = 359' "$HIGI_ROOT/app/build.gradle.kts"
           test -f "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/HigiCloudOcrRegressionTest.kt"
@@ -203,7 +203,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "$RUNNER_TEMP/higi-v209/v209.patch" "$GITHUB_WORKSPACE" <<'PY'
+          python3 - "/tmp/higi-v209/v209.patch" "$GITHUB_WORKSPACE" <<'PY'
           import base64,hashlib,json,lzma,pathlib,sys
           raw=pathlib.Path(sys.argv[1]).read_bytes()
           root=pathlib.Path(sys.argv[2])
