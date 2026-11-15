@@ -1,0 +1,128 @@
+name: Higi 0.15.207 - administrator OCR series batch and consolidated ZIP
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-generate-v207.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v207-patch-generation
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct signed v206 source and validate series-batch patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.207-DRY.json
+          WORK="$RUNNER_TEMP/higi-v207"
+          mkdir -p "$WORK/source"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$WORK/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $WORK/base.zip" | sha256sum --check
+          unzip -q "$WORK/base.zip" -d "$WORK/source"
+          ROOT="$WORK/source/HebrewCrosswordApp_v0.15.175"
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name='Higi builder' -c user.email='higi-builder@users.noreply.github.com' commit -qm 'pinned v175'
+          python3 - "$GITHUB_WORKSPACE/cloud-patches/v0.15.206-from-v0.15.175.patch.xz.b64" "$WORK/v206.patch" <<'PY'
+          import base64,hashlib,lzma,pathlib,sys
+          raw=lzma.decompress(base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True))
+          expected='69158ae8177ce08e5d9919a77614a9fc2802692a6c6f27444ee73219f12622dc'
+          assert hashlib.sha256(raw).hexdigest()==expected
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$WORK/v206.patch"
+          git -C "$ROOT" apply "$WORK/v206.patch"
+          grep -q 'versionCode = 356' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.206"' "$ROOT/app/build.gradle.kts"
+          python3 -m pip install --quiet brotli
+          python3 - "$GITHUB_WORKSPACE/cloud-tools/higi-v207-series-batch-overlay.patch.br.b64" "$WORK/overlay.patch" <<'PY'
+          import base64,brotli,hashlib,pathlib,sys
+          data=base64.b64decode(pathlib.Path(sys.argv[1]).read_text().strip(),validate=True)
+          assert hashlib.sha256(data).hexdigest()=='1cb018df22d99a381b8680fc498f2444561bd5f21f2fc7602add009eac05df03'
+          raw=brotli.decompress(data)
+          assert raw.startswith(b'diff --git a/app/src/main/AndroidManifest.xml')
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check "$WORK/overlay.patch"
+          git -C "$ROOT" apply "$WORK/overlay.patch"
+          python3 - "$ROOT" <<'PY'
+          from pathlib import Path
+          import sys
+          root=Path(sys.argv[1])
+          path=root/'app/build.gradle.kts'
+          s=path.read_text()
+          assert s.count('versionCode = 356')==1 and s.count('versionName = "0.15.206"')==1
+          path.write_text(s.replace('versionCode = 356','versionCode = 357').replace('versionName = "0.15.206"','versionName = "0.15.207"'))
+          pkg=root/'app/src/main/java/com/example/hebrewcrossword'
+          batch=(pkg/'AdminOcrSeriesBatchActivity.kt').read_text()
+          ocr=(pkg/'AdminOcrRecropActivity.kt').read_text()
+          exporter=(pkg/'AdminOcrBatchExportV206.kt').read_text()
+          menu=(pkg/'AdminActivity.kt').read_text()
+          manifest=(root/'app/src/main/AndroidManifest.xml').read_text()
+          cloud=(pkg/'CanonicalPuzzleCloud.kt').read_text()
+          assert 'AdminOcrSeriesBatchActivity' in manifest and 'android:exported="false"' in manifest
+          assert 'batchOcrButton.visibility=if(BuildConfig.HIGI_DRY_BUILD)' in menu
+          assert 'AdminAccess(this).loadRole' in batch and 'if(!BuildConfig.HIGI_DRY_BUILD)' in batch
+          assert 'CrosswordCatalog.all.map' in batch and 'YEDIOTH_WEDNESDAY_DEKEL' in batch
+          assert 'reviewer.launch(intent)' in batch and 'EXTRA_BATCH_TOKEN' in ocr
+          assert 'exportCurrentBatchPreview()' in ocr and 'saveBatchToCache(' in exporter
+          assert 'manifest.csv' in batch and 'errors.txt' in batch and 'summary.txt' in batch
+          assert 'ZipInputStream' in batch and 'ZipOutputStream' in batch
+          assert 'fun saveToDownloads(' in exporter and 'overview_all_crops.png' in exporter
+          assert 'ref.updateChildren(updates)' in cloud
+          assert 'LocalOcrCropPass' not in batch and 'Gemini' not in batch
+          print('PASS batch source guards, v206 single ZIP retained, Canonical source untouched')
+          PY
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          git -C "$ROOT" diff --check
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --binary HEAD > "$WORK/v207.patch"
+          test -s "$WORK/v207.patch"
+          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check "$WORK/v207.patch"
+          git -C "$ROOT" apply "$WORK/v207.patch"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          python3 - "$WORK/v207.patch" "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          base=pathlib.Path(sys.argv[2])
+          name='cloud-patches/v0.15.207-from-v0.15.175.patch.xz.b64'
+          manifest=base/'cloud-releases/v0.15.207-DRY.json'
+          assert not (base/name).exists() and not manifest.exists()
+          (base/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={
+            'channel':'dry','version':'0.15.207','versionCode':357,
+            'patchFile':name,'patchSha256':hashlib.sha256(raw).hexdigest(),
+            'notes':'Administrator-only DRY OCR series batch for locally saved puzzles. Select series including Dekel Monday+Wednesday, run original Android OCR in sequence and produce one ZIP in Downloads with per-puzzle overview, clue PNGs, parts, CSV, manifest and failures. Read-only, no AI, no automatic Canonical publication. Preserves v206 manual preview and export.'
+          }
+          manifest.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('Prepared immutable v207 patch',cfg['patchSha256'])
+          PY
+      - name: Commit immutable v207 patch and trigger gated DRY build
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-patches/v0.15.207-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.207-DRY.json
+          git commit -m 'Stage Higi v207 DRY OCR series batch and consolidated ZIP'
+          git push origin HEAD:main
