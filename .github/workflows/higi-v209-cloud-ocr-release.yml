@@ -157,7 +157,7 @@ jobs:
             adb shell am instrument -w -r -e class com.example.hebrewcrossword.HigiCloudOcrRegressionTest com.example.hebrewcrossword.test/androidx.test.runner.AndroidJUnitRunner > "$QA_RESULTS/instrumentation.log"
             cat "$QA_RESULTS/instrumentation.log"
             grep -q 'OK (1 test)' "$QA_RESULTS/instrumentation.log"
-            adb pull /sdcard/Android/data/com.example.hebrewcrossword/files/ocr-cloud-v209 "$QA_RESULTS/ocr-cloud-v209"
+            adb exec-out run-as com.example.hebrewcrossword tar -C files -cf - ocr-cloud-v209 | tar -C "$QA_RESULTS" -xf -
             test -s "$QA_RESULTS/ocr-cloud-v209/manifest.csv"
       - name: Compare real Android OCR output to prior v208 proposal counts
         shell: bash
