@@ -23,17 +23,27 @@ class HigiCloudOcrRegressionTest {
         val instrument=InstrumentationRegistry.getInstrumentation()
         val context=instrument.targetContext
         val assets=instrument.context.assets
-        val entries=assets.open("higi-fixtures/manifest.tsv").bufferedReader().use { it.readLines() }
+        val allEntries=assets.open("higi-fixtures/manifest.tsv").bufferedReader().use { it.readLines() }
             .filter { it.isNotBlank() }.map { it.split('\t') }
-        require(entries.size in 13..20 && entries.all { it.size==3 }) { "Fixture coverage invalid" }
+        require(allEntries.size in 13..20 && allEntries.all { it.size==3 }) { "Fixture coverage invalid" }
+        val requestedDate=InstrumentationRegistry.getArguments().getString("higi.fixture.date").orEmpty().trim()
+        val entries=if(requestedDate.isEmpty()) allEntries else listOf(
+            allEntries.single { it[0]==requestedDate }
+        )
         // Always use internal app storage. External app storage can be unmounted on CI emulators.
         // Export results with adb exec-out run-as (debug-only); no public storage permissions needed.
         val folder=File(context.filesDir,"ocr-cloud-v209")
-        if (folder.exists()) check(folder.deleteRecursively()) { "Cannot reset cloud output folder: ${folder.absolutePath}" }
+        // Individual instrumentations share app-private data; do not erase prior fixture results.
+        if (requestedDate.isEmpty() && folder.exists()) {
+            check(folder.deleteRecursively()) { "Cannot reset cloud output folder: ${folder.absolutePath}" }
+        }
         check(folder.isDirectory || folder.mkdirs()) { "Cannot create cloud-only output folder: ${folder.absolutePath}" }
         var ocrRan=0
         var proposedTotal=0
-        val manifest=StringBuilder("date,source_sha256,grid,expected,proposed,ocr_lines,verified,review,repair_before,status,reason,zip\n")
+        val manifestFile=File(folder,"manifest.csv")
+        if(!manifestFile.exists()) {
+            manifestFile.writeText("date,source_sha256,grid,expected,proposed,ocr_lines,verified,review,repair_before,status,reason,zip\n",StandardCharsets.UTF_8)
+        }
         for (entry in entries) {
             val date=entry[0]
             val file=entry[1]
@@ -49,13 +59,21 @@ class HigiCloudOcrRegressionTest {
             var repaired=0
             var state="FAILED"
             var reason=""
+            val recordStage:(String)->Unit = { stage ->
+                val line="date=$date stage=$stage epoch_ms=${System.currentTimeMillis()}"
+                File(folder,"progress.log").appendText(line+"\n",StandardCharsets.UTF_8)
+                android.util.Log.i("HIGI_CLOUD_OCR",line)
+            }
+            recordStage("START")
             try {
                 require(file.matches(Regex("[0-9]{6}\\.jpg")))
                 val image=assets.open("higi-fixtures/$file").use { BitmapFactory.decodeStream(it) }
                     ?:error("Bitmap decode failed")
                 bitmap=image
                 check(image.width>500 && image.height>350) { "Unexpected source dimensions" }
+                recordStage("IMAGE_DECODED")
                 val found=GridDetector.locate(image)
+                recordStage("GRID_DETECTION_DONE")
                 if(found==null) {
                     state="GRID_NOT_FOUND"
                 } else {
@@ -71,8 +89,10 @@ class HigiCloudOcrRegressionTest {
                         val b=found.bounds
                         val corners=listOf(PointF(b.left,b.top),PointF(b.right,b.top),
                             PointF(b.right,b.bottom),PointF(b.left,b.bottom))
+                        recordStage("OCR_START")
                         val result=LocalOcrCropPass.run(context,image,crossword,corners,
                             refineSharedRows=true,layoutSeriesId=OcrSeriesProfilesV197.WEEKLY.id)
+                        recordStage("OCR_DONE")
                         lines=result.ocrLineCount
                         val candidates=linkedMapOf<ClueEditorModel.Key,ClueGeometry>()
                         candidates.putAll(result.trusted)
@@ -96,6 +116,7 @@ class HigiCloudOcrRegressionTest {
                             result.previewReasons.toSortedMap(compareBy<ClueEditorModel.Key>({it.direction.name},{it.number}))
                                 .forEach{(k,v)-> append("${k.direction}:${k.number}=$v\n")}
                         }
+                        recordStage("EXPORT_START")
                         val z=AdminOcrBatchExportV206.saveBatchToCache(context,image,crops,
                             "Dekel $date",UUID.randomUUID().toString(),
                             AdminOcrBatchExportV206.BatchDetails(
@@ -103,6 +124,7 @@ class HigiCloudOcrRegressionTest {
                         ).getOrThrow()
                         zipName="${date.replace("-", "")}.zip"
                         z.copyTo(File(folder,zipName),overwrite=true)
+                        recordStage("EXPORT_DONE")
                         state=if(proposed==16)"PROPOSED_16_REVIEW_ONLY" else "PARTIAL_REVIEW_ONLY"
                     }
                 }
@@ -111,15 +133,17 @@ class HigiCloudOcrRegressionTest {
                 reason=t.javaClass.simpleName+":"+t.message.orEmpty().take(110)
             }finally { bitmap?.recycle() }
             val safe=reason.replace(',',';').replace('\n',' ').replace('\r',' ')
-            manifest.append("$date,$sourceSha,$gridLabel,$expected,$proposed,$lines,$verified,$review,$repaired,$state,$safe,$zipName\n")
-            android.util.Log.i("HIGI_CLOUD_OCR", "$date $state expected=$expected proposed=$proposed lines=$lines")
+            manifestFile.appendText("$date,$sourceSha,$gridLabel,$expected,$proposed,$lines,$verified,$review,$repaired,$state,$safe,$zipName\n",StandardCharsets.UTF_8)
+            recordStage("END_$state")
+            if(requestedDate.isNotEmpty()) assertTrue("Fixture $date threw: $reason",state!="ERROR")
         }
-        File(folder,"manifest.csv").writeText(manifest.toString(),StandardCharsets.UTF_8)
         File(folder,"readme.txt").writeText(
             "Higi cloud OCR replay on Android emulator. Identical in-app OCR engine, DRY only.\n"+
             "Visual correctness NOT automatically assessed. No Canonical or Firebase writes.\n"+
             "Expected 16 clue definitions per scanned 9x9 puzzle.\n",StandardCharsets.UTF_8)
-        assertTrue("OCR engine did not produce recognized lines",ocrRan>=1)
-        assertTrue("No crop proposals emitted",proposedTotal>=1)
+        if(requestedDate.isEmpty()) {
+            assertTrue("OCR engine did not produce recognized lines",ocrRan>=1)
+            assertTrue("No crop proposals emitted",proposedTotal>=1)
+        }
     }
 }
