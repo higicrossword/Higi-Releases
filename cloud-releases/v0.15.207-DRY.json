@@ -6,3 +6,4 @@
   "patchSha256": "c29eafe0da349c91ffa9eb6a597299e91c3c7edd5f73dc0fea4eb50ca56dc5dc",
   "notes": "Administrator-only DRY OCR series batch for locally saved puzzles. Select series including Dekel Monday+Wednesday, run original Android OCR in sequence and produce one ZIP in Downloads with per-puzzle overview, clue PNGs, parts, CSV, manifest and failures. Read-only, no AI, no automatic Canonical publication. Preserves v206 manual preview and export."
 }
+
