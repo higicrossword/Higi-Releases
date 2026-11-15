@@ -6,3 +6,4 @@
   "patchSha256": "2744900f8f431de4bcee5c472edf84cd8d131aece65e28314430d49e3882dd8e",
   "notes": "Administrator DRY OCR automatic 90-day source discovery for selected series, bounded 20-puzzle de-duplicated batch, recorded grid candidates, review-only conservative crop repair with before/after images, and consolidated diagnostic ZIP. No AI, no Canonical or Firebase write, no automatic approval. Existing v207 local batch preserved."
 }
+
