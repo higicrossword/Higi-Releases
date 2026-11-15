@@ -75,8 +75,8 @@ jobs:
           assert hashlib.sha256(blob).hexdigest()=='85ca40bac476b1c9dd3763e7075a3f8fbb9bfbf811b542147c6a68c6fff2701e'
           upgraded=brotli.decompress(blob).decode()
           assert 'fun saveBatchToCache(' in upgraded and 'fun saveToDownloads(' in upgraded
-          start='                    val markup=overview(source,crops)\\n'
-          end='                    zip.textEntry("review_notes.txt",report.toString())\\n'
+          start='                    val markup=overview(source,crops)\n'
+          end='                    zip.textEntry("review_notes.txt",report.toString())\n'
           assert original.count(start)==1 and original.count(end)==1
           assert upgraded.count(start)==1 and upgraded.count(end)==1
           assert original.split(start)[1].split(end)[0]==upgraded.split(start)[1].split(end)[0]
