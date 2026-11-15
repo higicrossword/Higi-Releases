@@ -60,8 +60,29 @@ jobs:
           assert raw.startswith(b'diff --git a/app/src/main/AndroidManifest.xml')
           pathlib.Path(sys.argv[2]).write_bytes(raw)
           PY
-          git -C "$ROOT" apply --check "$WORK/overlay.patch"
-          git -C "$ROOT" apply "$WORK/overlay.patch"
+          # The reviewed overlay used a simulated v206 exporter; preserve the exact
+          # v206 original and install the independently pinned full-source writer.
+          git -C "$ROOT" apply --check --exclude='app/src/main/java/com/example/hebrewcrossword/AdminOcrBatchExportV206.kt' "$WORK/overlay.patch"
+          git -C "$ROOT" apply --exclude='app/src/main/java/com/example/hebrewcrossword/AdminOcrBatchExportV206.kt' "$WORK/overlay.patch"
+          python3 - "$ROOT/app/src/main/java/com/example/hebrewcrossword/AdminOcrBatchExportV206.kt" "$GITHUB_WORKSPACE/cloud-tools/higi-v207-export-source.kt.br.b64" <<'PY'
+          from pathlib import Path
+          import base64,brotli,hashlib,sys
+          target=Path(sys.argv[1])
+          original=target.read_text()
+          assert 'fun saveToDownloads(' in original and 'fun saveBatchToCache(' not in original
+          assert 'overview_all_crops.png' in original and 'crop_coordinates.csv' in original
+          blob=base64.b64decode(Path(sys.argv[2]).read_text().strip(),validate=True)
+          assert hashlib.sha256(blob).hexdigest()=='85ca40bac476b1c9dd3763e7075a3f8fbb9bfbf811b542147c6a68c6fff2701e'
+          upgraded=brotli.decompress(blob).decode()
+          assert 'fun saveBatchToCache(' in upgraded and 'fun saveToDownloads(' in upgraded
+          start='                    val markup=overview(source,crops)\\n'
+          end='                    zip.textEntry("review_notes.txt",report.toString())\\n'
+          assert original.count(start)==1 and original.count(end)==1
+          assert upgraded.count(start)==1 and upgraded.count(end)==1
+          assert original.split(start)[1].split(end)[0]==upgraded.split(start)[1].split(end)[0]
+          target.write_text(upgraded)
+          print('PASS original v206 PNG/CSV export body unchanged; offline batch cache added')
+          PY
           python3 - "$ROOT" <<'PY'
           from pathlib import Path
           import sys
