@@ -6,6 +6,7 @@ on:
       - '.github/workflows/higi-v209-cloud-ocr-release.yml'
       - 'cloud-tests/v209/HigiCloudOcrRegressionTest.kt'
       - 'cloud-tests/v209/emulator-ocr-run.sh'
+      - 'cloud-tests/v209/test-emulator-ocr-runner.sh'
       - 'cloud-tests/v209/dekel-source-sha256.json'
   workflow_dispatch:
 permissions:
@@ -32,6 +33,12 @@ jobs:
           distribution: temurin
           java-version: '17'
       # Ubuntu runner already has Android SDK and cmdline-tools; avoid deprecated sdkmanager 'tools' package.
+      - name: Preflight OCR runner syntax and 19-fixture execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n cloud-tests/v209/emulator-ocr-run.sh
+          bash cloud-tests/v209/test-emulator-ocr-runner.sh
       - name: Enable KVM acceleration for this ephemeral runner
         shell: bash
         run: |
