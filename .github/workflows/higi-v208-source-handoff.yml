@@ -1,0 +1,32 @@
+name: Higi v207 source handoff for v208 development
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-v208-source-handoff.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and expand immutable v207 patch
+        run: |
+          python3 - <<'PY'
+          import base64,lzma,pathlib,hashlib,json
+          manifest=json.loads(pathlib.Path('cloud-releases/v0.15.207-DRY.json').read_text())
+          packed=pathlib.Path(manifest['patchFile']).read_text().strip()
+          raw=lzma.decompress(base64.b64decode(packed,validate=True))
+          check=hashlib.sha256(raw).hexdigest()
+          assert check==manifest['patchSha256'],(check,manifest['patchSha256'])
+          pathlib.Path('higi-v207-source.patch').write_bytes(raw)
+          print('Verified v207 patch',len(raw),'bytes',check)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: higi-v207-source-patch-for-v208
+          path: higi-v207-source.patch
+          if-no-files-found: error
+          retention-days: 3
