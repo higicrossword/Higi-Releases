@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.209",
+  "versionCode": 359,
+  "patchFile": "cloud-patches/v0.15.209-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "40c2f96c0c687cb50262326b869f656f1291e548f950bb72b5f8d9977af2ea3f",
+  "notes": "Administrator DRY cloud OCR validation: offline Android emulator instrumentation using exact bundled Tesseract4Android OCR, SHA-verified historic images, visual review ZIPs and proposal-count regression reports. No Firebase or Canonical changes. v208 user-facing features unchanged."
+}
