@@ -1,0 +1,225 @@
+name: Higi 0.15.209 - real Android OCR emulator gate and DRY release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/higi-v209-cloud-ocr-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v209-emulator-release
+  cancel-in-progress: false
+jobs:
+  android-ocr-and-stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      HIGI_ROOT: ${{ runner.temp }}/higi-v209/HebrewCrosswordApp_v0.15.175
+      QA_RESULTS: ${{ github.workspace }}/ocr-results-v209
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Verify baseline source, reconstruct v208, and stage v209 offline test
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.209-DRY.json
+          mkdir -p "$RUNNER_TEMP/higi-v209" "$QA_RESULTS"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$RUNNER_TEMP/higi-v209/base.zip" \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  $RUNNER_TEMP/higi-v209/base.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/higi-v209/base.zip" -d "$RUNNER_TEMP/higi-v209"
+          git -C "$HIGI_ROOT" init -q
+          git -C "$HIGI_ROOT" add -A
+          git -C "$HIGI_ROOT" -c user.name='Higi builder' -c user.email='higi-builder@users.noreply.github.com' commit -qm 'pinned v175'
+          python3 - "$GITHUB_WORKSPACE" "$RUNNER_TEMP/higi-v209" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);work=pathlib.Path(sys.argv[2])
+          obj=json.loads((repo/'cloud-releases/v0.15.208-DRY.json').read_text())
+          assert obj['version']=='0.15.208' and obj['versionCode']==358
+          data=lzma.decompress(base64.b64decode((repo/obj['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(data).hexdigest()==obj['patchSha256']
+          (work/'v208.patch').write_bytes(data)
+          PY
+          git -C "$HIGI_ROOT" apply --check "$RUNNER_TEMP/higi-v209/v208.patch"
+          git -C "$HIGI_ROOT" apply "$RUNNER_TEMP/higi-v209/v208.patch"
+          grep -q 'versionCode = 358' "$HIGI_ROOT/app/build.gradle.kts"
+          mkdir -p "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword"
+          cp "$GITHUB_WORKSPACE/cloud-tests/v209/HigiCloudOcrRegressionTest.kt" \
+            "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
+          python3 - "$HIGI_ROOT/app/build.gradle.kts" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]);text=p.read_text()
+          for a,b in [('versionCode = 358','versionCode = 359'),
+                      ('versionName = "0.15.208"','versionName = "0.15.209"'),
+                      ('        targetSdk = 35\n',
+                       '        targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"\n'),
+                      ('    testImplementation("junit:junit:4.13.2")',
+                       '    testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test:runner:1.6.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")')]:
+              assert text.count(a)==1, ('anchor mismatch',a)
+              text=text.replace(a,b)
+          p.write_text(text)
+          PY
+          python3 "$HIGI_ROOT/tools/sync-release-version.py" --write --root "$HIGI_ROOT"
+          python3 "$HIGI_ROOT/tools/sync-release-version.py" --check --root "$HIGI_ROOT"
+          git -C "$HIGI_ROOT" add -N -A
+          git -C "$HIGI_ROOT" diff --check
+          git -C "$HIGI_ROOT" diff --binary HEAD > "$RUNNER_TEMP/higi-v209/v209.patch"
+          test -s "$RUNNER_TEMP/higi-v209/v209.patch"
+          git -C "$HIGI_ROOT" reset --hard -q HEAD
+          git -C "$HIGI_ROOT" clean -fdq
+          git -C "$HIGI_ROOT" apply --check "$RUNNER_TEMP/higi-v209/v209.patch"
+          git -C "$HIGI_ROOT" apply "$RUNNER_TEMP/higi-v209/v209.patch"
+          python3 "$HIGI_ROOT/tools/sync-release-version.py" --check --root "$HIGI_ROOT"
+          grep -q 'versionCode = 359' "$HIGI_ROOT/app/build.gradle.kts"
+          test -f "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/HigiCloudOcrRegressionTest.kt"
+      - name: Fetch and verify historical source fixture bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet Pillow numpy
+          python3 cloud-tools/higi-20-yedioth-download-test.py > "$QA_RESULTS/fixture-download.log" 2>&1
+          cat "$QA_RESULTS/fixture-download.log" | tail -25
+          python3 - "$GITHUB_WORKSPACE" "$HIGI_ROOT" "$QA_RESULTS" <<'PY'
+          import hashlib,json,pathlib,shutil,sys
+          home=pathlib.Path(sys.argv[1]);root=pathlib.Path(sys.argv[2]);out=pathlib.Path(sys.argv[3])
+          valid=json.loads((home/'cloud-tests/v209/dekel-source-sha256.json').read_text())
+          assert len(valid)==20 and len({x['date'] for x in valid})==20
+          entries=[]
+          target=root/'app/src/androidTest/assets/higi-fixtures'
+          target.mkdir(parents=True,exist_ok=True)
+          for row in valid:
+              src=home/'yedioth-20-fixtures'/f"{row['date']}.jpg"
+              if not src.is_file():continue
+              raw=src.read_bytes()
+              actual=hashlib.sha256(raw).hexdigest()
+              if actual!=row['sha256']:
+                  print('SOURCE_HASH_MISMATCH',row['date'],actual)
+                  continue
+              name=row['date'].replace('-','')+'.jpg'
+              (target/name).write_bytes(raw)
+              entries.append((row['date'],name,actual))
+              print('FIXTURE_OK',row['date'],len(raw))
+          (target/'manifest.tsv').write_text(''.join('\t'.join(x)+'\n' for x in entries))
+          (out/'fixture-coverage.json').write_text(json.dumps({
+              'expected':20,'verified':len(entries),
+              'present':[x[0] for x in entries],
+              'missing':[x['date'] for x in valid if x['date'] not in {e[0] for e in entries}],
+              'unverified_fixtures_used':0
+          },indent=2)+'\n')
+          assert len(entries)>=13, 'At least 13 SHA-verified historic JPEG sources required'
+          PY
+      - name: Compile Android tests and run existing JVM regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI_ROOT"
+          gradle --no-daemon --stacktrace -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
+            > "$QA_RESULTS/gradle.log" 2>&1 || { tail -130 "$QA_RESULTS/gradle.log"; exit 1; }
+          tail -24 "$QA_RESULTS/gradle.log"
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      - name: Execute real local OCR and crop geometry on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: |
+            set -euo pipefail
+            cd "$HIGI_ROOT"
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -r -e class com.example.hebrewcrossword.HigiCloudOcrRegressionTest \
+              com.example.hebrewcrossword.test/androidx.test.runner.AndroidJUnitRunner \
+              | tee "$QA_RESULTS/instrumentation.log"
+            grep -q 'OK (1 test)' "$QA_RESULTS/instrumentation.log"
+            adb pull /sdcard/Android/data/com.example.hebrewcrossword/files/ocr-cloud-v209 "$QA_RESULTS/ocr-cloud-v209"
+            test -s "$QA_RESULTS/ocr-cloud-v209/manifest.csv"
+      - name: Compare real Android OCR output to prior v208 proposal counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$QA_RESULTS" <<'PY'
+          import csv,json,pathlib,sys
+          out=pathlib.Path(sys.argv[1])
+          with (out/'ocr-cloud-v209/manifest.csv').open(newline='') as f:
+              issues=list(csv.DictReader(f))
+          with (out/'fixture-coverage.json').open() as f:coverage=json.load(f)
+          assert len(issues)==coverage['verified']
+          baseline={'11-11-26':16,'09-11-26':16,'04-11-26':16,'02-11-26':15,
+              '28-10-26':16,'26-10-26':16,'14-10-26':13,'12-10-26':15,
+              '07-10-26':15,'05-10-26':16,'14-09-26':15,'09-09-26':12,'07-09-26':16}
+          compared=[]
+          for item in issues:
+              date=item['date'];n=int(item['proposed']);old=baseline.get(date)
+              compared.append({'date':date,'status':item['status'],
+                  'proposed':n,'v208_proposed':old,
+                  'proposal_delta':None if old is None else n-old,
+                  'ocr_lines':int(item['ocr_lines'])})
+          summary={'version':'0.15.209','source_verified':coverage['verified'],
+              'actual_ocr_runs':sum(x['ocr_lines']>0 for x in compared),
+              'proposed_total':sum(x['proposed'] for x in compared),
+              'compared_to_v208':sum(x['v208_proposed'] is not None for x in compared),
+              'regressed_proposal_counts':[x for x in compared if x['proposal_delta'] is not None and x['proposal_delta']<0],
+              'visual_crop_accuracy':'not_measured',
+              'fixture_details':compared,
+              'firebase_writes':0,'canonical_writes':0}
+          (out/'ocr-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
+          print(json.dumps({k:v for k,v in summary.items() if k!='fixture_details'},indent=2))
+          assert summary['actual_ocr_runs']>=13,'Insufficient real Android OCR executions'
+          assert summary['proposed_total']>0
+          assert not summary['regressed_proposal_counts'],'v208 proposal count regression'
+          PY
+      - name: Upload reproducible OCR outputs and execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-v209-android-emulator-ocr-qa
+          path: ocr-results-v209/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Stage signed-APK source patch only after successful emulator test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/higi-v209/v209.patch" "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          raw=pathlib.Path(sys.argv[1]).read_bytes()
+          root=pathlib.Path(sys.argv[2])
+          name='cloud-patches/v0.15.209-from-v0.15.175.patch.xz.b64'
+          manifest=root/'cloud-releases/v0.15.209-DRY.json'
+          assert not (root/name).exists() and not manifest.exists()
+          (root/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          manifest.write_text(json.dumps({
+              'channel':'dry','version':'0.15.209','versionCode':359,
+              'patchFile':name,'patchSha256':hashlib.sha256(raw).hexdigest(),
+              'notes':'Administrator DRY cloud OCR validation: offline Android emulator instrumentation using exact bundled Tesseract4Android OCR, SHA-verified historic images, visual review ZIPs and proposal-count regression reports. No Firebase or Canonical changes. v208 user-facing features unchanged.'
+          },ensure_ascii=False,indent=2)+'\n')
+          print('STAGED_VERIFIED_0.15.209',hashlib.sha256(raw).hexdigest())
+          PY
+          git config user.name higicrossword
+          git config user.email higicrossword@users.noreply.github.com
+          git add cloud-patches/v0.15.209-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.209-DRY.json
+          git commit -m 'Publish gated Higi 0.15.209 DRY after real Android emulator OCR validation'
+          git push origin HEAD:main
