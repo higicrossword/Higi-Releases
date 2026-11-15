@@ -99,9 +99,21 @@ class HigiCloudOcrRegressionTest {
                             crossword.startNumbers(Direction.HORIZONTAL).map{"H"+it}+
                             crossword.startNumbers(Direction.VERTICAL).map{"V"+it}
                         ).toSet()
-                        val sourceAnchors=OcrWeeklySourceAnchorsV199.inspect(
-                            result.geometryWords,expectedWires,image.width,image.height)
                         val measuredGridLeft=found.bounds.left.toInt()
+                        val sourceAnchors=OcrWeeklySourceAnchorsV199.inspect(
+                            result.geometryWords,expectedWires,image.width,image.height,measuredGridLeft)
+                        // Physical grid is a hard upper boundary for source word ownership.
+                        // Independent V201 clipping remains in place and is NOT weakened.
+                        val gridSafe=sourceAnchors.previews.all { (label,parts) ->
+                            OcrWeeklyFinalGeometryV201.clipFreshAcross(
+                                label,parts,measuredGridLeft,image.width)!=null
+                        }
+                        check(gridSafe) { "Source OCR included a grid word for $date" }
+                        if(date=="11-11-26") {
+                            val h11=sourceAnchors.previews["H11"]
+                                ?:error("H11 source proposal missing after grid filtering")
+                            check(h11.size==1) { "H11 must contain clue-only source row, found ${h11.size}" }
+                        }
                         val geometryDump=buildString {
                             append("DATE\t"+date+"\n")
                             append("IMAGE\t"+image.width+"x"+image.height+

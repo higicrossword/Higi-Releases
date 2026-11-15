@@ -138,6 +138,25 @@ jobs:
           print('PASS_V209_PRODUCTION_OCR_IDENTICAL_TO_V208_FILES',len(after))
           PY
           test -f "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/HigiCloudOcrRegressionTest.kt"
+      - name: Apply bounded OCR word ownership fix ONLY in ephemeral emulator test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cloud-tests/ocr-weekly-boundary-wip/apply_measured_grid_wip.py "$HIGI_ROOT"
+          python3 - "$HIGI_ROOT" "$QA_RESULTS" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]);out=pathlib.Path(sys.argv[2])
+          before=json.loads((out/'v208-production-source-sha256.json').read_text())
+          src=root/'app/src/main/java'
+          after={p.relative_to(src).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in src.rglob('*') if p.is_file()}
+          changed=sorted(k for k in set(before)|set(after) if before.get(k)!=after.get(k))
+          expected=['com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt',
+                    'com/example/hebrewcrossword/OcrWeeklySourceAnchorsV199.kt']
+          assert changed==expected,('Unexpected WIP production changes',changed)
+          print('WIP_ONLY_DIFF_VERIFIED',changed)
+          PY
+          git -C "$HIGI_ROOT" diff --check
       - name: Fetch and verify historical source fixture bytes
         shell: bash
         run: |
