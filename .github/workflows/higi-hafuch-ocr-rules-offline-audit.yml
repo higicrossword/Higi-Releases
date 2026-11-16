@@ -1,0 +1,51 @@
+name: Higi Hafuch OCR rules - evidence gate (offline WIP, no APK)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud-tests/hafuch-ocr-crops-wip/**'
+      - '.github/workflows/higi-hafuch-ocr-rules-offline-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate grid numbering and read-only audit
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/audit_printed_number_evidence.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_printed_number_evidence.py --self-test
+      - name: Download pinned real Android OCR token geometry (06 Nov)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ocr-original"
+          gh run download 43911067998 --repo "$REPO" \
+            --name higi-ocr-other-series-smoke-wip-results --dir "$RUNNER_TEMP/ocr-original"
+          test -s "$RUNNER_TEMP/ocr-original/ocr-cross-series-wip/number-tokens-HAFUCH_DEKEL.tsv"
+          test -s "$RUNNER_TEMP/ocr-original/ocr-cross-series-wip/headings-HAFUCH_DEKEL.tsv"
+      - name: Audit 28 expected grid keys against original OCR token positions
+        run: |
+          set -euo pipefail
+          mkdir -p hafuch-ocr-rules-qa
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_printed_number_evidence.py \
+            cloud-tests/hafuch-grid-fallback-wip/hafuch-13x13-reference.json \
+            "$RUNNER_TEMP/ocr-original" \
+            hafuch-ocr-rules-qa/first-fixture-number-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-ocr-number-evidence-wip
+          path: hafuch-ocr-rules-qa/
+          retention-days: 14
+          if-no-files-found: warn
