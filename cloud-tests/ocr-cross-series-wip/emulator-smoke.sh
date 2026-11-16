@@ -10,7 +10,7 @@ mkdir -p "$QA_RESULTS"
 adb install -r "$apk"
 adb install -r "$testapk"
 failed=0
-for series in HAFUCH_DEKEL MAARIV_ODED_ROZEN; do
+for series in TARTEY_DEKEL HAFUCH_DEKEL MAARIV_ODED_ROZEN; do
   log="$QA_RESULTS/instrument-$series.log"
   echo "::group::Android OCR series $series"
   if timeout --signal=TERM --kill-after=10s 210s \
