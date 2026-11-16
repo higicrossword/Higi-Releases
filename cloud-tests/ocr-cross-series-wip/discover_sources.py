@@ -67,6 +67,7 @@ def discover(target,required,queries,results):
                     body,_=get(turl,5500000)
                     thread=html.unescape(body.decode("utf8","replace"))
                     title=title_from_page(thread)
+                    item.setdefault("sample_thread_titles",[]).append({"thread":tid,"title":title[:160]})
                     if not all(term in title for term in required):continue
                     if not re.search(r"(?:^|[^0-9])0?6[./-]11[./-]26(?:[^0-9]|$)",title):
                         item.setdefault("date_ambiguous",[]).append(title[:130])
