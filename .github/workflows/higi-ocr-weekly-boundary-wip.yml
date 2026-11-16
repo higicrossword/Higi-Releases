@@ -276,7 +276,9 @@ jobs:
               'actual_ocr_runs':len(rows),'proposed_total':sum(x['proposed'] for x in compared),
               'compared_to_v208_phone':sum(x['phone_v208_proposed'] is not None for x in compared),
               'cross_environment_differences_not_code_regressions':discrepancies,
-              'production_source':'SHA256_VERIFIED_IDENTICAL_TO_V208',
+              'baseline_app_source':'SHA256_VERIFIED_IDENTICAL_TO_V208_BEFORE_OVERLAY',
+              'production_source':'EPHEMERAL_WIP_OVERLAY_2_KOTLIN_FILES',
+              'production_release_modified':False,
               'visual_crop_accuracy':'not_measured','fixture_details':compared,
               'firebase_writes':0,'canonical_writes':0}
           (out/'ocr-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
