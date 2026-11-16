@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/higi-ocr-number-evidence-wip.yml'
       - 'cloud-tests/ocr-weekly-boundary-wip/audit_number_evidence.py'
+      - 'cloud-tests/ocr-weekly-boundary-wip/audit_number_crop_integrity.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -45,6 +46,16 @@ jobs:
           test -s offline-report/ocr-number-evidence-report.txt
           test -s offline-report/ocr-number-evidence.csv
           echo "PASS WIP source OCR anchor evidence: 19 puzzles, 304 proposals, no Canonical write"
+      - name: Audit source image pixels near OCR-suffix crop boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet Pillow
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_number_crop_integrity.py --self-test
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_number_crop_integrity.py \
+            offline-input/ocr-cloud-v209 \
+            offline-report/ocr-number-evidence.csv offline-report
+          test -s offline-report/ocr-number-right-edge-summary.json
       - name: Upload independent review diagnostics
         if: always()
         uses: actions/upload-artifact@v4
