@@ -86,13 +86,23 @@ class HigiOtherSeriesOcrSmokeTest {
             }
             val missing=expectedKeys.filter{it !in candidates}
             val diagnostics=File(folder,"missing-"+series+".tsv")
-            diagnostics.writeText("series\tclue\tmissing_reason_code\n")
+            // Distinguish unresolved status from later review-only stages.
+            // Export *only* symbolic diagnostic codes, never clue or OCR text.
+            diagnostics.writeText("series\tclue\tunresolved_status\tpreview_pipeline_codes\n")
             val codePattern=Regex("[A-Z][A-Z0-9_]{3,}")
+            val codeList=Regex("(?:V[0-9]{3}_[A-Z][A-Z0-9_]*|[A-Z][A-Z0-9_]{3,})")
             for(k in missing){
-                val raw=outcome.review[k].orEmpty()+" "+outcome.previewReasons[k].orEmpty()
-                val reasonCode=codePattern.find(raw)?.value ?: "NO_CANDIDATE"
+                val primary=outcome.review[k].orEmpty()
+                val later=outcome.previewReasons[k].orEmpty()
+                val primaryCode=codePattern.find(primary)?.value ?: "NO_PRIMARY_CODE"
+                val laterCodes=codeList.findAll(later).map{it.value}.distinct()
+                    .joinToString("|").ifEmpty{"NO_LATER_CODE"}
                 val label=(if(k.direction==Direction.HORIZONTAL)"H" else "V")+k.number
-                diagnostics.appendText(series+"\t"+label+"\t"+reasonCode+"\n")
+                diagnostics.appendText(series+"\t"+label+"\t"+
+                    primaryCode+"\t"+laterCodes+"\n")
+            }
+            check(missing.size+proposals==count){
+                "Unexpected missing plus present clue counts: "+series
             }
             invalid=candidates.count{(_,g)->g.lines.isEmpty() || g.lines.any{r->
                 r.left<0f || r.top<0f || r.right>1f || r.bottom>1f ||
