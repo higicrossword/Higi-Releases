@@ -339,4 +339,3 @@ private object OcrSourceAnchorPairedBenchmark {
             newMedian.toDouble()/oldMedian,differences.joinToString("|"))
     }
 }
-
