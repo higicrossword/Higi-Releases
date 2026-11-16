@@ -1,0 +1,47 @@
+name: Higi OCR source word-box ownership - offline WIP
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-ocr-word-coverage-wip.yml'
+      - 'cloud-tests/ocr-weekly-boundary-wip/audit_full_word_coverage.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify audit syntax and self-tests (no emulator)
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/ocr-weekly-boundary-wip/audit_full_word_coverage.py
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_full_word_coverage.py --self-test
+      - name: Fetch pinned real Android OCR evidence (19 SHA-verified images)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pinned-input"
+          gh run download 43875417354 --repo "$REPO" --name higi-ocr-weekly-boundary-wip-results --dir "$RUNNER_TEMP/pinned-input"
+          test -s "$RUNNER_TEMP/pinned-input/ocr-cloud-v209/manifest.csv"
+          (cd "$RUNNER_TEMP/pinned-input" && zip -q -r "$RUNNER_TEMP/pinned-ocr-artifact.zip" .)
+          echo "Pinned read-only Android artifact; no production build or release"
+      - name: Verify all 304 crop rectangles and 2206 recognized words
+        run: |
+          set -euo pipefail
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_full_word_coverage.py             "$RUNNER_TEMP/pinned-ocr-artifact.zip" "$GITHUB_WORKSPACE/word-coverage-report"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-ocr-full-word-coverage-wip-report
+          path: word-coverage-report/
+          retention-days: 14
+          if-no-files-found: warn
