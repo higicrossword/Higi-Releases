@@ -133,20 +133,7 @@ jobs:
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           disable-animations: true
           emulator-boot-timeout: 420
-          script: |
-            set -euo pipefail
-            adb install -r "$HIGI_ROOT/app/build/outputs/apk/debug/app-debug.apk"
-            adb install -r "$HIGI_ROOT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
-            timeout --signal=TERM --kill-after=30s 1000s adb shell am instrument -w -r \
-              -e class com.example.hebrewcrossword.HigiHafuch20OcrEvidenceTest \
-              com.example.hebrewcrossword.test/androidx.test.runner.AndroidJUnitRunner \
-              > "$QA_RESULTS/instrument.log" 2>&1 || { tail -90 "$QA_RESULTS/instrument.log"; exit 1; }
-            tail -15 "$QA_RESULTS/instrument.log"
-            grep -q 'OK (1 test)' "$QA_RESULTS/instrument.log"
-            adb exec-out run-as com.example.hebrewcrossword \
-              tar -C files -cf - hafuch-ocr-20 | tar -C "$QA_RESULTS" -xf -
-            test -s "$QA_RESULTS/hafuch-ocr-20/manifest.tsv"
-            echo "WIP 20-source same-engine OCR word geometry only; no canonical or release"
+          script: bash "$GITHUB_WORKSPACE/cloud-tests/hafuch-ocr-crops-wip/run-android-20-evidence.sh"
       - name: Verify no clue text/source images in evidence artifact
         shell: bash
         run: |
