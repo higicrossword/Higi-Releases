@@ -1,0 +1,39 @@
+name: Higi Hafuch - fetch 20 latest original grid images (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-latest-20-grid-audit.yml'
+      - 'cloud-tools/hafuch-20-latest-source-fetch.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect-source-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate source collection script
+        run: |
+          set -euo pipefail
+          python -m py_compile cloud-tools/hafuch-20-latest-source-fetch.py
+          python -m pip install --quiet Pillow
+      - name: Discover source publication dates and download images by source SHA
+        run: |
+          set -euo pipefail
+          python cloud-tools/hafuch-20-latest-source-fetch.py | tee source-fetch.log
+          test -s hafuch-20-source-results/sources.json
+      - name: Preserve forensic source images and traceable search evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-20-original-images-grid-audit
+          path: |
+            hafuch-20-source-results/
+            source-fetch.log
+          retention-days: 14
+          if-no-files-found: warn
