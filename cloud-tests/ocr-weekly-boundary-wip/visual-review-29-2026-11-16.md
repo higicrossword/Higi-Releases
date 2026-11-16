@@ -46,3 +46,10 @@
 - Do **not** mark any of the 304 clues as approved, write Canonical/Firebase, or overwrite manual/verified clues as a side effect.
 - The 29 weak-marker alerts are **not a justification for loosening V201 or changing the OCR engine**.
 - Remaining QA: review other higher-risk multi-fragment crops and test additional newspapers/series before considering a change to production code. Keep review-only proposals independent from user-visible canonical data.
+
+## Additional full-set risk-screen of all 304 candidates (2026-11-16)
+- Reviewed native `crop_coordinates.csv` and pixel dimensions for all 304 candidate images; 47 are single-part, 222 two-part, and 35 three-part crops.
+- Nine three-part candidates exceed **0.14 of source-image height in summed fragment heights**: 02-09-26 H1, 28-10-26 H14/H6, 14-10-26 V4/V8, 30-09-26 H1, 26-10-26 V8, 07-09-26 V12, and 07-10-26 H13.
+- Opened the rendered `clues/*.png` for those nine; the printed clue number, wrapped text and terminal enumeration are visibly present. No obvious unrelated next-clue text is visible.
+- This geometry metric is **a triage heuristic, not an error threshold**. Multiline clues naturally require several image fragments. Do not reject or truncate them based on a fixed height cutoff.
+- Combined distinct items visually inspected in this work: 29 weak-marker candidates and 9 additional multiline candidates. Their overlap is zero, yielding **38/304** individually inspected clue renderings. Remaining **266/304** lack this specific visual certification.
