@@ -1,0 +1,55 @@
+name: Higi OCR printed-number audit - offline WIP
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-ocr-number-evidence-wip.yml'
+      - 'cloud-tests/ocr-weekly-boundary-wip/audit_number_evidence.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify-ocr-anchor-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate audit Python logic without Android
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/ocr-weekly-boundary-wip/audit_number_evidence.py
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_number_evidence.py --self-test
+      - name: Download pinned SHA-verified 19-image WIP OCR results
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p offline-input offline-report
+          gh run download 43765741209 --repo "$REPO" --name higi-ocr-weekly-boundary-wip-results --dir offline-input
+          test -s offline-input/ocr-cloud-v209/manifest.csv
+          test -s offline-input/ocr-cloud-v209/geometry-11-11-26.tsv
+          echo "Downloaded verified source run 43765741209. No emulator or release build required."
+      - name: Audit 304 candidates and unverified number markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cloud-tests/ocr-weekly-boundary-wip/audit_number_evidence.py \
+            offline-input/ocr-cloud-v209 offline-report
+          test -s offline-report/ocr-number-evidence-report.txt
+          test -s offline-report/ocr-number-evidence.csv
+          echo "PASS WIP source OCR anchor evidence: 19 puzzles, 304 proposals, no Canonical write"
+      - name: Upload independent review diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-ocr-number-evidence-wip-report
+          path: offline-report/
+          retention-days: 14
+          if-no-files-found: warn
