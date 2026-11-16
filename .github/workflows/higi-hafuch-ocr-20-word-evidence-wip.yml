@@ -30,6 +30,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Permit KVM for temporary Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then sudo chmod 0666 /dev/kvm; fi
+          test -r /dev/kvm && test -w /dev/kvm
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
@@ -61,6 +68,19 @@ jobs:
           git -C "$HIGI_ROOT" apply --check /tmp/higi-hafuch-word-test/v208.patch
           git -C "$HIGI_ROOT" apply /tmp/higi-hafuch-word-test/v208.patch
           mkdir -p "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
+          python3 - "$HIGI_ROOT/app/build.gradle.kts" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]);text=p.read_text()
+          for a,b in [('        targetSdk = 35\n',
+                       '        targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"\n'),
+                      ('    testImplementation("junit:junit:4.13.2")',
+                       '    testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test:runner:1.6.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")')]:
+              assert text.count(a)==1,('AndroidTest dependency anchor changed',a)
+              text=text.replace(a,b)
+          p.write_text(text)
+          print('Ephemeral Android instrumentation wiring only; app version unchanged')
+          PY
           cp cloud-tests/hafuch-ocr-crops-wip/HigiHafuch20OcrEvidenceTest.kt \
             "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
       - name: Download all twenty SHA-pinned originals, never place image bytes in output artifact
