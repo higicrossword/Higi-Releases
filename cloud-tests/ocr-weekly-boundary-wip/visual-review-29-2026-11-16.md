@@ -73,3 +73,17 @@
 
 ### Safety
 - QA only, no APK or release, no Canonical/Firebase writes, no automatic approval of proposals or overwrite of manually/verified edited clues.
+
+## Android emulator result: three printed enumeration tokens recovered (2026-11-16)
+
+- **WIP run:** [43875417354](https://github.com/higicrossword/Higi-Releases/actions/runs/43875417354), successful after restoring the original release asset access permission. Previous run 43875258403 failed with HTTP 403 while fetching the source archive, *before* building or running OCR; it was an authorization regression and not evidence of an OCR failure.
+- Artifact `higi-ocr-weekly-boundary-wip-results`, ID `14230751178`, digest SHA-256 `eb3adb6a68c957ce1b2986276c30a0309cb88b5d524bc91e3f6b36e8163102e6`.
+- The **actual Android instrumentation** checks that all 19 SHA-verified sources produce their 304 REVIEW_ONLY proposals, exactly the three confidence-17 enumeration tokens are present, and their word box centers are now included in the original source-anchor crop *and the final proposed crop*. The release wasn't modified.
+- Strict comparer `compare_terminal_crop_regression.py` read the 19 independent baseline nested ZIPs and 19 new nested ZIPs, matched source SHA-256 and all 304 keys, and reported:
+  - **02-11-26 V01**: OCR `(3):` is included (previously omitted), number of crop pieces 1 -> 1
+  - **11-11-26 H05**: OCR `(3);` is included (previously omitted), crop pieces 2 -> 2
+  - **21-10-26 V01**: OCR `(3);` is included (previously omitted), crop pieces 1 -> 1
+  - **301/301 other crop coordinate sets exactly equal**, zero unrelated coordinate changes
+  - no Firebase/Canonical writes and no new APK/release
+- **Additional pixel regression outside CI:** extracted every actual rendered `clues/*.png` from both artifact sets. Their SHA-256 hashes were identical for exactly **301/301 unaffected crops**, while only the above **three** intended crop PNGs changed. Visually opened the three before/after pairs; all three now display the missing printed `(3)` and their existing clue text. No neighboring clue number is included in these new rendered samples.
+- This proves the three known enumeration omissions are corrected **within the ephemeral WIP Android OCR test**. It does *not* prove all 304 crops are universally complete, nor does it publish the change to the regular manager/admin APK. A release requires a separate explicit user instruction.
