@@ -60,6 +60,7 @@ jobs:
           PY
           git -C "$HIGI_ROOT" apply --check /tmp/higi-hafuch-word-test/v208.patch
           git -C "$HIGI_ROOT" apply /tmp/higi-hafuch-word-test/v208.patch
+          mkdir -p "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
           cp cloud-tests/hafuch-ocr-crops-wip/HigiHafuch20OcrEvidenceTest.kt \
             "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
       - name: Download all twenty SHA-pinned originals, never place image bytes in output artifact
