@@ -153,6 +153,37 @@ class HigiCloudOcrRegressionTest {
                         candidates.putAll(result.trusted)
                         result.previewOnly.forEach { (k,g)->candidates.putIfAbsent(k,g) }
                         proposed=candidates.size
+                        // Read-only WIP: a weak terminal number (3) is not a start anchor,
+                        // but its bounded source pixels belong to the prior clue.
+                        val weakTerminal=Regex("""^\([1-9][0-9]?(?:,[1-9][0-9]?){0,2}\)[;:,.]?$""")
+                        val weakLengthWords=result.geometryWords.filter{
+                            it.confidence in 15..19 && weakTerminal.matches(it.text)
+                        }
+                        val terminalTargets=mapOf("11-11-26" to "H5",
+                            "02-11-26" to "V1", "21-10-26" to "V1")
+                        val target=terminalTargets[date]
+                        check(weakLengthWords.size==(if(target==null) 0 else 1)){
+                            "Unexpected low-confidence length words on $date: $weakLengthWords"
+                        }
+                        if(target!=null){
+                            val marker=weakLengthWords.single()
+                            val x=(marker.box.left+marker.box.right)/2
+                            val y=(marker.box.top+marker.box.bottom)/2
+                            val anchored=sourceAnchors.previews[target]
+                                ?:error("Missing independent anchor for $date $target")
+                            check(anchored.any{x>=it.left && x<it.right && y>=it.top && y<it.bottom}){
+                                "SOURCE crop omits terminal for $date $target: "+marker.text
+                            }
+                            val final=candidates.entries.singleOrNull{(k,_)->
+                                (if(k.direction==Direction.HORIZONTAL)"H" else "V")+k.number==target
+                            }?.value ?:error("Missing final candidate for $date $target")
+                            val fx=x.toFloat()/image.width
+                            val fy=y.toFloat()/image.height
+                            check(final.lines.any{fx>=it.left && fx<it.right &&
+                                fy>=it.top && fy<it.bottom}){
+                                "FINAL crop omits terminal for $date $target: "+marker.text
+                            }
+                        }
                         // Compare against the last SHA-verified WIP emulator fixture run.
                         // These are review-only candidate counts, NOT approved crops.
                         val baseline=mapOf(

@@ -60,4 +60,19 @@ edit('OcrWeeklySourceAnchorsV199.kt',[
 ("                val weakContext=word.confidence in 20..51 && truncation &&\n                    prior!=null && after!=null &&\n                    middle>prior.box.bottom && middle<after.box.top\n                (bareNumber || truncation) && ordered &&\n                    (word.confidence>=52 || weakContext)", "                val weakContext=word.confidence in 20..51 && truncation &&\n                    prior!=null && after!=null &&\n                    middle>prior.box.bottom && middle<after.box.top\n                // A low-confidence *printed number* can still be unique evidence\n                // when reliable neighboring starts constrain the same text column.\n                val weakPrinted=printed(raw)==num && word.confidence>=20 &&\n                    ((word.confidence>=52 && (prior!=null || after!=null)) ||\n                    (prior!=null && after!=null &&\n                        middle>prior.box.bottom && middle<after.box.top))\n                // OCR sometimes reads printed '1.' as '1,'; never treat commas\n                // as strong automatic anchors, and require a right-edge position.\n                val edge=word.box.right.toFloat()/w >= (if(dir=='H')0.54f else 0.24f)\n                val comma=raw==\"$num,\" && word.confidence>=52 && edge &&\n                    (prior!=null || after!=null)\n                // For a LAST clue (such as V12), there is no following anchor.\n                // A 2 read from 12 is allowed only as unique, low-confidence,\n                // near-margin, short-distance REVIEW-ONLY evidence.\n                val weakLast=word.confidence in 35..51 && truncation &&\n                    prior!=null && after==null &&\n                    middle>prior.box.bottom && middle-prior.box.bottom<=max(60,h/8)\n                (bareNumber || truncation || weakPrinted || comma) && ordered &&\n                    (word.confidence>=52 || weakContext || weakPrinted || comma || weakLast)")
 ])
 
+
+# Third WIP-only experiment: include exact printed answer-length tokens at OCR 15..19
+# in review-row geometry, NEVER in start-number anchors, AI or Canonical.
+edit('OcrWeeklySourceAnchorsV199.kt', [
+(
+    '''    private fun rows(words:List<OcrSharedRowSplitterV161.Word>,w:Int,h:Int,dir:Char,sourceRight:Int?):List<OcrRow> {
+        val eligible=words.filter{it.box.valid && it.confidence>=20 &&''',
+    '''    private val weakTerminalLength = Regex("""^\([1-9][0-9]?(?:,[1-9][0-9]?){0,2}\)[;:,.]?$""")
+    private fun rows(words:List<OcrSharedRowSplitterV161.Word>,w:Int,h:Int,dir:Char,sourceRight:Int?):List<OcrRow> {
+        val eligible=words.filter{it.box.valid &&
+            (it.confidence>=20 || (it.confidence in 15..19 &&
+                weakTerminalLength.matches(clean(it.text)))) &&'''
+)
+])
+
 print('WIP_OVERLAY_OK two Kotlin production source files, in ephemeral emulator workspace only')

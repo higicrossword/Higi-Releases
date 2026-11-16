@@ -7,7 +7,8 @@ on:
       - 'cloud-tests/ocr-weekly-boundary-wip/HigiCloudOcrRegressionTest.kt'
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
+  actions: read
 concurrency:
   group: higi-ocr-weekly-boundary-wip
   cancel-in-progress: true
@@ -36,6 +37,7 @@ jobs:
           set -euo pipefail
           bash -n cloud-tests/v209/emulator-ocr-run.sh
           bash cloud-tests/v209/test-emulator-ocr-runner.sh
+          python3 cloud-tests/ocr-weekly-boundary-wip/compare_terminal_crop_regression.py --self-test
       - name: Enable KVM acceleration for this ephemeral runner
         shell: bash
         run: |
@@ -216,6 +218,16 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 420
           script: bash "$GITHUB_WORKSPACE/cloud-tests/v209/emulator-ocr-run.sh"
+      - name: Compare 304 native crop geometries to pinned original Android run
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$QA_RESULTS/baseline"
+          gh run download 43765741209 --repo "$REPO" --name higi-ocr-weekly-boundary-wip-results --dir "$QA_RESULTS/baseline"
+          python3 cloud-tests/ocr-weekly-boundary-wip/compare_terminal_crop_regression.py \
+            "$QA_RESULTS/baseline/ocr-cloud-v209" "$QA_RESULTS/ocr-cloud-v209" \
+            "$QA_RESULTS/terminal-enumeration-regression.json"
+          rm -rf "$QA_RESULTS/baseline"
       - name: Verify every OCR artifact and report cross-environment differences
         shell: bash
         run: |
