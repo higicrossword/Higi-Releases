@@ -1,0 +1,146 @@
+name: Higi Hafuch grid fallback - isolated WIP unit regression (no APK)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-grid-fallback-wip.yml'
+      - 'cloud-tests/hafuch-grid-fallback-wip/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: higi-hafuch-grid-fallback-wip
+  cancel-in-progress: true
+jobs:
+  test-frozen-source-overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      HIGI_ROOT: /tmp/higi-hafuch-wip/HebrewCrosswordApp_v0.15.175
+      RESULT_DIR: ${{ github.workspace }}/hafuch-fallback-qa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Validate 20 independent historical source hashes and frozen topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULT_DIR"
+          python3 -m py_compile cloud-tests/hafuch-grid-fallback-wip/verify_template_sources.py
+          gh run download 43939011519 --repo "$REPO" \
+            --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/verified-hafuch"
+          python3 cloud-tests/hafuch-grid-fallback-wip/verify_template_sources.py \
+            cloud-tests/hafuch-grid-fallback-wip/hafuch-13x13-reference.json \
+            "$RUNNER_TEMP/verified-hafuch/hafuch-20-source-results" \
+            "$RESULT_DIR/source-mask-proof.json"
+          rm -rf "$RUNNER_TEMP/verified-hafuch"
+      - name: Reconstruct sealed v208 source without changing version
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-hafuch-wip
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output /tmp/higi-hafuch-wip/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-hafuch-wip/base.zip" | sha256sum -c -
+          unzip -q /tmp/higi-hafuch-wip/base.zip -d /tmp/higi-hafuch-wip
+          git -C "$HIGI_ROOT" init -q
+          git -C "$HIGI_ROOT" add -A
+          git -C "$HIGI_ROOT" -c user.name='Higi QA' -c user.email='higi-qa@users.noreply.github.com' commit -qm 'pinned v175'
+          python3 - "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          item=json.loads((root/'cloud-releases/v0.15.208-DRY.json').read_text())
+          assert item['version']=='0.15.208' and item['versionCode']==358
+          data=lzma.decompress(base64.b64decode((root/item['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(data).hexdigest()==item['patchSha256']
+          pathlib.Path('/tmp/higi-hafuch-wip/v208.patch').write_bytes(data)
+          PY
+          git -C "$HIGI_ROOT" apply --check /tmp/higi-hafuch-wip/v208.patch
+          git -C "$HIGI_ROOT" apply /tmp/higi-hafuch-wip/v208.patch
+          grep -q 'versionCode = 358' "$HIGI_ROOT/app/build.gradle.kts"
+          git -C "$HIGI_ROOT" add -A
+          git -C "$HIGI_ROOT" -c user.name='Higi QA' -c user.email='higi-qa@users.noreply.github.com' commit -qm 'sealed v208 production'
+      - name: Apply Hafuch-only topology patch in ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d cloud-tests/hafuch-grid-fallback-wip/hafuch-grid-fallback.patch.xz.b64 \
+            | xz -dc > /tmp/higi-hafuch-wip/hafuch.patch
+          python3 cloud-tests/hafuch-grid-fallback-wip/verify_template_sources.py \
+            --patch /tmp/higi-hafuch-wip/hafuch.patch
+          git -C "$HIGI_ROOT" apply --check /tmp/higi-hafuch-wip/hafuch.patch
+          git -C "$HIGI_ROOT" apply /tmp/higi-hafuch-wip/hafuch.patch
+          git -C "$HIGI_ROOT" diff --check
+          python3 - "$HIGI_ROOT" "$RESULT_DIR" <<'PY'
+          import hashlib,json,pathlib,subprocess,sys
+          root=pathlib.Path(sys.argv[1]);out=pathlib.Path(sys.argv[2])
+          changed=set(subprocess.check_output(['git','-C',str(root),'diff','--name-only','HEAD'],text=True).splitlines())
+          # New files are untracked after git apply and need inclusion.
+          added=set(subprocess.check_output(['git','-C',str(root),'ls-files','--others','--exclude-standard'],text=True).splitlines())
+          changed |= added
+          prefix='app/src/main/java/com/example/hebrewcrossword/'
+          exact={prefix+n for n in (
+            'HafuchGridTemplate.kt','MainActivity.kt','WeeklyImageSelector.kt',
+            'AdminLibraryRedecodeRunner.kt','AdminOcrRecropActivity.kt')}
+          exact.add('app/src/test/java/com/example/hebrewcrossword/HafuchGridTemplateFallbackTest.kt')
+          assert changed==exact,('Patch touched unexpected files',sorted(changed))
+          frozen=['GridDetector.kt','GridAnalysis.kt','OcrSeriesProfilesV197.kt',
+             'OcrWeeklySourceAnchorsV199.kt','HigiLocalOcrCropEngine.kt',
+             'LocalOcrCropPass.kt','OcrWeeklyFinalGeometryV201.kt','MakorRishonGridTemplate.kt']
+          for filename in frozen:
+              p=prefix+filename
+              original=subprocess.check_output(['git','-C',str(root),'show','HEAD:'+p])
+              current=(root/p).read_bytes()
+              assert original==current,('Frozen or shared OCR code changed',filename)
+          source=(root/(prefix+'HafuchGridTemplate.kt')).read_text()
+          assert 'HAFUCH_DEKEL' in source
+          assert 'YEDIOTH_MONDAY_DEKEL' not in source
+          assert 'YEDIOTH_WEDNESDAY_DEKEL' not in source
+          meta={'changed_paths':sorted(changed),'frozen_ocr_files_preserved':frozen,
+                'series_guard':'HAFUCH_DEKEL only',
+                'pixel_proof':True,
+                'production_version_changed':False,'release_created':False,
+                'firebase_writes':0,'canonical_writes':0}
+          (out/'source-isolation.json').write_text(json.dumps(meta,indent=2)+'\n')
+          print('PASS exact six changed Hafuch WIP files and eight frozen originals')
+          PY
+      - name: Compile updated Android source and run all JVM regressions (no APK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI_ROOT"
+          gradle --no-daemon --stacktrace -PhigiDryBuild=true :app:testDebugUnitTest \
+            > "$RESULT_DIR/gradle.log" 2>&1 || { tail -150 "$RESULT_DIR/gradle.log"; exit 1; }
+          tail -35 "$RESULT_DIR/gradle.log"
+          test -f app/build/test-results/testDebugUnitTest/TEST-com.example.hebrewcrossword.HafuchGridTemplateFallbackTest.xml
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "::error::Unexpected APK build"; exit 1
+          fi
+          echo 'PASS new template tests, existing JVM suite, no APK and unchanged version'
+      - name: Upload WIP QA evidence (no source image or APK)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-grid-fallback-wip-qa
+          path: |
+            hafuch-fallback-qa/source-mask-proof.json
+            hafuch-fallback-qa/source-isolation.json
+            hafuch-fallback-qa/gradle.log
+          retention-days: 14
+          if-no-files-found: warn
