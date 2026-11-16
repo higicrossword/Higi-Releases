@@ -119,7 +119,11 @@ for t in threads:
         for url in t["attachments"]:
             fname=urllib.parse.unquote(urllib.parse.urlparse(url).path.split("/")[-1])
             fdates=dated(fname)
-            if fdates and d not in fdates:continue
+            # 11 Sep thread has a filename marked 11-8-26; retain it explicitly
+            # for visual verification rather than silently treating it as Aug 11.
+            if fdates and d not in fdates and not (
+                d==dt.date(2026,9,11) and t.get("thread")=="tpducUFCeCo"
+            ):continue
             candidates.append((d,t,url))
 # Always include one explicitly user-supplied link as an independent fallback.
 for ds,url in KNOWN_URLS.items():
@@ -143,7 +147,10 @@ def download_one(v):
             if fmt not in ("JPEG","PNG") or w<500 or h<340:raise ValueError("not valid full page image")
         return {"date":date.isoformat(),"title":thread["title"],"thread":thread["url"],
                 "url":url,"sha256":hashlib.sha256(raw).hexdigest(),
-                "width":w,"height":h,"format":fmt,"bytes":len(raw),"_data":raw}
+                "width":w,"height":h,"format":fmt,"bytes":len(raw),
+                "filename_dates":[x.isoformat() for x in dated(urllib.parse.unquote(urllib.parse.urlparse(url).path))],
+                "source_date_filename_mismatch":bool(dated(urllib.parse.unquote(urllib.parse.urlparse(url).path)) and date not in dated(urllib.parse.unquote(urllib.parse.urlparse(url).path))),
+                "_data":raw}
     except Exception as exc:
         return {"date":date.isoformat(),"url":url,"error":type(exc).__name__+":"+str(exc)[:150]}
 downloaded=[]
