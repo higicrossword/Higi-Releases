@@ -89,7 +89,7 @@ class HigiOtherSeriesOcrSmokeTest {
             diagnostics.writeText("series\tclue\tmissing_reason_code\n")
             val codePattern=Regex("[A-Z][A-Z0-9_]{3,}")
             for(k in missing){
-                val raw=outcome.review[k].orEmpty()+" "+outcome.previewDiagnostics[k].orEmpty()
+                val raw=outcome.review[k].orEmpty()+" "+outcome.previewReasons[k].orEmpty()
                 val reasonCode=codePattern.find(raw)?.value ?: "NO_CANDIDATE"
                 val label=(if(k.direction==Direction.HORIZONTAL)"H" else "V")+k.number
                 diagnostics.appendText(series+"\t"+label+"\t"+reasonCode+"\n")
