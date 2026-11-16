@@ -1,0 +1,29 @@
+{
+  "purpose": "WIP read-only Android OCR smoke fixtures, no Canonical or Firebase write",
+  "discovery_run": 43904729096,
+  "fixtures": [
+    {
+      "series": "HAFUCH_DEKEL",
+      "title": "הפוך על הפוך - דקל בנו",
+      "date": "06-11-26",
+      "reported_expected": 28,
+      "filename": "hafuch-061126.jpg",
+      "sha256": "37e53145854c549f786819cd27e38852ce1deaaae484e9e7e71044db168774ef",
+      "width": 3000,
+      "height": 2433,
+      "url": "https://groups.google.com/group/tartey_mashma/attach/637b8b58672e4/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%206-11-26.jpg?part=0.2"
+    },
+    {
+      "series": "MAARIV_ODED_ROZEN",
+      "title": "מעריב - עודד רוזן",
+      "date": "06-11-26",
+      "reported_expected": 24,
+      "filename": "maariv-061126.jpg",
+      "sha256": "2d588cff84f568d78d04569cd1d3c0704adb32d6c5692f0e1c6578f3bf7b51f8",
+      "width": 1000,
+      "height": 1519,
+      "url": "https://groups.google.com/group/tartey_mashma/attach/637f035ba0b9f/%D7%9E%D7%A2%D7%A8%D7%99%D7%91%20%D7%A2%D7%95%D7%93%D7%93%20%D7%A8%D7%95%D7%96%D7%9F%206-11-26.jpg?part=0.1"
+    }
+  ],
+  "missing_series": "TARTEY_DEKEL"
+}
