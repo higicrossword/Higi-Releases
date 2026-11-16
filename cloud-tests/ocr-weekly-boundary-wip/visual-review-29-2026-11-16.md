@@ -87,3 +87,25 @@
   - no Firebase/Canonical writes and no new APK/release
 - **Additional pixel regression outside CI:** extracted every actual rendered `clues/*.png` from both artifact sets. Their SHA-256 hashes were identical for exactly **301/301 unaffected crops**, while only the above **three** intended crop PNGs changed. Visually opened the three before/after pairs; all three now display the missing printed `(3)` and their existing clue text. No neighboring clue number is included in these new rendered samples.
 - This proves the three known enumeration omissions are corrected **within the ephemeral WIP Android OCR test**. It does *not* prove all 304 crops are universally complete, nor does it publish the change to the regular manager/admin APK. A release requires a separate explicit user instruction.
+
+## 2026-11-16: independent word-box coverage gate (19 verified sources)
+
+- New **read-only**, no-APK workflow: [run 43900421645](https://github.com/higicrossword/Higi-Releases/actions/runs/43900421645), success. It uses pinned, unchanged Android evidence from run 43875417354.
+- Files: `cloud-tests/ocr-weekly-boundary-wip/audit_full_word_coverage.py` and `.github/workflows/higi-ocr-word-coverage-wip.yml`.
+- Checks the **full rectangular OCR word box**, not just the word center, and requires exactly one matching clue in the measured source text lane. Word confidence minimum for this independent check: 15.
+- **2,206/2,206** eligible OCR word boxes completely contained in a single crop piece, with **0 missing, 0 ambiguous/duplicated assignments, 0 partially clipped words, 0 measured across-to-grid intrusions**. Coverage still **19 sources / 304 review-only clues**.
+- Five clue renders lack a *machine-readable OCR enumeration token* despite the printed enumeration being visible on a manual comparison to the source: 09-09-26 V08, 19-10-26 V07, 28-10-26 H06, 30-09-26 V07/V12. The offline gate preserves these known exceptions; it does not synthesize missing OCR or consider them proof of an incorrectly cropped picture.
+- **Important limitation:** full containment of OCR word boxes does **not** test letters the OCR engine failed to detect; neither this gate nor 304/304 candidate count proves complete visual correctness. The 20th historical JPEG dated 28-09-26 is unavailable from the verified fixture set, so coverage stays 19/20. Other crossword series are not covered by these 19 Dekel sources.
+
+### Performance caveat: GitHub emulator timing is inconclusive
+Two independent runs of the same 19 images were compared using actual Android `progress.log` timestamps; **not** a controlled same-device A/B:
+| Stage (median per source) | Pre-terminal WIP run 43765741209 | Post-terminal WIP run 43875417354 |
+|---|---:|---:|
+| START -> grid detection complete | 0.780 s | 1.097 s |
+| OCR_START -> OCR_DONE | 1.112 s | 1.685 s |
+| OCR_DONE -> EXPORT_START (includes candidate computation) | 1.046 s | 1.475 s |
+| START -> END | 3.246 s | 5.106 s |
+
+**Do not infer the code caused the timing difference.** Even the unrelated grid detection and OCR recognition phases slowed substantially between independent cloud emulator runs; runner contention, cache state, and image/OS conditions were not controlled. Equally, **do not assert that performance is unaffected** without a controlled benchmark. Before integrating into the manager APK, a same-environment repeated A/B should compare the old and patched OCR paths independently of external I/O, and apply the existing no-regression requirement.
+
+No release, no APK, no Canonical or Firebase writes.
