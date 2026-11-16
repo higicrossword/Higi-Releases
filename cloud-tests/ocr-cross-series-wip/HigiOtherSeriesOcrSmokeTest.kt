@@ -78,6 +78,28 @@ class HigiOtherSeriesOcrSmokeTest {
             // Read-only source-position evidence for missed printed clue starts.
             // Export ONLY numbers, their OCR confidence, boxes and heading categories.
             // Do NOT export full printed clue text, or infer missing number glyphs.
+            if(series=="HAFUCH_DEKEL"){
+                // Word-box evidence for a single series. Hebrew clue strings are
+                // never written: replace all Hebrew glyphs with H, retaining
+                // only punctuation/numerals and original pixel geometry.
+                val mask=Regex("[\u0590-\u05ff]")
+                val wordPath=File(folder,"word-boxes-HAFUCH_DEKEL.tsv")
+                wordPath.writeText("id\tmasked_ocr\tconfidence\tleft\ttop\tright\tbottom\n")
+                outcome.geometryWords.forEachIndexed{index,word->
+                    val shape=word.text.replace(mask,"H")
+                        .replace('\t',' ').replace('\n',' ')
+                    val b=word.box
+                    wordPath.appendText(listOf(index,shape,word.confidence,
+                        b.left,b.top,b.right,b.bottom).joinToString("\t")+"\n")
+                }
+                val linePath=File(folder,"text-line-boxes-HAFUCH_DEKEL.tsv")
+                linePath.writeText("line\tconfidence\tleft\ttop\tright\tbottom\n")
+                outcome.rawOcrLines.forEach{line->
+                    val b=line.rect
+                    linePath.appendText(listOf(line.id,line.confidence,
+                        b.left,b.top,b.right,b.bottom).joinToString("\t")+"\n")
+                }
+            }
             val numericToken=Regex("""^[.:]?([0-9]{1,2})[.,:]?$""")
             val bidi=Regex("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
             val tokens=File(folder,"number-tokens-"+series+".tsv")
