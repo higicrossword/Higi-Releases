@@ -1,0 +1,156 @@
+name: Higi Hafuch 20-source source-word geometry evidence (WIP only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud-tests/hafuch-ocr-crops-wip/HigiHafuch20OcrEvidenceTest.kt'
+      - '.github/workflows/higi-hafuch-ocr-20-word-evidence-wip.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: higi-hafuch-ocr-20-word-evidence-wip
+  cancel-in-progress: true
+jobs:
+  extract-real-android-ocr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 26
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      HIGI_ROOT: /tmp/higi-hafuch-word-test/HebrewCrosswordApp_v0.15.175
+      QA_RESULTS: ${{ github.workspace }}/hafuch-20-ocr-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Restore same sealed original app source (no published changes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-hafuch-word-test "$QA_RESULTS"
+          curl --silent --show-error --fail --location --retry 3 \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/octet-stream" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output /tmp/higi-hafuch-word-test/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-hafuch-word-test/base.zip" | sha256sum -c -
+          unzip -q /tmp/higi-hafuch-word-test/base.zip -d /tmp/higi-hafuch-word-test
+          git -C "$HIGI_ROOT" init -q
+          git -C "$HIGI_ROOT" add -A
+          git -C "$HIGI_ROOT" -c user.name='Higi QA' -c user.email='higi-qa@users.noreply.github.com' commit -qm 'pinned v175'
+          python3 - "$GITHUB_WORKSPACE" <<'PY'
+          import base64,hashlib,json,lzma,pathlib,sys
+          root=pathlib.Path(sys.argv[1])
+          item=json.loads((root/'cloud-releases/v0.15.208-DRY.json').read_text())
+          assert item['version']=='0.15.208' and item['versionCode']==358
+          data=lzma.decompress(base64.b64decode((root/item['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(data).hexdigest()==item['patchSha256']
+          pathlib.Path('/tmp/higi-hafuch-word-test/v208.patch').write_bytes(data)
+          PY
+          git -C "$HIGI_ROOT" apply --check /tmp/higi-hafuch-word-test/v208.patch
+          git -C "$HIGI_ROOT" apply /tmp/higi-hafuch-word-test/v208.patch
+          cp cloud-tests/hafuch-ocr-crops-wip/HigiHafuch20OcrEvidenceTest.kt \
+            "$HIGI_ROOT/app/src/androidTest/java/com/example/hebrewcrossword/"
+      - name: Download all twenty SHA-pinned originals, never place image bytes in output artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download 43939011519 --repo "$REPO" \
+            --name higi-hafuch-20-original-images-grid-audit \
+            --dir "$RUNNER_TEMP/verified"
+          python3 - "$RUNNER_TEMP/verified/hafuch-20-source-results" \
+            "$HIGI_ROOT/app/src/androidTest/assets/hafuch-20" <<'PY'
+          import hashlib,json,pathlib,shutil,sys
+          src=pathlib.Path(sys.argv[1]); dst=pathlib.Path(sys.argv[2])
+          dataset=json.loads((src/'sources.json').read_text())
+          assert dataset['verified_distinct_dates']==20
+          sources=dataset['selected']
+          assert len(sources)==20 and len({s['date'] for s in sources})==20
+          dst.mkdir(parents=True,exist_ok=True)
+          manifest=[]
+          for row in sources:
+              file=src/row['local_image_file']
+              digest=hashlib.sha256(file.read_bytes()).hexdigest()
+              assert digest==row['sha256'],('source mismatch',row['date'])
+              assert row['local_image_file']=='images/'+row['date']+'.jpg'
+              shutil.copyfile(file,dst/(row['date']+'.jpg'))
+              manifest.append(row['date']+'\t'+digest+'\t'+row['date']+'.jpg')
+          (dst/'manifest.tsv').write_text('\n'.join(manifest)+'\n')
+          print('SHA VERIFIED',len(manifest),'HAFUCH source JPEGs')
+          PY
+          rm -rf "$RUNNER_TEMP/verified"
+      - name: Compile instrumentation test and original project JVM regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$HIGI_ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
+            > "$QA_RESULTS/gradle.log" 2>&1 || { tail -140 "$QA_RESULTS/gradle.log"; exit 1; }
+          tail -15 "$QA_RESULTS/gradle.log"
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      - name: Execute 20 original OCR scans on temporary Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 3072M
+          disable-linux-hw-accel: false
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          disable-animations: true
+          emulator-boot-timeout: 420
+          script: |
+            set -euo pipefail
+            adb install -r "$HIGI_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+            adb install -r "$HIGI_ROOT/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+            timeout --signal=TERM --kill-after=30s 1000s adb shell am instrument -w -r \
+              -e class com.example.hebrewcrossword.HigiHafuch20OcrEvidenceTest \
+              com.example.hebrewcrossword.test/androidx.test.runner.AndroidJUnitRunner \
+              > "$QA_RESULTS/instrument.log" 2>&1 || { tail -90 "$QA_RESULTS/instrument.log"; exit 1; }
+            tail -15 "$QA_RESULTS/instrument.log"
+            grep -q 'OK (1 test)' "$QA_RESULTS/instrument.log"
+            adb exec-out run-as com.example.hebrewcrossword \
+              tar -C files -cf - hafuch-ocr-20 | tar -C "$QA_RESULTS" -xf -
+            test -s "$QA_RESULTS/hafuch-ocr-20/manifest.tsv"
+            echo "WIP 20-source same-engine OCR word geometry only; no canonical or release"
+      - name: Verify no clue text/source images in evidence artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$QA_RESULTS" <<'PY'
+          import csv,pathlib,re,sys
+          root=pathlib.Path(sys.argv[1])/'hafuch-ocr-20'
+          with (root/'manifest.tsv').open() as f:rows=list(csv.DictReader(f,delimiter='\t'))
+          assert len(rows)==20 and len({r['date'] for r in rows})==20
+          for r in rows:
+              folder=root/r['date']
+              for file in ('lines.tsv','words.tsv'):assert (folder/file).is_file()
+              content=(folder/'words.tsv').read_text()
+              assert not re.search('[\u0590-\u05ff]',content),'Leaked Hebrew clue text'
+              assert not list(folder.glob('*.jpg'))
+          print('PASS',len(rows),'originals; OCR output masks Hebrew source text')
+          PY
+      - name: Upload source-word geometry ONLY (not original photos or APK)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-hafuch-twenty-ocr-word-geometry-wip
+          path: |
+            hafuch-20-ocr-evidence/hafuch-ocr-20/
+            hafuch-20-ocr-evidence/instrument.log
+            hafuch-20-ocr-evidence/gradle.log
+          retention-days: 14
+          if-no-files-found: warn
