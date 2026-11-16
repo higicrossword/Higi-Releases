@@ -214,6 +214,21 @@ jobs:
               if int(r['unique_proposals'])<int(r['grid_start_numbers']):
                   print('::warning::PARTIAL_SERIES_OCR_CROPS',key,
                         r['unique_proposals']+'/'+r['grid_start_numbers'])
+          numeric=list(csv.DictReader(
+              (out/'ocr-cross-series-wip/ocr-number-counters.tsv').open(encoding='utf8'),
+              delimiter='\t'))
+          assert len(numeric)==3,('Missing number token counters',len(numeric))
+          for stats in numeric:
+              assert stats['series'] in by
+              assert int(stats['words'])>0
+              assert int(stats['standalone_numeric_tokens'])>=0
+              assert int(stats['heading_lines'])>=0
+              src=out/'ocr-cross-series-wip'
+              for prefix in ('number-tokens-','headings-'):
+                  file=src/(prefix+stats['series']+'.tsv')
+                  assert file.is_file() and file.stat().st_size>0,file
+          print('Read-only original OCR number/heading geometry counters:')
+          print(json.dumps(numeric,indent=2))
           summary={'scope':'Three verified source images, real Android OCR, nonweekly profiles',
                    'series':rows,'review_only':True,'user_approved_crops':0,
                    'firebase_writes':0,'canonical_writes':0,
