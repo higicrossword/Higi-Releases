@@ -61,6 +61,19 @@ edit('OcrWeeklySourceAnchorsV199.kt',[
 ])
 
 
+# Freeze the exact PRE-TERMINAL source-anchor parser inside the Android TEST source tree.
+# This is the same measured-grid / weak-number code, before the confidence-15..19 change.
+# It is a separate test object, not a production edit or separate APK release.
+root_project=Path(sys.argv[1])
+class_marker='object OcrWeeklySourceAnchorsV199 {'
+pre_terminal=(root/'OcrWeeklySourceAnchorsV199.kt').read_text()
+assert pre_terminal.count(class_marker)==1,'Missing source object to clone'
+baseline=pre_terminal.replace(class_marker,'object OcrWeeklySourceAnchorsV199Baseline {',1)
+test_java=root_project/'app/src/androidTest/java/com/example/hebrewcrossword'
+test_java.mkdir(parents=True,exist_ok=True)
+(test_java/'OcrWeeklySourceAnchorsV199Baseline.kt').write_text(baseline)
+print('BASELINE_V199_ANDROID_TEST_COPY',len(baseline))
+
 # Third WIP-only experiment: include exact printed answer-length tokens at OCR 15..19
 # in review-row geometry, NEVER in start-number anchors, AI or Canonical.
 edit('OcrWeeklySourceAnchorsV199.kt', [
