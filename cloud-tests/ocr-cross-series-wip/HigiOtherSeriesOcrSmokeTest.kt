@@ -28,7 +28,8 @@ class HigiOtherSeriesOcrSmokeTest {
         val fields=lines.singleOrNull{it.substringBefore('\t')==series}?.split('\t')
             ?:error("No pinned asset for "+series)
         check(fields.size==6)
-        val (id,name,sha,date,title,reported)=fields
+        val id=fields[0];val name=fields[1];val sha=fields[2]
+        val date=fields[3];val title=fields[4];val reported=fields[5]
         val expectedId=when(series){
             "HAFUCH_DEKEL"->OcrSeriesProfilesV197.HAFUCH.id
             "MAARIV_ODED_ROZEN"->OcrSeriesProfilesV197.MAARIV.id
@@ -54,10 +55,11 @@ class HigiOtherSeriesOcrSmokeTest {
             val actual=MessageDigest.getInstance("SHA-256").digest(bytes)
                 .joinToString(""){"%02x".format(it.toInt() and 255)}
             check(actual==sha){"Original image SHA mismatch "+series}
-            bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size)
+            val image=BitmapFactory.decodeByteArray(bytes,0,bytes.size)
                 ?:error("IMAGE_DECODE_FAILED")
-            imageW=bitmap.width;imageH=bitmap.height
-            val located=GridDetector.locate(bitmap)?:error("GRID_NOT_FOUND")
+            bitmap=image
+            imageW=image.width;imageH=image.height
+            val located=GridDetector.locate(image)?:error("GRID_NOT_FOUND")
             val crossword=located.result.crossword
             grid=crossword.rows.toString()+"x"+crossword.cols.toString()
             count=crossword.startNumbers(Direction.HORIZONTAL).size+
@@ -67,7 +69,7 @@ class HigiOtherSeriesOcrSmokeTest {
             val corners=listOf(PointF(b.left,b.top),PointF(b.right,b.top),
                 PointF(b.right,b.bottom),PointF(b.left,b.bottom))
             val start=System.nanoTime()
-            val outcome=LocalOcrCropPass.run(context,bitmap,crossword,corners,
+            val outcome=LocalOcrCropPass.run(context,image,crossword,corners,
                 refineSharedRows=true,layoutSeriesId=profile.id)
             ms=(System.nanoTime()-start)/1000000
             ocrLines=outcome.ocrLineCount
