@@ -75,6 +75,42 @@ class HigiOtherSeriesOcrSmokeTest {
             ms=(System.nanoTime()-start)/1000000
             ocrLines=outcome.ocrLineCount
             check(outcome.attempted&&ocrLines>0){"OCR_NOT_EXECUTED"}
+            // Read-only source-position evidence for missed printed clue starts.
+            // Export ONLY numbers, their OCR confidence, boxes and heading categories.
+            // Do NOT export full printed clue text, or infer missing number glyphs.
+            val numericToken=Regex("""^[.:]?([0-9]{1,2})[.,:]?$""")
+            val bidi=Regex("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+            val tokens=File(folder,"number-tokens-"+series+".tsv")
+            tokens.writeText("series\tnumber\tconfidence\tleft\ttop\tright\tbottom\tgrid_left\n")
+            var exactNumbers=0
+            for(word in outcome.geometryWords){
+                val cleaned=word.text.replace(bidi,"").trim().replace('\uFF0E','.')
+                val numeric=numericToken.matchEntire(cleaned)?.groupValues?.get(1)
+                    ?.toIntOrNull()?:continue
+                exactNumbers++
+                val box=word.box
+                tokens.appendText(listOf(series,numeric,word.confidence,
+                    box.left,box.top,box.right,box.bottom,located.bounds.left.toInt())
+                    .joinToString("\t")+"\n")
+            }
+            val headingPattern=Regex("""^\s*(מאוזן|מאונך|אופקי|אנכי)\s*[:.]?""")
+            val headings=File(folder,"headings-"+series+".tsv")
+            headings.writeText("series\tdirection\tconfidence\tleft\ttop\tright\tbottom\n")
+            var headingCount=0
+            for(row in outcome.rawOcrLines){
+                val recognized=headingPattern.find(row.text.replace(bidi,"").trim())
+                    ?.groupValues?.get(1)?:continue
+                val direction=if(recognized=="מאוזן"||recognized=="אופקי")"H" else "V"
+                headingCount++
+                val box=row.rect
+                headings.appendText(listOf(series,direction,row.confidence,
+                    box.left,box.top,box.right,box.bottom).joinToString("\t")+"\n")
+            }
+            val counters=File(folder,"ocr-number-counters.tsv")
+            if(!counters.exists())counters.writeText(
+                "series\twords\tstandalone_numeric_tokens\theading_lines\tgrid_left\n")
+            counters.appendText(listOf(series,outcome.geometryWords.size,
+                exactNumbers,headingCount,located.bounds.left.toInt()).joinToString("\t")+"\n")
             trusted=outcome.trusted.size;previews=outcome.previewOnly.size
             val candidates=linkedMapOf<ClueEditorModel.Key,ClueGeometry>()
             candidates.putAll(outcome.trusted)
