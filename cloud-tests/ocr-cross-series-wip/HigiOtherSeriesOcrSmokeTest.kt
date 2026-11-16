@@ -31,6 +31,7 @@ class HigiOtherSeriesOcrSmokeTest {
         val id=fields[0];val name=fields[1];val sha=fields[2]
         val date=fields[3];val title=fields[4];val reported=fields[5]
         val expectedId=when(series){
+            "TARTEY_DEKEL"->OcrSeriesProfilesV197.TARTEY.id
             "HAFUCH_DEKEL"->OcrSeriesProfilesV197.HAFUCH.id
             "MAARIV_ODED_ROZEN"->OcrSeriesProfilesV197.MAARIV.id
             else->error("Unsupported series "+series)
@@ -79,6 +80,20 @@ class HigiOtherSeriesOcrSmokeTest {
             candidates.putAll(outcome.trusted)
             outcome.previewOnly.forEach{(k,g)->candidates.putIfAbsent(k,g)}
             proposals=candidates.size
+            // Export status CODES only for each missing clue. No clue text or crop pixels.
+            val expectedKeys=Direction.entries.flatMap { direction ->
+                crossword.startNumbers(direction).map{n->ClueEditorModel.Key(n,direction)}
+            }
+            val missing=expectedKeys.filter{it !in candidates}
+            val diagnostics=File(folder,"missing-"+series+".tsv")
+            diagnostics.writeText("series\tclue\tmissing_reason_code\n")
+            val codePattern=Regex("[A-Z][A-Z0-9_]{3,}")
+            for(k in missing){
+                val raw=outcome.review[k].orEmpty()+" "+outcome.previewDiagnostics[k].orEmpty()
+                val reasonCode=codePattern.find(raw)?.value ?: "NO_CANDIDATE"
+                val label=(if(k.direction==Direction.HORIZONTAL)"H" else "V")+k.number
+                diagnostics.appendText(series+"\t"+label+"\t"+reasonCode+"\n")
+            }
             invalid=candidates.count{(_,g)->g.lines.isEmpty() || g.lines.any{r->
                 r.left<0f || r.top<0f || r.right>1f || r.bottom>1f ||
                 r.left>=r.right || r.top>=r.bottom

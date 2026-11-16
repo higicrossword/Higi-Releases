@@ -1,4 +1,4 @@
-name: Higi OCR two nonweekly original sources - Android smoke WIP
+name: Higi OCR three nonweekly original sources - Android smoke WIP
 on:
   push:
     branches: [main]
@@ -160,7 +160,7 @@ jobs:
           print('WIP_ONLY_DIFF_VERIFIED',changed)
           PY
           git -C "$HIGI_ROOT" diff --check
-      - name: Fetch only two SHA-pinned original nonweekly images to ephemeral androidTest assets
+      - name: Fetch three SHA-pinned original nonweekly images to ephemeral androidTest assets
         shell: bash
         run: |
           set -euo pipefail
@@ -192,7 +192,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 420
           script: bash "$GITHUB_WORKSPACE/cloud-tests/ocr-cross-series-wip/emulator-smoke.sh"
-      - name: Check both nonweekly Android diagnoses and preserve exact numerical evidence
+      - name: Check three nonweekly Android diagnoses and preserve exact numerical evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -201,11 +201,11 @@ jobs:
           out=pathlib.Path(sys.argv[1])
           p=out/'ocr-cross-series-wip/summary.tsv'
           rows=list(csv.DictReader(p.open(encoding='utf8'),delimiter='\t'))
-          assert len(rows)==2,('missing tested series',len(rows))
+          assert len(rows)==3,('missing tested series',len(rows))
           by={r['series']:r for r in rows}
-          assert set(by)=={'HAFUCH_DEKEL','MAARIV_ODED_ROZEN'}
+          assert set(by)=={'TARTEY_DEKEL','HAFUCH_DEKEL','MAARIV_ODED_ROZEN'}
           verification=json.loads((out/'pinned-source-verification.json').read_text())
-          assert verification['verified_sources']==2
+          assert verification['verified_sources']==3
           for key,r in by.items():
               assert r['status']=='DIAGNOSTIC_ONLY',(key,r['status'],r['error'])
               assert int(r['ocr_lines'])>0,(key,'OCR did not run')
@@ -214,7 +214,7 @@ jobs:
               if int(r['unique_proposals'])<int(r['grid_start_numbers']):
                   print('::warning::PARTIAL_SERIES_OCR_CROPS',key,
                         r['unique_proposals']+'/'+r['grid_start_numbers'])
-          summary={'scope':'Two verified source images, real Android OCR, nonweekly profiles',
+          summary={'scope':'Three verified source images, real Android OCR, nonweekly profiles',
                    'series':rows,'review_only':True,'user_approved_crops':0,
                    'firebase_writes':0,'canonical_writes':0,
                    'visual_crop_correctness':'NOT_MEASURED',
