@@ -1,0 +1,38 @@
+name: Higi OCR three other series - original source byte discovery WIP
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-ocr-cross-series-source-discovery-wip.yml'
+      - 'cloud-tests/ocr-cross-series-wip/discover_sources.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  find-public-source-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate extractor and dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet Pillow
+          python3 -m py_compile cloud-tests/ocr-cross-series-wip/discover_sources.py
+          python3 cloud-tests/ocr-cross-series-wip/discover_sources.py --self-test
+      - name: Identify original JPG byte sources without publishing them
+        run: |
+          set -euo pipefail
+          python3 cloud-tests/ocr-cross-series-wip/discover_sources.py \
+            cross-series-wip-report/source-discovery.json
+          test -s cross-series-wip-report/source-discovery.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-ocr-three-series-source-discovery-wip
+          path: cross-series-wip-report/
+          retention-days: 14
+          if-no-files-found: warn
