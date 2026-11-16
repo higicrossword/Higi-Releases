@@ -1,7 +1,20 @@
 {
   "purpose": "WIP read-only Android OCR smoke fixtures, no Canonical or Firebase write",
-  "discovery_run": 43904729096,
+  "discovery_run": 43906882287,
   "fixtures": [
+    {
+      "series": "TARTEY_DEKEL",
+      "title": "תרתי משמע - דקל בנו",
+      "date": "06-11-26",
+      "reported_expected": 24,
+      "filename": "tartey-061126.jpg",
+      "sha256": "5fe4bc049368db305eda25b0209549a19f95e02c02f9a1de34ee23712a7d2de6",
+      "width": 1062,
+      "height": 1115,
+      "observed_thread_issue": "2234",
+      "observed_image_filename_issue": "2236",
+      "url": "https://groups.google.com/group/tartey_mashma/attach/6244ba437982a/%D7%AA%D7%A8%D7%AA%D7%99%20%D7%9E%D7%A9%D7%9E%D7%A2%202236%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%206-11-26.jpg?part=0.1"
+    },
     {
       "series": "HAFUCH_DEKEL",
       "title": "הפוך על הפוך - דקל בנו",
@@ -24,6 +37,5 @@
       "height": 1519,
       "url": "https://groups.google.com/group/tartey_mashma/attach/637f035ba0b9f/%D7%9E%D7%A2%D7%A8%D7%99%D7%91%20%D7%A2%D7%95%D7%93%D7%93%20%D7%A8%D7%95%D7%96%D7%9F%206-11-26.jpg?part=0.1"
     }
-  ],
-  "missing_series": "TARTEY_DEKEL"
+  ]
 }
