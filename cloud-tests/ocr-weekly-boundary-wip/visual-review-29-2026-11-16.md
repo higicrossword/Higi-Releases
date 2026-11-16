@@ -53,3 +53,23 @@
 - Opened the rendered `clues/*.png` for those nine; the printed clue number, wrapped text and terminal enumeration are visibly present. No obvious unrelated next-clue text is visible.
 - This geometry metric is **a triage heuristic, not an error threshold**. Multiline clues naturally require several image fragments. Do not reject or truncate them based on a fixed height cutoff.
 - Combined distinct items visually inspected in this work: 29 weak-marker candidates and 9 additional multiline candidates. Their overlap is zero, yielding **38/304** individually inspected clue renderings. Remaining **266/304** lack this specific visual certification.
+
+## 2026-11-16: Full 304-crop contact-sheet scan revealed 3 genuine omissions
+
+**Correction to earlier apparent 304/304 coverage:** that figure counts *review-only proposals*, not complete visual clues. A first-pass visual contact-sheet scan of all 304 candidate renderings identified three candidates with their answer-length enumeration `(3)` absent. These were then **cross-checked against the original source images** (not simply the OCR string):
+
+| Date | Clue key | Original printed token omitted from candidate | OCR confidence | OCR word pixel box |
+|---|---|---|---:|---|
+| 11-11-26 | H5 | `(3)` | 17 | (440,224)-(466,241) |
+| 02-11-26 | V1 | `(3)` | 17 | (40,180)-(66,196) |
+| 21-10-26 | V1 | `(3)` | 17 | (109,175)-(135,191) |
+
+- All three markers are present and visible in their original source images; each sits immediately before the next clue's printed number on a shared physical text line.
+- In the pinned Android run 43765741209, the word boxes are absent from the relevant proposal geometry because `OcrWeeklySourceAnchorsV199.rows()` uses a minimum OCR confidence of 20. The three markers each have confidence 17.
+- Across all 19 pinned OCR geometry files, these are the only low-confidence (confidence <20) tokens matching the *strict terminal-enumeration grammar* `(N)` with optional `;:` or similar OCR punctuation. Their existence does not prove their ownership without image/box verification; ownership here was checked against the printed images.
+- A WIP-only emulator experiment now accepts this **specific terminal-enumeration grammar at confidence 15–19 for row geometry only**. It does **not** broaden start-number inference, alter original OCR readings, or bypass grid safety. Test must verify the final crop contains the printed token, plus compare all 301 other crop geometries exactly with the pinned baseline.
+- Until that experiment's Android tests and 301-crop regression pass, this is a **proposed fix, not an approved code correction**.
+- This contact-sheet check does not imply pixel-by-pixel or clue-by-clue ground-truth certification of every other 301 result. At least these 3 errors were concretely verified.
+
+### Safety
+- QA only, no APK or release, no Canonical/Firebase writes, no automatic approval of proposals or overwrite of manually/verified edited clues.
