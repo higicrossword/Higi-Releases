@@ -7,7 +7,7 @@ on:
       - 'cloud-tests/ocr-weekly-boundary-wip/HigiCloudOcrRegressionTest.kt'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   actions: read
 concurrency:
   group: higi-ocr-weekly-boundary-wip
