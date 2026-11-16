@@ -102,6 +102,19 @@ class HigiCloudOcrRegressionTest {
                         val measuredGridLeft=found.bounds.left.toInt()
                         val sourceAnchors=OcrWeeklySourceAnchorsV199.inspect(
                             result.geometryWords,expectedWires,image.width,image.height,measuredGridLeft)
+                        // Two exact compiled implementations, same process and OCR words.
+                        val benchmark=OcrSourceAnchorPairedBenchmark.run(
+                            date,result.geometryWords,expectedWires,
+                            image.width,image.height,measuredGridLeft)
+                        val benchFile=File(folder,"source-anchor-paired-benchmark.csv")
+                        if(!benchFile.exists())benchFile.writeText(
+                            "date,samples,warmups,baseline_median_ns,patched_median_ns,"+
+                            "baseline_p95_ns,patched_p95_ns,ratio_median,changed_source_keys\n")
+                        benchFile.appendText(
+                            "$date,${benchmark.samples},${benchmark.warmups},"+
+                            "${benchmark.oldMedian},${benchmark.newMedian},"+
+                            "${benchmark.oldP95},${benchmark.newP95},"+
+                            "${benchmark.ratio},${benchmark.changedKeys}\n")
                         // Physical grid is a hard upper boundary for source word ownership.
                         // Independent V201 clipping remains in place and is NOT weakened.
                         val gridSafe=sourceAnchors.previews.all { (label,parts) ->
@@ -260,3 +273,70 @@ class HigiCloudOcrRegressionTest {
         }
     }
 }
+
+
+// WIP source-anchor benchmark only. Baseline is frozen BEFORE terminal-confidence fix,
+// with every earlier grid/number correction shared between both exact code copies.
+// Same Android process, identical recognized words, AB/BA alternation after warmup.
+// Timing excludes grid detection, OCR, clue export, Firebase, AI and all file writes.
+private object OcrSourceAnchorPairedBenchmark {
+    data class Timings(
+        val samples:Int,val warmups:Int,val oldMedian:Long,val newMedian:Long,
+        val oldP95:Long,val newP95:Long,val ratio:Double,val changedKeys:String)
+    private fun pct(a:List<Long>,p:Int):Long {
+        check(a.isNotEmpty())
+        val sorted=a.sorted()
+        return sorted[((sorted.size-1)*p/100).coerceIn(0,sorted.lastIndex)]
+    }
+    fun run(date:String,words:List<OcrSharedRowSplitterV161.Word>,
+            expected:Set<String>,w:Int,h:Int,gridLeft:Int):Timings {
+        val before=OcrWeeklySourceAnchorsV199Baseline.inspect(words,expected,w,h,gridLeft)
+        val after=OcrWeeklySourceAnchorsV199.inspect(words,expected,w,h,gridLeft)
+        val differences=(before.previews.keys+after.previews.keys)
+            .filter{before.previews[it]!=after.previews[it]}.toSortedSet()
+        val allowed=when(date){
+            "11-11-26" -> setOf("H5")
+            "02-11-26", "21-10-26" -> setOf("V1")
+            else -> emptySet()
+        }
+        check(differences==allowed){
+            "Source-anchor A/B changed unexpected clues on $date: $differences (expected $allowed)"
+        }
+        var consume=0L
+        fun oldCall():Long {
+            val start=System.nanoTime()
+            val actual=OcrWeeklySourceAnchorsV199Baseline.inspect(words,expected,w,h,gridLeft)
+            val elapsed=System.nanoTime()-start
+            consume+=actual.previews.size
+            return elapsed
+        }
+        fun newCall():Long {
+            val start=System.nanoTime()
+            val actual=OcrWeeklySourceAnchorsV199.inspect(words,expected,w,h,gridLeft)
+            val elapsed=System.nanoTime()-start
+            consume+=actual.previews.size
+            return elapsed
+        }
+        val warmups=10
+        repeat(warmups){i->
+            if(i%2==0){oldCall();newCall()}else{newCall();oldCall()}
+        }
+        val oldTimes=mutableListOf<Long>()
+        val newTimes=mutableListOf<Long>()
+        val samples=30
+        repeat(samples){i->
+            if(i%2==0){
+                oldTimes+=oldCall();newTimes+=newCall()
+            }else{
+                newTimes+=newCall();oldTimes+=oldCall()
+            }
+        }
+        check(consume>0 && oldTimes.all{it>0} && newTimes.all{it>0})
+        val oldMedian=pct(oldTimes,50)
+        val newMedian=pct(newTimes,50)
+        return Timings(samples,warmups,oldMedian,newMedian,
+            pct(oldTimes,95),pct(newTimes,95),
+            newMedian.toDouble()/oldMedian,differences.joinToString("|"))
+    }
+}
+

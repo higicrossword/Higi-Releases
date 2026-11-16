@@ -38,6 +38,7 @@ jobs:
           bash -n cloud-tests/v209/emulator-ocr-run.sh
           bash cloud-tests/v209/test-emulator-ocr-runner.sh
           python3 cloud-tests/ocr-weekly-boundary-wip/compare_terminal_crop_regression.py --self-test
+          python3 cloud-tests/ocr-weekly-boundary-wip/summarize_paired_benchmark.py --self-test
       - name: Enable KVM acceleration for this ephemeral runner
         shell: bash
         run: |
@@ -218,6 +219,13 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 420
           script: bash "$GITHUB_WORKSPACE/cloud-tests/v209/emulator-ocr-run.sh"
+      - name: Verify paired same-process OCR source-anchor timings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 cloud-tests/ocr-weekly-boundary-wip/summarize_paired_benchmark.py \
+            "$QA_RESULTS/ocr-cloud-v209/source-anchor-paired-benchmark.csv" \
+            "$QA_RESULTS/source-anchor-paired-summary.json"
       - name: Compare 304 native crop geometries to pinned original Android run
         shell: bash
         run: |
