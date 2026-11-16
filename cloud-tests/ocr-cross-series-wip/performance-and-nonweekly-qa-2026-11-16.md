@@ -33,3 +33,24 @@ The source files were downloaded into disposable CI workspaces, not checked into
 ## Next gate and safety
 - A new WIP Android suite tests **all three** with each series' own layout profile, without Yedioth-specific 9×9 or 16-clue assumptions. It also exports per-clue rejection **codes**, not copyrighted clue text or original images. Preserve discrepancies instead of auto-repair.
 - None of these test findings authorize a new version, APK Release, automatic approval, or edits to Firebase/Canonical.
+
+## Three-series Android smoke, pinned source bytes (run 43908126826)
+
+[GitHub run 43908126826](https://github.com/higicrossword/Higi-Releases/actions/runs/43908126826), **success**. Full compiler, JVM regressions, Android 34 emulator, three distinct profiles. Output artifact `higi-ocr-other-series-smoke-wip-results`, artifact ID `14247315269`. All read-only, no source images or clue texts uploaded, no APK release.
+
+| Source series | SHA verified original | Grid | OCR lines | Candidate crop count | Missing expected starts | Trusted/approved |
+|---|---|---|---:|---:|---:|---:|
+| `TARTEY_DEKEL` | `5fe4bc04...` | 11×11 | 62 | 17/24 | 7 | 0 |
+| `HAFUCH_DEKEL` | `37e53145...` | 13×13 | 55 | **1/28** | **27** | 0 |
+| `MAARIV_ODED_ROZEN` | `2d588cf...` | 11×11 | 20 | 23/24 | 1 | 0 |
+
+All three were `DIAGNOSTIC_ONLY`, zero invalid normalized geometries among emitted candidates. This is **not** a claim that emitted crops are complete or visually correct.
+
+Missing-clue code distributions from the actual artifact:
+- **Tartey:** H9, H11, H14, H18, H19, H21, V12 → primary `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` (7).
+- **Hafuch:** 27 missing H/V keys → primary `NO_REFERENCE_LANE` (27).
+- **Maariv:** H17 → primary `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` (1).
+
+**Nuance:** `NO_REFERENCE_LANE` originates in the early V042 neighbor-based recovery when it finds no accepted same-direction reference candidates. It **does not** prove why later independent V178/V179/V180/... passes did not rescue those 27 keys. Likewise `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` is a preliminary/unresolved label, **not** proof that V180 successfully produced or rejected a final safe rectangle. The reason-code exporter previously selected the first code from concatenated early and late diagnoses, potentially obscuring the later causal stage. A follow-up **WIP-only diagnostic update** exports these into distinct columns `unresolved_status` and `preview_pipeline_codes`; do not relax geometry or change profiles without examining those independent results.
+
+The fact that zero are in `trusted` is expected in this DRY review run and must not be misreported as 0 OCR recognized clues. A separate visual review and geometry ownership gate are required before accepting any new proposal. No Firebase/Canonical writes.
