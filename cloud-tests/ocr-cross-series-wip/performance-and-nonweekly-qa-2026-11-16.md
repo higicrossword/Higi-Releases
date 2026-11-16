@@ -54,3 +54,27 @@ Missing-clue code distributions from the actual artifact:
 **Nuance:** `NO_REFERENCE_LANE` originates in the early V042 neighbor-based recovery when it finds no accepted same-direction reference candidates. It **does not** prove why later independent V178/V179/V180/... passes did not rescue those 27 keys. Likewise `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` is a preliminary/unresolved label, **not** proof that V180 successfully produced or rejected a final safe rectangle. The reason-code exporter previously selected the first code from concatenated early and late diagnoses, potentially obscuring the later causal stage. A follow-up **WIP-only diagnostic update** exports these into distinct columns `unresolved_status` and `preview_pipeline_codes`; do not relax geometry or change profiles without examining those independent results.
 
 The fact that zero are in `trusted` is expected in this DRY review run and must not be misreported as 0 OCR recognized clues. A separate visual review and geometry ownership gate are required before accepting any new proposal. No Firebase/Canonical writes.
+
+## Independent late-stage rejection diagnostics — run 43909713898
+
+[Run 43909713898](https://github.com/higicrossword/Higi-Releases/actions/runs/43909713898): successful, 3 pinned sources, real Android test, unchanged candidate totals (Tartey 17/24, Hafuch 1/28, Maariv 23/24), zero canonical/Firebase writes, no release. Report artifact **14248540478** `higi-ocr-other-series-smoke-wip-results`.
+
+The test was updated to keep `outcome.review[k]` (primary/unresolved status) **separate from** `outcome.previewReasons[k]` (later stage diagnostics); no crop algorithm or profile was modified. All missing keys were accounted for.
+
+| Series | Missing clues | Primary status | Independent late-stage status |
+|---|---:|---|---|
+| Hafuch | 25 | `NO_REFERENCE_LANE` | `V178_NO_UNAMBIGUOUS_NUMBER_IN_HEADED_RTL_LANE` |
+| Hafuch | 2 | `NO_REFERENCE_LANE` | `V178_LAST_CLUE_HAS_NO_LENGTH_OR_NEXT_ANCHOR` |
+| Tartey | 3 | `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` | `V190_MISSING_EXACT_OWN_NUMBER` |
+| Tartey | 3 | `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` | `V192_WITHHELD_UNANCHORED_MULTIPIECE_FOREIGN_NUMBER`, `V192_EXACT_OWN_NUMBER_MISSING` |
+| Tartey | 1 | `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` | `V192_WITHHELD_UNPROVEN_MULTIPIECE_BOUNDARY`, `V192_UNPROVEN_END_BOUNDARY` |
+| Maariv | 1 | `V180_WORD_SPLIT_ADMIN_REVIEW_ONLY` | `V190_MISSING_EXACT_OWN_NUMBER` |
+
+Precise keys:
+- Tartey: H9 (unproven end); H11/H18/V12 (unanchored multi-piece with foreign-number risk); H14/H19/H21 (exact own number missing)
+- Hafuch: H5 and V1 (last clue without safe end anchor), all 25 other missing keys (no unambiguous number inside the recognized headed RTL lane)
+- Maariv: H17 (own exact number missing).
+
+**Actionable interpretation:** V042 `NO_REFERENCE_LANE` is an expected initial neighbor-stage status when earlier trusted reference crops are absent; it should not be treated as the universal cause. V178's independent failure on 25 Hafuch clues gives a more precise direction: examine OCR printed-number tokens/heading positions and the *physical source column geometry* before attempting repairs. The two last-clue failures need a distinct terminal/next-anchor investigation. On Tartey/Maariv, V190/V192 deliberately withheld proposals when independent number/ownership evidence was insufficient, preventing accidental consumption of a neighboring clue. Preserve these safety barriers.
+
+**Next research gate, NOT performed by this run:** inspect source image and OCR token coordinates at physical column headings, not only the status text; validate on multiple originals from each series and visually compare every newly proposed crop before considering code changes. Neither `1/28` nor any other proposal coverage establishes published/canonical clue text correctness. No APK, no new version or release.
