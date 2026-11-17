@@ -35,7 +35,7 @@ jobs:
             --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/original"
           gh run download 44047765517 --repo "$REPO" \
             --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/grid"
-          (cd "$RUNNER_TEMP/original" && zip -qr "$RUNNER_TEMP/20-originals.zip" hafuch-20-source-results)
+          (cd "$RUNNER_TEMP/original/hafuch-20-source-results" && zip -qr "$RUNNER_TEMP/20-originals.zip" images)
           (cd "$RUNNER_TEMP/grid" && zip -qr "$RUNNER_TEMP/old-grid.zip" hafuch-roi-20)
           python3 - "$RUNNER_TEMP/20-originals.zip" <<'PY'
           import zipfile,sys
