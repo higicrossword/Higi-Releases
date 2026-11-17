@@ -1,0 +1,149 @@
+name: Higi 0.15.211 admin App Check gate and staged DRY release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-v211-admin-appcheck-release.yml'
+      - 'cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v211-admin-appcheck
+  cancel-in-progress: false
+jobs:
+  validate-and-stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      ROOT: /tmp/higi211/HebrewCrosswordApp_v0.15.175
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Verify immutable base and reconstruct exact published v210 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.211-DRY.json
+          test ! -e cloud-patches/v0.15.211-from-v0.15.175.patch.xz.b64
+          mkdir -p /tmp/higi211
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi211/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi211/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi211/base.zip -d /tmp/higi211
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'pinned v175 baseline'
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          repo=pathlib.Path('.')
+          cfg=json.loads((repo/'cloud-releases/v0.15.210-DRY.json').read_text())
+          assert cfg['version']=='0.15.210' and cfg['versionCode']==360
+          raw=lzma.decompress(base64.b64decode((repo/cfg['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi211/v210.patch').write_bytes(raw)
+          PY
+          git -C "$ROOT" apply --check /tmp/higi211/v210.patch
+          git -C "$ROOT" apply /tmp/higi211/v210.patch
+          grep -q 'versionCode = 360' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.210"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'verified 0.15.210 release source'
+      - name: Apply tested v210 admin App Check fix and bump v211 only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" apply --check "$GITHUB_WORKSPACE/cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch"
+          git -C "$ROOT" apply "$GITHUB_WORKSPACE/cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch"
+          python3 - <<'PY'
+          import pathlib
+          p=pathlib.Path('/tmp/higi211/HebrewCrosswordApp_v0.15.175/app/build.gradle.kts')
+          s=p.read_text()
+          for a,b in [('versionCode = 360','versionCode = 361'),
+                      ('versionName = "0.15.210"','versionName = "0.15.211"')]:
+              assert s.count(a)==1,('version bump anchor missing',a)
+              s=s.replace(a,b)
+          p.write_text(s)
+          PY
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          import pathlib,subprocess
+          root=pathlib.Path('/tmp/higi211/HebrewCrosswordApp_v0.15.175')
+          changed=subprocess.check_output(['git','-C',str(root),'diff','--name-only'],text=True).splitlines()
+          p='app/src/main/java/com/example/hebrewcrossword/'
+          allowed={p+'AdminHafuchAiBatchActivity.kt',
+                   p+'AdminHafuchAiBatchPolicy.kt'}
+          production={x for x in changed if x.startswith(p)}
+          assert production==allowed,('Frozen/shared production Kotlin changed',sorted(production))
+          policy=(root/(p+'AdminHafuchAiBatchPolicy.kt')).read_text()
+          admin=(root/(p+'AdminHafuchAiBatchActivity.kt')).read_text()
+          assert 'HAFUCH_DEKEL' in policy and 'REVIEW_ONLY = true' in policy
+          assert 'isAppCheckRejection' in policy
+          assert 'AppCheckSetup.initialize(this)' in admin
+          assert 'if(AdminHafuchAiBatchPolicy.isAppCheckRejection(e))' in admin
+          assert 'stopping=true' in admin and 'appCheckBlocked=true' in admin
+          assert 'transcribeCluesVerbatimForAdmin' in admin
+          assert 'all_20_ai_clues.csv' in admin
+          assert 'versionCode = 361' in (root/'app/build.gradle.kts').read_text()
+          assert 'versionName = "0.15.211"' in (root/'app/build.gradle.kts').read_text()
+          print('PASS exact v210 source, only admin App Check changes; other series frozen')
+          PY
+      - name: Run all Android JVM tests and compile debug package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi211/gradle.log 2>&1 || {
+            tail -180 /tmp/higi211/gradle.log
+            exit 1
+          }
+          tail -35 /tmp/higi211/gradle.log
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Revalidate complete v175-to-v211 patch and stage manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --binary HEAD~1 > /tmp/higi211/v211.patch
+          test -s /tmp/higi211/v211.patch
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          raw=pathlib.Path('/tmp/higi211/v211.patch').read_bytes()
+          path=pathlib.Path('cloud-patches/v0.15.211-from-v0.15.175.patch.xz.b64')
+          path.write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.211','versionCode':361,
+               'patchFile':str(path),'patchSha256':hashlib.sha256(raw).hexdigest(),
+               'notes':'Administrator-only Higi DRY update based on v0.15.210. Initialize Firebase App Check provider before admin batch auth/Gemini; stop remaining AI attempts after first App Check server rejection; keep previous 17 saved transcripts and resumable AI20 export. Limited-use token mode unchanged. No Firebase/Canonical changes; no modifications to Dekel Monday/Wednesday or production OCR. Tests and compile gated; live App Check acceptance not yet proven.'}
+          pathlib.Path('cloud-releases/v0.15.211-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('STAGED_211_PATCH_SHA256',cfg['patchSha256'])
+          PY
+          # Verify patch reconstructs full v211 from sealed v175 baseline.
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check /tmp/higi211/v211.patch
+          git -C "$ROOT" apply /tmp/higi211/v211.patch
+          grep -q 'versionCode = 361' "$ROOT/app/build.gradle.kts"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          git add cloud-patches/v0.15.211-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.211-DRY.json
+          git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage tested Higi 0.15.211 admin App Check DRY manifest'
+          git push origin HEAD:main
