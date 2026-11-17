@@ -94,7 +94,14 @@ class HigiHafuchRoi20OcrEvidenceTest {
                 val cropBottom=image.height
                 val roi=android.graphics.Bitmap.createBitmap(image,cropLeft,cropTop,
                     image.width-cropLeft-2,cropBottom-cropTop)
-                val scale=minOf(1f,950f/roi.width,1250f/roi.height)
+                // Hafuch-only same-font-scale A/B experiment: extending the
+                // source ROI must NOT make all printed glyphs 2–3% smaller.
+                // Retain the previous 97.5%-source-height OCR scale but include
+                // extra bottom rows. The prepared bitmap may be a little taller
+                // than 1250px; this is isolated instrumentation, not production.
+                val legacyBottom=(image.height*.975f).toInt()
+                val legacyHeight=(legacyBottom-cropTop).coerceAtLeast(24)
+                val scale=minOf(1f,950f/roi.width,1250f/legacyHeight)
                 val roiWidth=(roi.width*scale).toInt().coerceAtLeast(24)
                 val roiHeight=(roi.height*scale).toInt().coerceAtLeast(24)
                 val prepared=android.graphics.Bitmap.createScaledBitmap(roi,roiWidth,roiHeight,true)
