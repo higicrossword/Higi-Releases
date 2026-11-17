@@ -1,0 +1,56 @@
+name: Higi Hafuch selective bottom ROI start-preservation gate (WIP only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-adaptive-roi-safety-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/verify_adaptive_bottom_20.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate source-only safety checker, no production changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/verify_adaptive_bottom_20.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/verify_adaptive_bottom_20.py --self-test
+      - name: Download two completed SHA-pinned 20-source Android OCR evidence runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/baseline" "$RUNNER_TEMP/selective"
+          gh run download 44047765517 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/baseline"
+          gh run download 44127304827 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/selective"
+          test -s "$RUNNER_TEMP/baseline/hafuch-roi-20/manifest.tsv"
+          test -s "$RUNNER_TEMP/selective/hafuch-roi-20/manifest.tsv"
+          (cd "$RUNNER_TEMP/baseline" && zip -qr "$RUNNER_TEMP/baseline.zip" hafuch-roi-20)
+          (cd "$RUNNER_TEMP/selective" && zip -qr "$RUNNER_TEMP/selective.zip" hafuch-roi-20)
+      - name: Preserve all 18 unchanged sources and EVERY existing numbered start in the other two
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p hafuch-adaptive-roi-gate
+          python3 cloud-tests/hafuch-ocr-crops-wip/verify_adaptive_bottom_20.py \
+            "$RUNNER_TEMP/baseline.zip" "$RUNNER_TEMP/selective.zip" \
+            hafuch-adaptive-roi-gate/20-source-safety.json
+      - name: Upload review-only findings (never source images or clue wording)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-hafuch-selective-roi-20-safety-wip
+          path: hafuch-adaptive-roi-gate/
+          retention-days: 14
+          if-no-files-found: warn
