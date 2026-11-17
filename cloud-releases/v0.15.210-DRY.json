@@ -4,5 +4,5 @@
   "versionCode": 360,
   "patchFile": "cloud-patches/v0.15.210-from-v0.15.175.patch.xz.b64",
   "patchSha256": "0c438cd8a78f53c4185ddd223a7df2aab61919631d2e9ccfb1a41bef3f4c2753",
-  "notes": "Administrator-only DRY: 20 SHA-pinned HAFUCH_DEKEL image downloads, one Gemini verbatim text-only call per source, local OCR word geometry and resumable per-source private checkpoints. Consolidated Downloads ZIP. No Firebase or Canonical writes; frozen Dekel Monday/Wednesday algorithms untouched. QA build and unit tests gated."
+  "notes": "Administrator-only DRY: 20 SHA-pinned HAFUCH_DEKEL image downloads, one Gemini verbatim text-only call per source, local OCR word geometry and resumable per-source private checkpoints. Consolidated Downloads ZIP. No Firebase or Canonical writes; frozen Dekel Monday/Wednesday algorithms untouched. QA build and unit tests gated. Signed DRY APK publication must verify package version, original signing certificate, and final release manifest."
 }
