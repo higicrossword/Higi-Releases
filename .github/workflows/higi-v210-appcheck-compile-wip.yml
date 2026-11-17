@@ -1,0 +1,93 @@
+name: Higi v210 Hafuch App Check isolated compile gate (no release)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-v210-appcheck-compile-wip.yml'
+      - 'cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      ROOT: /tmp/higi210/HebrewCrosswordApp_v0.15.175
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Rebuild exact released v210 source and apply isolated admin patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi210
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -o /tmp/higi210/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi210/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi210/base.zip -d /tmp/higi210
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'sealed source base'
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          repo=pathlib.Path('.')
+          cfg=json.loads((repo/'cloud-releases/v0.15.210-DRY.json').read_text())
+          assert cfg['version']=='0.15.210' and cfg['versionCode']==360
+          patch=lzma.decompress(base64.b64decode((repo/cfg['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(patch).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi210/v210.patch').write_bytes(patch)
+          PY
+          git -C "$ROOT" apply --check /tmp/higi210/v210.patch
+          git -C "$ROOT" apply /tmp/higi210/v210.patch
+          grep -q 'versionCode = 360' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'frozen v210 source'
+          git -C "$ROOT" apply --check "$GITHUB_WORKSPACE/cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch"
+          git -C "$ROOT" apply "$GITHUB_WORKSPACE/cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch"
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          import pathlib,subprocess
+          root='/tmp/higi210/HebrewCrosswordApp_v0.15.175'
+          changed=subprocess.check_output(['git','-C',root,'diff','--name-only'],text=True).splitlines()
+          expected={
+            'app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt',
+            'app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt',
+          }
+          assert set(changed)==expected,changed
+          main=pathlib.Path(root)/'app/src/main/java/com/example/hebrewcrossword'
+          policy=(main/'AdminHafuchAiBatchPolicy.kt').read_text()
+          ai=(main/'AdminHafuchAiBatchActivity.kt').read_text()
+          assert 'isAppCheckRejection' in policy
+          assert 'AppCheckSetup.initialize(this)' in ai
+          assert 'stopping=true' in ai
+          assert 'versionCode = 360' in (pathlib.Path(root)/'app/build.gradle.kts').read_text()
+          print('PASS isolated v210 admin gate, no frozen-series or release version modifications')
+          PY
+      - name: Run all existing JVM tests and compile DRY APK but never publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi210/gradle.log 2>&1 || {
+            tail -180 /tmp/higi210/gradle.log
+            exit 1
+          }
+          tail -35 /tmp/higi210/gradle.log
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          echo 'PASS tests and compile; no release and no APK artifact uploaded.'
