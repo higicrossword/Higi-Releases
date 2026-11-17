@@ -50,7 +50,7 @@ class HigiHafuchRoi20OcrEvidenceTest {
         val root=File(context.filesDir,"hafuch-roi-20")
         check(root.isDirectory || root.mkdirs())
         val overview=File(root,"manifest.tsv")
-        overview.writeText("date\tsha256\twidth\theight\tgrid\tgrid_left\tgrid_right\tgrid_top\tgrid_bottom\troi_left\troi_top\troi_scale\troi_width\troi_height\tocr_lines\tocr_words\tocr_millis\n")
+        overview.writeText("date\tsha256\twidth\theight\tgrid\tgrid_left\tgrid_right\tgrid_top\tgrid_bottom\troi_left\troi_top\troi_scale\troi_width\troi_height\tocr_lines\tocr_words\tocr_millis\tbottom_extended\n")
         for(entry in input){
             val args=entry.split('\t')
             check(args.size==3)
@@ -86,12 +86,18 @@ class HigiHafuchRoi20OcrEvidenceTest {
                 val cropLeft=(bounds.right+image.width*.003f).toInt()
                     .coerceIn(0,image.width-24)
                 val cropTop=(image.height*.035f).toInt().coerceIn(0,image.height-24)
-                // HAFUCH_DEKEL-only WIP experiment: preserve printed clue V23
-                // at the physical image bottom. The old .975 height cutoff
-                // intersects its ink on 2026-08-07 and 2026-07-31.
-                // Keep footer artifacts in review-only evidence; never synthesize
-                // or auto-approve a terminal clue without source-pixel verification.
-                val cropBottom=image.height
+                // Hafuch-specific image-only bottom-ink detector. The test
+                // expects an extension ONLY when a physical clue line crosses
+                // the previous .975 cutoff; do not mistake footer dots for text.
+                val extendsBottom=HafuchBottomInkV1.needsSourceBottom(
+                    image,bounds.right)
+                val expectedExtension=date=="2026-07-31" || date=="2026-08-07"
+                check(extendsBottom==expectedExtension){
+                    "Hafuch source-only ink test disagrees with reviewed originals: "+
+                    date+" actual="+extendsBottom
+                }
+                val cropBottom=if(extendsBottom)image.height else
+                    (image.height*.975f).toInt().coerceIn(cropTop+24,image.height)
                 val roi=android.graphics.Bitmap.createBitmap(image,cropLeft,cropTop,
                     image.width-cropLeft-2,cropBottom-cropTop)
                 // Hafuch-only same-font-scale A/B experiment: extending the
@@ -144,7 +150,7 @@ class HigiHafuchRoi20OcrEvidenceTest {
                 overview.appendText(listOf(date,originalSha,image.width,image.height,
                     gridStatus,bounds?.left?:-1f,bounds?.right?:-1f,
                     bounds.top,bounds.bottom,cropLeft,cropTop,scale,roiWidth,roiHeight,
-                    lines.size,words.size,ms).joinToString("\t")+"\n")
+                    lines.size,words.size,ms,extendsBottom).joinToString("\t")+"\n")
                 android.util.Log.i("HAFUCH20","SOURCE_SHA_VERIFIED "+date+" OCR_WORDS "+
                     words.size+" OCR_LINES "+lines.size+" GRID_STATUS "+gridStatus+
                     " OCR_MS "+ms)
