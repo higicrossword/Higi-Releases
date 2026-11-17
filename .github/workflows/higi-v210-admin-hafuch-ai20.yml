@@ -1,0 +1,147 @@
+name: Higi 0.15.210 admin Hafuch AI20 gated source and release
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-v210-admin-hafuch-ai20.yml'
+      - 'cloud-tests/v210/admin-hafuch-ai20-on-v208.patch'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v210-admin-hafuch-build
+  cancel-in-progress: false
+jobs:
+  validate-and-stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      ROOT: /tmp/higi210/HebrewCrosswordApp_v0.15.175
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Reconstruct exact published v209 source and validate unmodified baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.210-DRY.json
+          test ! -e cloud-patches/v0.15.210-from-v0.15.175.patch.xz.b64
+          mkdir -p /tmp/higi210
+          curl --fail --silent --show-error --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -o /tmp/higi210/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi210/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi210/base.zip -d /tmp/higi210
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'sealed 0.15.175'
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          repo=pathlib.Path('.')
+          cfg=json.loads((repo/'cloud-releases/v0.15.209-DRY.json').read_text())
+          assert cfg['version']=='0.15.209' and cfg['versionCode']==359
+          patch=lzma.decompress(base64.b64decode((repo/cfg['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(patch).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi210/v209.patch').write_bytes(patch)
+          PY
+          git -C "$ROOT" apply --check /tmp/higi210/v209.patch
+          git -C "$ROOT" apply /tmp/higi210/v209.patch
+          grep -q 'versionCode = 359' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.209"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'verified 0.15.209'
+          git -C "$ROOT" rev-parse HEAD > /tmp/higi210/v209-head
+      - name: Apply HAFUCH-only administrator UI, add source inventory and bump version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" apply --check "$GITHUB_WORKSPACE/cloud-tests/v210/admin-hafuch-ai20-on-v208.patch"
+          git -C "$ROOT" apply "$GITHUB_WORKSPACE/cloud-tests/v210/admin-hafuch-ai20-on-v208.patch"
+          python3 - <<'PY'
+          import pathlib
+          root=pathlib.Path('/tmp/higi210/HebrewCrosswordApp_v0.15.175')
+          p=root/'app/build.gradle.kts'
+          data=p.read_text()
+          for before,after in [('versionCode = 359','versionCode = 360'),('versionName = "0.15.209"','versionName = "0.15.210"')]:
+              assert data.count(before)==1,before
+              data=data.replace(before,after)
+          p.write_text(data)
+          PY
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          root=pathlib.Path('/tmp/higi210/HebrewCrosswordApp_v0.15.175')
+          paths=subprocess.check_output(['git','-C',str(root),'diff','--name-only']).decode().splitlines()
+          orig=[p for p in paths if p.startswith('app/src/main/java/') and not p.endswith((
+              '/AdminActivity.kt','/AdminHafuchAiBatchActivity.kt',
+              '/AdminHafuchAiBatchPolicy.kt','/HafuchAdminSourceGridV1.kt'))]
+          assert not orig,('Unexpected production Kotlin change',orig)
+          manifest=json.loads((root/'app/src/main/assets/hafuch/sources20.json').read_text())
+          assert manifest['seriesId']=='HAFUCH_DEKEL' and len(manifest['items'])==20
+          assert len({i['sha256'] for i in manifest['items']})==20
+          assert len({i['date'] for i in manifest['items']})==20
+          src=(root/'app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt').read_text()
+          assert 'transcribeCluesVerbatimForAdmin' in src
+          assert 'GeminiSmartOcr' in src and 'AdminAccess.Role.NONE' in src
+          assert 'firebaseWrites' in src and 'canonicalWrites' in src
+          assert 'ai-attempt.json' in src and 'all_20_ai_clues.csv' in src
+          assert 'REVIEW_ONLY' in (root/'app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt').read_text()
+          print('PASS HAFUCH-only diff; 20 fixed sources; no frozen series Kotlin edits')
+          PY
+      - name: Compile application and run ALL JVM regressions before staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi210/gradle.log 2>&1 || {
+            tail -180 /tmp/higi210/gradle.log
+            exit 1
+          }
+          tail -45 /tmp/higi210/gradle.log
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Check tested patch and save v210 definition to GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --binary HEAD~1 > /tmp/higi210/v210.patch
+          test -s /tmp/higi210/v210.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,json,lzma
+          raw=Path('/tmp/higi210/v210.patch').read_bytes()
+          root=Path('.')
+          name='cloud-patches/v0.15.210-from-v0.15.175.patch.xz.b64'
+          (root/name).write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          data={'channel':'dry','version':'0.15.210','versionCode':360,
+                'patchFile':name,'patchSha256':hashlib.sha256(raw).hexdigest(),
+                'notes':'Administrator-only DRY: 20 SHA-pinned HAFUCH_DEKEL image downloads, one Gemini verbatim text-only call per source, local OCR word geometry and resumable per-source private checkpoints. Consolidated Downloads ZIP. No Firebase or Canonical writes; frozen Dekel Monday/Wednesday algorithms untouched. QA build and unit tests gated.'}
+          (root/'cloud-releases/v0.15.210-DRY.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          print('VERIFIED_PATCH_SHA256',data['patchSha256'])
+          PY
+          git -C "$ROOT" reset --hard -q HEAD~1
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check /tmp/higi210/v210.patch
+          git -C "$ROOT" apply /tmp/higi210/v210.patch
+          grep -q 'versionCode = 360' "$ROOT/app/build.gradle.kts"
+          git add cloud-patches/v0.15.210-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.210-DRY.json
+          git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage validated Higi v0.15.210 admin Hafuch AI20 DRY release'
+          git push origin HEAD:main
