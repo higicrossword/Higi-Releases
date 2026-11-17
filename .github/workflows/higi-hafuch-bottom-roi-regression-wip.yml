@@ -1,0 +1,55 @@
+name: Higi Hafuch 20-image bottom ROI A-B safety gate WIP
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-bottom-roi-regression-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/compare_bottom_roi_regression.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate static safety and script syntax
+        run: |
+          set -euo pipefail
+          python -m py_compile cloud-tests/hafuch-ocr-crops-wip/compare_bottom_roi_regression.py
+          python cloud-tests/hafuch-ocr-crops-wip/compare_bottom_roi_regression.py --self-test
+      - name: Retrieve both immutable Android OCR artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/old" "$RUNNER_TEMP/new"
+          gh run download 44047765517 --repo "$REPO" \
+            --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/old"
+          gh run download 44099678598 --repo "$REPO" \
+            --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/new"
+          test -s "$RUNNER_TEMP/old/hafuch-roi-20/manifest.tsv"
+          test -s "$RUNNER_TEMP/new/hafuch-roi-20/manifest.tsv"
+          (cd "$RUNNER_TEMP/old" && zip -qr "$RUNNER_TEMP/old.zip" hafuch-roi-20)
+          (cd "$RUNNER_TEMP/new" && zip -qr "$RUNNER_TEMP/new.zip" hafuch-roi-20)
+      - name: Reject unconditional full-height OCR replacement if any previously read start is lost
+        run: |
+          set -euo pipefail
+          mkdir -p hafuch-bottom-roi-report
+          python cloud-tests/hafuch-ocr-crops-wip/compare_bottom_roi_regression.py \
+            "$RUNNER_TEMP/old.zip" "$RUNNER_TEMP/new.zip" \
+            hafuch-bottom-roi-report/bottom-roi-20-ab.json
+      - name: Upload source-verified diagnostic metadata only
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-bottom-roi-20-ab-wip
+          path: hafuch-bottom-roi-report/
+          retention-days: 14
+          if-no-files-found: warn
