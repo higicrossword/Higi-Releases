@@ -86,7 +86,12 @@ class HigiHafuchRoi20OcrEvidenceTest {
                 val cropLeft=(bounds.right+image.width*.003f).toInt()
                     .coerceIn(0,image.width-24)
                 val cropTop=(image.height*.035f).toInt().coerceIn(0,image.height-24)
-                val cropBottom=(image.height*.975f).toInt().coerceIn(cropTop+24,image.height)
+                // HAFUCH_DEKEL-only WIP experiment: preserve printed clue V23
+                // at the physical image bottom. The old .975 height cutoff
+                // intersects its ink on 2026-08-07 and 2026-07-31.
+                // Keep footer artifacts in review-only evidence; never synthesize
+                // or auto-approve a terminal clue without source-pixel verification.
+                val cropBottom=image.height
                 val roi=android.graphics.Bitmap.createBitmap(image,cropLeft,cropTop,
                     image.width-cropLeft-2,cropBottom-cropTop)
                 val scale=minOf(1f,950f/roi.width,1250f/roi.height)
