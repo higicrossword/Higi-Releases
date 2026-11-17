@@ -1,0 +1,75 @@
+name: Higi Hafuch terminal source-pixel crop guard (WIP only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-terminal-source-crops-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/audit_terminal_source_crops.py'
+      - 'cloud-tests/hafuch-ocr-crops-wip/audit_bottom_ink_20.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify-source-geometry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify standalone HAFUCH-only guard and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet Pillow numpy
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/audit_terminal_source_crops.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_terminal_source_crops.py --self-test
+      - name: Fetch immutable original publisher JPEGs and original one-pass Android OCR
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/ocr"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/source"
+          gh run download 44047765517 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/ocr"
+          (cd "$RUNNER_TEMP/source" && zip -qr "$RUNNER_TEMP/source.zip" hafuch-20-source-results)
+          (cd "$RUNNER_TEMP/ocr" && zip -qr "$RUNNER_TEMP/ocr.zip" hafuch-roi-20)
+          test -s "$RUNNER_TEMP/source.zip"
+          test -s "$RUNNER_TEMP/ocr.zip"
+      - name: Reject unverified starts and preserve every original OCR record
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p hafuch-terminal-review
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_terminal_source_crops.py \
+            "$RUNNER_TEMP/source.zip" "$RUNNER_TEMP/ocr.zip" \
+            hafuch-terminal-review/20-source-terminal-review.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('hafuch-terminal-review/20-source-terminal-review.json').read_text())
+          assert report['series_id']=='HAFUCH_DEKEL'
+          assert report['sources_checked']==20
+          assert report['used_second_ocr'] is False
+          assert report['changed_old_ocr_words'] is False
+          assert report['changed_yedioth_algorithms'] is False
+          assert report['canonical_writes']==report['firebase_writes']==0
+          bydate={r['date']:r for r in report['sources']}
+          assert bydate['2026-07-31']['decision']=='REVIEW_ONLY_V23_SOURCE_CROP'
+          assert bydate['2026-08-07']['decision']=='ADMIN_REVIEW_ONLY_START_UNVERIFIED'
+          assert all(r['decision']=='UNCHANGED' for d,r in bydate.items()
+                     if d not in ('2026-07-31','2026-08-07'))
+          print('PASS 20 SHA-pinned sources; original OCR unchanged; only one review-only crop')
+          PY
+      - name: Upload diagnostic coordinates only (never source JPEGs or clue text)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-terminal-source-geometry-review-only
+          path: hafuch-terminal-review/
+          retention-days: 14
+          if-no-files-found: warn
