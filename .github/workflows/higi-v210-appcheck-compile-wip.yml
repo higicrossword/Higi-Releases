@@ -7,7 +7,8 @@ on:
       - 'cloud-tests/v210/HAFUCH_APP_CHECK_FAIL_CLOSED_WIP.patch'
   workflow_dispatch:
 permissions:
-  contents: read
+  # Draft baseline source asset requires elevated download permission; never publish.
+  contents: write
 jobs:
   compile-check:
     runs-on: ubuntu-latest
