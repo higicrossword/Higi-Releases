@@ -52,6 +52,7 @@ def validate(baseline,adaptive,output):
         new={x['date']:x for x in rows(b,'hafuch-roi-20/manifest.tsv')}
         assert len(old)==len(new)==20 and set(old)==set(new)
         result=[]
+        violations=[]
         for date in sorted(old):
             x=old[date];y=new[date]
             assert x['sha256']==y['sha256'] and x['grid']==y['grid']=='13x13'
@@ -63,6 +64,8 @@ def validate(baseline,adaptive,output):
                 p=f'hafuch-roi-20/{date}/{name}'
                 if a.read(p)!=b.read(p):
                     difference.append(name)
+            missing_starts={'H':[],'V':[]}
+            gained_starts={'H':[],'V':[]}
             if not expected_extension:
                 assert not difference,('OCR regression in non-clipped source',date,difference)
                 assert x['roi_width']==y['roi_width'] and x['roi_height']==y['roi_height']
@@ -72,16 +75,20 @@ def validate(baseline,adaptive,output):
                 old_starts=numbered(a,date)
                 new_starts=numbered(b,date)
                 for direction in ('H','V'):
-                    missing=sorted(old_starts[direction]-new_starts[direction])
-                    assert not missing,(
-                        'Unsafe adaptive enlargement lost an already recognized clue start',
-                        date,direction,missing)
-                if date=='2026-08-07':
-                    assert 23 in new_starts['V'],('V23 still not recognized',date)
+                    missing_starts[direction]=sorted(old_starts[direction]-new_starts[direction])
+                    gained_starts[direction]=sorted(new_starts[direction]-old_starts[direction])
+                    if missing_starts[direction]:
+                        violations.append({'date':date,'direction':direction,
+                            'lost_preexisting_printed_starts':missing_starts[direction]})
+                if date=='2026-08-07' and 23 not in new_starts['V']:
+                    violations.append({'date':date,'direction':'V',
+                        'terminal_V23_not_recognized':True})
             result.append({'date':date,'extended':expected_extension,
                 'ocr_tsv_files_changed':difference,'old_words':int(x['ocr_words']),
                 'new_words':int(y['ocr_words']),'old_ms':int(x['ocr_millis']),
-                'new_ms':int(y['ocr_millis'])})
+                'new_ms':int(y['ocr_millis']),
+                'lost_preexisting_starts':missing_starts,
+                'gained_starts':gained_starts})
         assert sum(x['extended'] for x in result)==2
     summary={'series':'HAFUCH_DEKEL','original_images':20,
       'source_pixel_guard_decisions_verified':20,
@@ -92,10 +99,13 @@ def validate(baseline,adaptive,output):
       'not_a_clue_crop_visual_approval':True,
       'source_project_modified':False,'published_apk':False,
       'firebase_writes':0,'canonical_writes':0,
-      'per_source':result}
+      'all_baseline_numbered_starts_preserved':not violations,
+      'safety_violations':violations,'per_source':result}
     Path(output).parent.mkdir(parents=True,exist_ok=True)
     Path(output).write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({k:v for k,v in summary.items() if k!='per_source'},indent=2))
+    if violations:
+        raise AssertionError(('Selective extended OCR ROI violates preservation gate',violations))
 def self_test():
     assert len(ALLOW)==2 and '2026-09-04' not in ALLOW
     print('PASS selective bottom ROI safety expectations')
