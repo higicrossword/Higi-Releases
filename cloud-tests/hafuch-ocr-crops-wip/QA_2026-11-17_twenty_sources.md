@@ -47,3 +47,15 @@ The image manifest and numeric audit are reproducible from the pinned GitHub Act
 - A reviewed, correct **V23** text crop has *not* yet been proven on every 20 originals, and source-line overlap/terminal completeness remain acceptance gates.
 
 This comparator is an isolated Python/CI QA layer; no changes to Android production, any other series, Canonical, Firebase, or release.
+
+## Targeted source-pixel proof: 2026-08-07 V23
+
+An independent offline check took the original JPEG directly from the pinned 20-source archive (`SHA-256 dbdf0d06ca4efc843f2f593991eaf3ef0467a027b54d5a1d0df3ab67e723cd95`) and mapped actual word boxes from the full-bottom Android OCR capture back to **source pixels**.
+
+- Printed start `23.` (confidence **93**) and trailing enumeration `(3).` (confidence **92**) lie on the same physical text line.
+- The previous clue's separate terminal marker `(4);` (confidence **93**) lies immediately to the RIGHT of that start and is excluded by a measured horizontal gutter.
+- Calculated source-image rectangle: **(1441,1445)–(1862,1483)** in the original **2048×1505** JPEG, outside the measured grid boundary. The resulting displayed pixel crop contains the complete printed `23.` clue and `(3)`, without the prior clue's terminal marker.
+- **Only this individual clue crop has been source-verified.** The independent test used the full-bottom OCR output as *offline evidence*; there is **no app-integrated one-pass implementation** of this terminal-recovery rule yet. Do not use source-date-specific coordinates in app production.
+- Across all 20 images the full-height scan is a regression risk: **7 gained and 9 lost** clean printed start tokens (499 → 497 overall). See [the comparison gate](https://github.com/higicrossword/Higi-Releases/actions/runs/44124709211). The proper production design remains fail-closed: preserve the default OCR ROI, derive any recovered terminal geometry from source-pixel proof, and withhold ambiguous crops.
+
+No new version, APK or release. No changes to Monday/Wednesday Yedioth, common OCR source, Firebase or Canonical.
