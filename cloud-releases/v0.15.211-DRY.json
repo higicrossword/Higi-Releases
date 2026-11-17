@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.211",
+  "versionCode": 361,
+  "patchFile": "cloud-patches/v0.15.211-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "00a73f9beca5d459fd42c0d44dd0d8f61b431fbbe33b5c10badce7e5be61efa7",
+  "notes": "Administrator-only Higi DRY update based on v0.15.210. Initialize Firebase App Check provider before admin batch auth/Gemini; stop remaining AI attempts after first App Check server rejection; keep previous 17 saved transcripts and resumable AI20 export. Limited-use token mode unchanged. No Firebase/Canonical changes; no modifications to Dekel Monday/Wednesday or production OCR. Tests and compile gated; live App Check acceptance not yet proven."
+}
