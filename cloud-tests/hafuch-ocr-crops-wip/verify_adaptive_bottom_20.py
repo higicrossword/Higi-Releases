@@ -21,6 +21,31 @@ def rows(z,name):
         out.append(dict(zip(header,p)))
     return out
 
+
+H={1,5,8,9,10,12,14,15,18,19,21,22,24,25}
+V={1,2,3,4,5,6,7,11,13,16,17,19,20,23}
+import re
+NUM=re.compile(r"^([0-9]{1,2})[.,:]$")
+def numbered(z,date):
+    words=rows(z,f'hafuch-roi-20/{date}/words.tsv')
+    lines=rows(z,f'hafuch-roi-20/{date}/lines.tsv')
+    headings=sorted(int(w['top']) for w in lines if w['heading']=='V')
+    across_end=sorted(int(w['top']) for w in words if w['masked'].strip()=='25.')
+    start_one=sorted(int(w['top']) for w in words if w['masked'].strip()=='1.')
+    later=[i for i in start_one if across_end and i>across_end[0]]
+    cut=headings[0] if headings else (later[0] if later else None)
+    if cut is not None and across_end and cut<across_end[0]:
+        cut=later[0] if later else None
+    assert cut is not None,('No H/V section evidence',date)
+    found={'H':set(),'V':set()}
+    for w in words:
+        m=NUM.fullmatch(w['masked'].strip())
+        if not m:continue
+        n=int(m.group(1))
+        d='H' if int(w['top'])<cut else 'V'
+        if n in (H if d=='H' else V):found[d].add(n)
+    return found
+
 def validate(baseline,adaptive,output):
     with zipfile.ZipFile(baseline) as a,zipfile.ZipFile(adaptive) as b:
         old={x['date']:x for x in rows(a,'hafuch-roi-20/manifest.tsv')}
@@ -44,6 +69,15 @@ def validate(baseline,adaptive,output):
             else:
                 assert difference,('Expected modified OCR evidence',date)
                 assert int(y['roi_height'])>=int(x['roi_height'])
+                old_starts=numbered(a,date)
+                new_starts=numbered(b,date)
+                for direction in ('H','V'):
+                    missing=sorted(old_starts[direction]-new_starts[direction])
+                    assert not missing,(
+                        'Unsafe adaptive enlargement lost an already recognized clue start',
+                        date,direction,missing)
+                if date=='2026-08-07':
+                    assert 23 in new_starts['V'],('V23 still not recognized',date)
             result.append({'date':date,'extended':expected_extension,
                 'ocr_tsv_files_changed':difference,'old_words':int(x['ocr_words']),
                 'new_words':int(y['ocr_words']),'old_ms':int(x['ocr_millis']),
