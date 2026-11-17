@@ -33,3 +33,17 @@ The experiment grouped boxes by physically OCR-detected rows, sorted words right
 5. After that, port the Hafuch-only algorithm to **ephemeral Android WIP** and run regression. Do not change or alter the frozen Yedioth Monday/Wednesday algorithms; do not create APK/release or alter Canonical/Firebase without a separate user instruction.
 
 The image manifest and numeric audit are reproducible from the pinned GitHub Actions artifacts. The experimental Python working analysis is not application source, and its results must not be treated as a published feature.
+
+## Full-bottom ROI controlled comparison (20 source images, two real Android runs)
+
+**Evidence:** [CI gate 44124709211](https://github.com/higicrossword/Higi-Releases/actions/runs/44124709211) PASS, artifact `higi-hafuch-bottom-roi-20-ab-wip`. Compares genuine local Android OCR geometry from source runs [44047765517](https://github.com/higicrossword/Higi-Releases/actions/runs/44047765517) (ROI stops at 97.5% source height) and [44099678598](https://github.com/higicrossword/Higi-Releases/actions/runs/44099678598) (ROI extends to image bottom). Both processed **the same 20 SHA-pinned JPEGs** with the existing OCR engine, and both recognized the pixel-proven 13×13 grid.
+
+- Standalone numbered anchor coverage with unchanged strict grammar and H/V section split: **499/560** originally, **497/560** with full-height ROI.
+- The full-height input **gains 7** individually numbered tokens and **loses 9** tokens present under the original ROI settings.
+- In the **2026-08-07** original image, **V23** improves materially: the expanded Android OCR reports `23.` confidence 93 and `(3).` confidence 92 at the bottom; the old OCR did not read V23 as a complete start and misread `(3)`. The printed source does contain both. However **H24** ceases to be a clean standalone start under the expanded OCR, demonstrating a concrete same-image tradeoff.
+- On **2026-08-28**, **2026-10-30** and **2026-11-06**, the total number of OCR words falls by 2, 3 and 1 respectively in the new capture. In the aggregate across all sources, word count rises from 4,386 to 4,406, but this **does not guarantee** preserved per-word recognition or correct crop boundaries.
+- **Decision:** DO NOT change the global/default `HAFUCH_DEKEL` OCR region bottom from 97.5% to 100% unconditionally. This would cause a demonstrated 9-number regression even though it fixes one terminal clue.
+- **Next safe design:** retain one-pass original ROI for the normal clue set; use the *original unaltered source image* to extend a **candidate terminal clue's source-pixel rectangle** only if its printed start/end and ownership are independently proven. If start/end cannot be proven without a second OCR pass, withhold that candidate for administrator review. Do not silently synthesize a `23.` OCR word from expected grid numbering. To remain within the one-OCR-pass performance requirement, no second full-page OCR fallback may be added to runtime.
+- A reviewed, correct **V23** text crop has *not* yet been proven on every 20 originals, and source-line overlap/terminal completeness remain acceptance gates.
+
+This comparator is an isolated Python/CI QA layer; no changes to Android production, any other series, Canonical, Firebase, or release.
