@@ -10,7 +10,19 @@ H={1,5,8,9,10,12,14,15,18,19,21,22,24,25}
 V={1,2,3,4,5,6,7,11,13,16,17,19,20,23}
 EXACT=re.compile(r"^(\d{1,2})[.,:]$")
 def read_tsv(z,path):
-    return list(csv.DictReader(io.StringIO(z.read(path).decode('utf8')),delimiter='\t'))
+    # These TSVs contain raw OCR punctuation, including unescaped double
+    # quotes. The writer emits literal TAB-separated columns, not CSV quoting.
+    # csv.DictReader would silently swallow several entire rows as multiline
+    # quoted fields. Split physical lines strictly and verify column counts.
+    lines=z.read(path).decode('utf8').splitlines()
+    assert lines,('Empty evidence',path)
+    header=lines[0].split('\t')
+    out=[]
+    for i,line in enumerate(lines[1:],2):
+        parts=line.split('\t')
+        assert len(parts)==len(header),(path,i,'wrong TSV field count')
+        out.append(dict(zip(header,parts)))
+    return out
 def audit(artifact,destination):
     rows=[];raw_counts=[]
     with zipfile.ZipFile(artifact) as z:
