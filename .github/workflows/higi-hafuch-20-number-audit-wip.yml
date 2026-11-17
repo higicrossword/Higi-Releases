@@ -1,0 +1,50 @@
+name: Higi Hafuch 20-original-number-audit WIP (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-20-number-audit-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/audit_twenty_source_numbers.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate parser and static safety checks
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/audit_twenty_source_numbers.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_twenty_source_numbers.py --self-test
+      - name: Fetch 20-source original Android ROI OCR geometry (pinned evidence only)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pinned-ocr"
+          gh run download 44047765517 --repo "$REPO" \
+            --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/pinned-ocr"
+          test -s "$RUNNER_TEMP/pinned-ocr/hafuch-roi-20/manifest.tsv"
+          (cd "$RUNNER_TEMP/pinned-ocr" && zip -q -r "$RUNNER_TEMP/ocr-evidence.zip" hafuch-roi-20)
+      - name: Audit 560 possible starts without claiming crop correctness
+        run: |
+          set -euo pipefail
+          mkdir -p number-audit-report
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_twenty_source_numbers.py \
+            "$RUNNER_TEMP/ocr-evidence.zip" number-audit-report/hafuch-20-number-audit.json
+      - name: Upload safe per-source findings only
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-20-number-evidence-audit
+          path: number-audit-report/
+          retention-days: 14
+          if-no-files-found: warn
