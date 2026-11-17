@@ -1,0 +1,97 @@
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt
+index 19b604c..486fb94 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt
+@@ -88,6 +88,18 @@ class AdminHafuchAiBatchActivity:AppCompatActivity() {
+         val loaded=runCatching{readSources()}
+         if(loaded.isFailure){ status.text="רשימת המקורות לא אומתה: ${loaded.exceptionOrNull()?.message.orEmpty()}";return }
+         sources=loaded.getOrThrow()
++        // An Android process may restore this Activity without ever opening MainActivity.
++        // Install the existing production App Check provider before AdminAccess or Gemini.
++        // Do not relax App Check enforcement or switch the production Gemini token mode.
++        val appCheckSetup=runCatching{AppCheckSetup.initialize(this)}
++        if(appCheckSetup.isFailure){
++            val failure=appCheckSetup.exceptionOrNull()
++            DebugLog.e("HAFUCH_AI_APP_CHECK","provider initialization failed; no AI allowed",failure)
++            status.text="אתחול Firebase App Check נכשל. לא יבוצעו קריאות AI. " +
++                DebugLog.sanitize(failure?.message.orEmpty()).take(120)
++            return
++        }
++        DebugLog.i("HAFUCH_AI_APP_CHECK","provider installed before admin auth and Gemini; no tokens logged")
+         AdminAccess(this).loadRole{role->runOnUiThread{
+             if(isFinishing || isDestroyed)return@runOnUiThread
+             allowed=role!=AdminAccess.Role.NONE && BuildConfig.HIGI_DRY_BUILD
+@@ -220,6 +232,7 @@ class AdminHafuchAiBatchActivity:AppCompatActivity() {
+         val downloaded=ensureSources()
+         if(downloaded!=20)return "אומתו $downloaded/20 תמונות. ${if(stopping)"נעצר לפי בקשה" else "שגיאה בהורדת המקורות"}. לא בוצעו קריאות AI."
+         var successes=0;var attempted=0;var ambiguous=0;var ocrFailed=0
++        var appCheckBlocked=false
+         for((index,s) in sources.withIndex()){
+             if(stopping)break
+             update("מעבד ${index+1}/20: ${s.date}; פוענחו: $successes; בקשות AI חדשות: $attempted")
+@@ -296,13 +309,23 @@ class AdminHafuchAiBatchActivity:AppCompatActivity() {
+                         put("imageSha256",s.sha256);put("error",e.javaClass.simpleName)
+                         put("message",reason.take(200));put("at",System.currentTimeMillis())
+                     })
++                    if(AdminHafuchAiBatchPolicy.isAppCheckRejection(e)){
++                        // A fresh attestation is required. Other queued AI requests must
++                        // not be attempted automatically after an App Check rejection.
++                        stopping=true
++                        appCheckBlocked=true
++                        DebugLog.e("HAFUCH_AI_APP_CHECK","server rejected App Check; remaining AI calls blocked",e)
++                        update("Firebase App Check דחה את הבקשה. יתר קריאות ה־AI נעצרו; הנתונים נשמרו.")
++                    }
+                 }
+             }finally{bitmap.recycle()}
+         }
+         val exported=runCatching{saveZip()}
+         return "מקורות מאומתים: $downloaded/20\nתמלולים שמורים: $successes/20\n"+
+             "קריאות AI חדשות: $attempted\nבקשות ישנות שלא יבוצעו שוב אוטומטית: $ambiguous\n"+
+-            "שגיאות OCR: $ocrFailed\n"+exported.fold({"נשמר ב־Downloads: $it"},{"שמירה ל־Downloads נכשלה: ${it.message.orEmpty()}; הנתונים נשארו פרטיים במכשיר"})
++            "שגיאות OCR: $ocrFailed\n"+
++            (if(appCheckBlocked) "App Check דחה טוקן; קריאות AI נוספות נעצרו עד בדיקה.\n" else "")+
++            exported.fold({"נשמר ב־Downloads: $it"},{"שמירה ל־Downloads נכשלה: ${it.message.orEmpty()}; הנתונים נשארו פרטיים במכשיר"})
+     }
+ 
+     private fun boxJson(rect:CropRect,roiX:Int,roiY:Int,scale:Float):JSONArray {
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt
+index 0fa5076..20316ed 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt
+@@ -42,6 +42,16 @@ internal object AdminHafuchAiBatchPolicy {
+     fun shouldCallAi(complete:Boolean, attemptRecorded:Boolean, explicitRetry:Boolean=false):Boolean =
+         !complete && (!attemptRecorded || explicitRetry)
+ 
++    /** Fail closed on server-side App Check rejection, without retrying any billable AI call. */
++    fun isAppCheckRejection(error:Throwable?):Boolean =
++        generateSequence(error){it.cause}.take(8).any { throwable ->
++            val message=throwable.message.orEmpty().lowercase(java.util.Locale.ROOT)
++            (message.contains("app check") || message.contains("appcheck") ||
++                message.contains("attestation")) &&
++                (message.contains("invalid") || message.contains("denied") ||
++                    message.contains("unauthorized") || message.contains("403"))
++        }
++
+     /** A public crop/canonical publishing path MUST NOT be called from this batch. */
+     const val REVIEW_ONLY = true
+ }
+diff --git a/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt b/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt
+index d43c268..b6e361e 100644
+--- a/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt
++++ b/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt
+@@ -46,4 +46,15 @@ class AdminHafuchAiBatchPolicyTest {
+         assertTrue(AdminHafuchAiBatchPolicy.REVIEW_ONLY)
+         assertEquals("HAFUCH_DEKEL",AdminHafuchAiBatchPolicy.SERIES_ID)
+     }
++    @Test fun appCheckRejectionsBlockRemainingAiCalls(){
++        assertTrue(AdminHafuchAiBatchPolicy.isAppCheckRejection(
++            IllegalStateException("Firebase App Check token is invalid.")))
++        assertTrue(AdminHafuchAiBatchPolicy.isAppCheckRejection(
++            IllegalStateException("wrapper",IllegalArgumentException("AppCheck token denied (403)"))))
++        assertFalse(AdminHafuchAiBatchPolicy.isAppCheckRejection(
++            IllegalStateException("Gemini generation timed out")))
++        assertFalse(AdminHafuchAiBatchPolicy.isAppCheckRejection(
++            IllegalStateException("Gemini quota exceeded")))
++        assertFalse(AdminHafuchAiBatchPolicy.isAppCheckRejection(null))
++    }
+ }
