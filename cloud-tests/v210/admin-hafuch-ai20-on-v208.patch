@@ -1,0 +1,882 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index f9244b0..24cb0ec 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -40,6 +40,10 @@
+             android:name=".AdminActivity"
+             android:screenOrientation="portrait"
+             android:exported="false" />
++        <activity
++            android:name=".AdminHafuchAiBatchActivity"
++            android:screenOrientation="portrait"
++            android:exported="false" />
+         <activity
+             android:name=".AdminOcrSeriesBatchActivity"
+             android:screenOrientation="portrait"
+diff --git a/app/src/main/assets/hafuch/sources20.json b/app/src/main/assets/hafuch/sources20.json
+new file mode 100644
+index 0000000..13545e9
+--- /dev/null
++++ b/app/src/main/assets/hafuch/sources20.json
+@@ -0,0 +1,208 @@
++{
++  "schema": "higi-admin-hafuch-20-sources-v1",
++  "seriesId": "HAFUCH_DEKEL",
++  "asOf": "2026-11-16",
++  "verifiedCount": 20,
++  "items": [
++    {
++      "date": "2026-11-13",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 13/11/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/20b2dd32c32cf/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2013-11-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/hTx08Plq19s",
++      "sha256": "d1e3ca66c53d2d68fed682e8c389e55f3061bbf59f31af34044a9896ffaf9d00",
++      "width": 3000,
++      "height": 2305,
++      "bytes": 825301
++    },
++    {
++      "date": "2026-11-06",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 6/11/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/637b8b58672e4/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%206-11-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/Mb7_WMFmw0g",
++      "sha256": "37e53145854c549f786819cd27e38852ce1deaaae484e9e7e71044db168774ef",
++      "width": 3000,
++      "height": 2433,
++      "bytes": 882388
++    },
++    {
++      "date": "2026-10-30",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 30/10/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/5bcecd13f1cce/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2030-10-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/TROMNjwk0CA",
++      "sha256": "cd4307f741b99dfd21fe9773c7aa6b7e403e349fff82e402676118597b773a7e",
++      "width": 3053,
++      "height": 2448,
++      "bytes": 897522
++    },
++    {
++      "date": "2026-10-23",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 23/10/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/1b1466b2d851f/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2023-10-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/us_dZFyYHYc",
++      "sha256": "6f1c1f8aa3715e1d8d772576bc2108660b53cb7e67d233283e717fc8e46eec0b",
++      "width": 3008,
++      "height": 2366,
++      "bytes": 736965
++    },
++    {
++      "date": "2026-10-16",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 16/10/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/4696ac7b85a32/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2016-10-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/Znq9pkhcLZ4",
++      "sha256": "0ec88219f015b10e4722211e75b9a566afde740e298e7502e937fae788c78fb6",
++      "width": 2048,
++      "height": 1618,
++      "bytes": 479302
++    },
++    {
++      "date": "2026-10-09",
++      "title": "תשבץ היגיון ידיעות הפוך על הפוך דקל בנו 9/10/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/1660373f72788/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%209-10-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/xc7Xae27PqI",
++      "sha256": "5b95f9b133a400d1d2acf56b55256a0f02a8dae120533f2fdfaba46dc1198a59",
++      "width": 1000,
++      "height": 774,
++      "bytes": 215576
++    },
++    {
++      "date": "2026-10-02",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 2/10/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/837fd1370015/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%202-10-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/4Bb09RpRDwY",
++      "sha256": "88ea935d374cdd01f524230434c2e5e17bcfc166c68513ec414ff532b1231cd1",
++      "width": 3400,
++      "height": 2475,
++      "bytes": 1071754
++    },
++    {
++      "date": "2026-09-25",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 25/9/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/1108f9371fcd9/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2025-9-26%281%29.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/vKsoy8LDsWg",
++      "sha256": "6100cd113c6c28dffe0c4d15f526e7f83649556971b8118c2b11386a97bcb10c",
++      "width": 1756,
++      "height": 1352,
++      "bytes": 829770
++    },
++    {
++      "date": "2026-09-18",
++      "title": "תשבץ היגיון ידיעות אחרונות הפוך על הפוך דקל בנו 18/9/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/b819718b8cea/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2018-9-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/O3KA2KVATcY",
++      "sha256": "677313c97819b9563c0c84c26907a5130e0a7116bb237600769d846ec25cd729",
++      "width": 2048,
++      "height": 1563,
++      "bytes": 478674
++    },
++    {
++      "date": "2026-09-11",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 11/9/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/12b018f89c225a/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2011-8-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/tpducUFCeCo",
++      "sha256": "ab58ed8fa40e9fab34d08bb30e45243e0bf8eb36446310e61657ca5a896f3257",
++      "width": 1996,
++      "height": 1532,
++      "bytes": 678030
++    },
++    {
++      "date": "2026-09-04",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 4/9/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/fb86f3e402e0b/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%204-9-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/ASKDBleCkqU",
++      "sha256": "6b675566bab40379596615748d44ecdf7d91b468256cc4c49b56f6a2a26783cc",
++      "width": 1890,
++      "height": 1410,
++      "bytes": 1102575
++    },
++    {
++      "date": "2026-08-28",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 28/8/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/5a8138d91e4a8/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2028-8-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/1sfM5oPPAt8",
++      "sha256": "7391e88c29bbc2ad45e3d8f5ec553258586d188443171a971acc08498358313f",
++      "width": 2048,
++      "height": 1578,
++      "bytes": 434038
++    },
++    {
++      "date": "2026-08-21",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 21/8/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/37c6aab96d352/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%2021-8-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/V96AqJuvB3Q",
++      "sha256": "043fd17b6635d8fb9da4bff636c9a2eb5c2c1a7ecfb7c656a2de43767dc4b4df",
++      "width": 2048,
++      "height": 1560,
++      "bytes": 459773
++    },
++    {
++      "date": "2026-08-14",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 14/8/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/e1abfdc8b92af/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2014-8-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/1G73wOYdQBY",
++      "sha256": "fef046ad56a79f540dfe4055189e56d5a2346450c881440aeddfc06a5ca64ecf",
++      "width": 1800,
++      "height": 1410,
++      "bytes": 864944
++    },
++    {
++      "date": "2026-08-07",
++      "title": "הפוך על הפוך דקל בנו 7.8.26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/6c2a923aebec7/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%207.8.26.jpeg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/INNX6y2FWsY",
++      "sha256": "dbdf0d06ca4efc843f2f593991eaf3ef0467a027b54d5a1d0df3ab67e723cd95",
++      "width": 2048,
++      "height": 1505,
++      "bytes": 321888
++    },
++    {
++      "date": "2026-07-31",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 31/7/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/6fa149bf8af54/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2031-7-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/VK0RPo-JfJA",
++      "sha256": "3c5f220eef89e4ac509c0f92fb53c5802d5b9887b710dd3e3d35676c6f36ef07",
++      "width": 2048,
++      "height": 1544,
++      "bytes": 637000
++    },
++    {
++      "date": "2026-07-24",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 24/7/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/7bbbc46481272/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2024-7-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/T7mOdvAtY9c",
++      "sha256": "e9ae648759d672dd4514cab3c91d4d0d35db8aecce2e8b2c1d61f14c9ed236d0",
++      "width": 3000,
++      "height": 2309,
++      "bytes": 755691
++    },
++    {
++      "date": "2026-07-17",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 17/7/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/64819ac98967d/%D7%94%D7%A4%D7%95%D7%9A%20%D7%A2%D7%9C%20%D7%94%D7%A4%D7%95%D7%9A%20%D7%93%D7%A7%D7%9C%20%D7%91%D7%A0%D7%95%2017-7-26.jpg?part=0.2",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/bqX9Pk1MGNA",
++      "sha256": "024297906397801f6584ff30ebbfd4872b3f68a58e2d2a3a345f4ed31d7d40ea",
++      "width": 2412,
++      "height": 1800,
++      "bytes": 795984
++    },
++    {
++      "date": "2026-07-10",
++      "title": "תשבץ היגיון הפוך על הפוך דקל בנו 10/7/26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/425080e5b5c1a/%D7%94%D7%A4%D7%95%D7%9A_%D7%A2%D7%9C_%D7%94%D7%A4%D7%95%D7%9A_%D7%93%D7%A7%D7%9C_%D7%91%D7%A0%D7%95_10-7-26%281%29.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/UhLqnN0odm0",
++      "sha256": "0d95a28547a6f913f9b43e4b809fc7ba08e93a79cafb4361ab953070eb8a0eca",
++      "width": 1200,
++      "height": 908,
++      "bytes": 500403
++    },
++    {
++      "date": "2026-07-03",
++      "title": "הפוך על הפוך דקל בנו 3-7-26",
++      "url": "https://groups.google.com/group/tartey_mashma/attach/1093cbfa1fba1/%D7%94%D7%A4%D7%95%D7%9A_%D7%A2%D7%9C_%D7%94%D7%A4%D7%95%D7%9A_%D7%93%D7%A7%D7%9C_%D7%91%D7%A0%D7%95_3-7-26.jpg?part=0.1",
++      "thread": "https://groups.google.com/g/tartey_mashma/c/dxOP2N5w-Og",
++      "sha256": "75e0f3789de06dfd2de5f3bb88ea9951b0ff2ede0403329147821666aca010df",
++      "width": 2688,
++      "height": 2004,
++      "bytes": 1483106
++    }
++  ]
++}
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminActivity.kt b/app/src/main/java/com/example/hebrewcrossword/AdminActivity.kt
+index 541cd97..f934242 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminActivity.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminActivity.kt
+@@ -21,6 +21,7 @@ class AdminActivity:AppCompatActivity() {
+     private lateinit var sourceTestsButton:View
+     private lateinit var dryUpdatesButton:View
+     private lateinit var batchOcrButton:View
++    private lateinit var hafuchAiBatchButton:View
+     private lateinit var dryUpdateManager:HigiDryUpdateManager
+     private lateinit var status:TextView
+     private var role=AdminAccess.Role.NONE
+@@ -52,6 +53,11 @@ class AdminActivity:AppCompatActivity() {
+                 startActivity(Intent(this,AdminOcrSeriesBatchActivity::class.java))
+         }.apply{visibility=View.GONE}
+         root.addView(batchOcrButton,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)).apply{topMargin=dp(8)})
++        hafuchAiBatchButton=UiKit.button(this,"הפוך על הפוך — הורד 20 + תמלול AI",primary=true){
++            if(role!=AdminAccess.Role.NONE && BuildConfig.HIGI_DRY_BUILD)
++                startActivity(Intent(this,AdminHafuchAiBatchActivity::class.java))
++        }.apply{visibility=View.GONE}
++        root.addView(hafuchAiBatchButton,LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)).apply{topMargin=dp(8)})
+         status=TextView(this).apply{text="בודק הרשאות…";textSize=14f;gravity=Gravity.RIGHT;setPadding(0,dp(14),0,dp(8))}
+         root.addView(status)
+         root.addView(TextView(this).apply{text="ניהול מנהלים";textSize=20f;gravity=Gravity.RIGHT;setPadding(0,dp(10),0,dp(6))})
+@@ -63,11 +69,12 @@ class AdminActivity:AppCompatActivity() {
+         setContentView(root);ScreenUi.insets(window,root,true)
+         access.loadRole { r -> runOnUiThread {
+             role=r
+-            if(r==AdminAccess.Role.NONE){status.text="אין הרשאת מנהל למשתמש הנוכחי";addButton.visibility=View.GONE;sourceTestsButton.visibility=View.GONE;dryUpdatesButton.visibility=View.GONE;batchOcrButton.visibility=View.GONE;adminsBox.removeAllViews();return@runOnUiThread}
++            if(r==AdminAccess.Role.NONE){status.text="אין הרשאת מנהל למשתמש הנוכחי";addButton.visibility=View.GONE;sourceTestsButton.visibility=View.GONE;dryUpdatesButton.visibility=View.GONE;batchOcrButton.visibility=View.GONE;hafuchAiBatchButton.visibility=View.GONE;adminsBox.removeAllViews();return@runOnUiThread}
+             status.text=if(r==AdminAccess.Role.SUPERADMIN)"מנהל ראשי" else "מנהל"
+             sourceTestsButton.visibility=View.VISIBLE
+             dryUpdatesButton.visibility=View.VISIBLE
+             batchOcrButton.visibility=if(BuildConfig.HIGI_DRY_BUILD)View.VISIBLE else View.GONE
++            hafuchAiBatchButton.visibility=if(BuildConfig.HIGI_DRY_BUILD)View.VISIBLE else View.GONE
+             addButton.visibility=if(r==AdminAccess.Role.SUPERADMIN)View.VISIBLE else View.GONE
+             refreshAdmins()
+         }}
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt
+new file mode 100644
+index 0000000..19b604c
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchActivity.kt
+@@ -0,0 +1,456 @@
++package com.example.hebrewcrossword
++
++import android.content.ContentValues
++import android.graphics.Bitmap
++import android.graphics.BitmapFactory
++import android.os.Build
++import android.os.Bundle
++import android.os.Environment
++import android.provider.MediaStore
++import android.view.Gravity
++import android.view.View
++import android.view.WindowManager
++import android.widget.Button
++import android.widget.LinearLayout
++import android.widget.ScrollView
++import android.widget.TextView
++import androidx.appcompat.app.AlertDialog
++import androidx.appcompat.app.AppCompatActivity
++import java.io.File
++import java.io.FileOutputStream
++import java.security.MessageDigest
++import java.text.SimpleDateFormat
++import java.util.Date
++import java.util.Locale
++import java.util.UUID
++import java.util.concurrent.Executors
++import java.util.zip.ZipEntry
++import java.util.zip.ZipOutputStream
++import kotlinx.coroutines.runBlocking
++import org.json.JSONArray
++import org.json.JSONObject
++
++/**
++ * Explicit administrator-only one-click research collection for the twenty
++ * SHA-pinned HAFUCH_DEKEL originals. It saves source pixels, local OCR geometry,
++ * and *one* Gemini text-only transcription per source; no AI coordinates, no
++ * canonical, no Firebase/RTDB writes and no other crossword series changes.
++ *
++ * This is an app-private checkpointed workflow (not a background service).
++ * A recorded interrupted AI attempt is NEVER retried implicitly because the
++ * first request may have been billable even when its result was not saved.
++ */
++class AdminHafuchAiBatchActivity:AppCompatActivity() {
++    private val worker=Executors.newSingleThreadExecutor()
++    private lateinit var runButton:Button
++    private lateinit var exportButton:Button
++    private lateinit var retryButton:Button
++    private lateinit var stopButton:Button
++    private lateinit var status:TextView
++    private var allowed=false
++    private var running=false
++    @Volatile private var stopping=false
++    private lateinit var sources:List<AdminHafuchAiBatchPolicy.Source>
++    private val collection by lazy { File(filesDir,"admin-hafuch-ai20/v1").apply{mkdirs()} }
++    private val sha=Regex("^[0-9a-f]{64}$")
++
++    override fun onCreate(savedInstanceState:Bundle?) {
++        super.onCreate(savedInstanceState)
++        if(!BuildConfig.HIGI_DRY_BUILD) { finish(); return }
++        val root=LinearLayout(this).apply {
++            orientation=LinearLayout.VERTICAL; layoutDirection=View.LAYOUT_DIRECTION_RTL
++            setPadding(dp(16),dp(12),dp(16),dp(12))
++            AppBackground.apply(this,AppBackground.Family.FOCUS,AppBackground.Accent.TECHNICAL)
++        }
++        root.addView(TextView(this).apply {
++            text="הפוך על הפוך — איסוף 20 תשבצים";textSize=21f;gravity=Gravity.CENTER
++        },LinearLayout.LayoutParams(-1,dp(55)))
++        root.addView(TextView(this).apply {
++            text="הורדת 20 תמונות מקור מאומתות (3.7–13.11.2026), OCR מקומי אחד לכל תמונה וקריאת Gemini אחת לתמלול הגדרות בלבד לכל תשבץ. " +
++                "הנתונים נשמרים מקומית; ZIP מרוכז יישמר ב־Downloads. אין שינוי בקנוני, בחיתוכים מאומתים או בסדרות אחרות."
++            textSize=14f
++        },LinearLayout.LayoutParams(-1,-2))
++        status=TextView(this).apply { text="בודק הרשאת מנהל...";textSize=15f;setPadding(0,dp(14),0,dp(14)) }
++        val scroll=ScrollView(this).apply {addView(status)}
++        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
++        runButton=UiKit.button(this,"הורד + פענח 20 + שמור",primary=true){confirmStart()}.apply{isEnabled=false}
++        root.addView(runButton,LinearLayout.LayoutParams(-1,dp(54)))
++        exportButton=UiKit.button(this,"ייצא נתונים קיימים ל־Downloads"){exportExisting()}.apply{isEnabled=false}
++        root.addView(exportButton,LinearLayout.LayoutParams(-1,dp(48)).apply{topMargin=dp(8)})
++        retryButton=UiKit.button(this,"נסה שוב בקשות AI לא גמורות (באישור)"){confirmRetry()}.apply{isEnabled=false}
++        root.addView(retryButton,LinearLayout.LayoutParams(-1,dp(48)).apply{topMargin=dp(8)})
++        stopButton=UiKit.button(this,"עצור לאחר התשבץ הנוכחי"){
++            stopping=true;stopButton.isEnabled=false
++            update("נדרש לעצור. מה שכבר נשמר יישאר זמין, ללא קריאות AI חוזרות אוטומטית.")
++        }.apply{isEnabled=false}
++        root.addView(stopButton,LinearLayout.LayoutParams(-1,dp(48)).apply{topMargin=dp(8)})
++        setContentView(root);ScreenUi.insets(window,root,true)
++        val loaded=runCatching{readSources()}
++        if(loaded.isFailure){ status.text="רשימת המקורות לא אומתה: ${loaded.exceptionOrNull()?.message.orEmpty()}";return }
++        sources=loaded.getOrThrow()
++        AdminAccess(this).loadRole{role->runOnUiThread{
++            if(isFinishing || isDestroyed)return@runOnUiThread
++            allowed=role!=AdminAccess.Role.NONE && BuildConfig.HIGI_DRY_BUILD
++            if(!allowed){status.text="נדרשת הרשאת מנהל בגרסת DRY";finish();return@runOnUiThread}
++            runButton.isEnabled=true;exportButton.isEnabled=true;retryButton.isEnabled=true
++            status.text="20 מקורות מאומתים. לפני התחלה נדרש אישור ל־20 ניסיונות AI. " +
++                "הפעלה מחדש מדלגת על תוצאות שכבר נשמרו ועל בקשות AI שמצבן אינו ידוע."
++        }}
++    }
++
++    private fun dp(n:Int)=UiKit.dp(this,n)
++    private fun update(message:String){runOnUiThread {if(!isDestroyed)status.text=message}}
++    private fun readSources():List<AdminHafuchAiBatchPolicy.Source> {
++        val root=assets.open("hafuch/sources20.json").bufferedReader().use{JSONObject(it.readText())}
++        require(root.optString("schema")==AdminHafuchAiBatchPolicy.SCHEMA &&
++            root.optString("seriesId")==AdminHafuchAiBatchPolicy.SERIES_ID &&
++            root.optInt("verifiedCount")==AdminHafuchAiBatchPolicy.EXPECTED)
++        val array=root.getJSONArray("items")
++        val values=(0 until array.length()).map{n->array.getJSONObject(n).let{row->
++            AdminHafuchAiBatchPolicy.Source(row.getString("date"),row.getString("title"),
++                row.getString("url"),row.getString("thread"),row.getString("sha256"),
++                row.getInt("width"),row.getInt("height"),row.getLong("bytes"))
++        }}
++        return AdminHafuchAiBatchPolicy.validate(values)
++    }
++
++    private fun confirmStart(){
++        if(!allowed || running)return
++        val succeeded=sources.count{isFinished(it)}
++        val ambiguous=sources.count{!isFinished(it) && File(issueDir(it),"ai-attempt.json").exists()}
++        val remaining=sources.size-succeeded-ambiguous
++        AlertDialog.Builder(this).setTitle("איסוף 20 תשבצי הפוך על הפוך")
++            .setMessage("מקורות: 20 (3.7–13.11.2026)\nתמלולי AI שמורים: $succeeded\n"+
++                "בקשות AI קודמות ללא תשובה ודאית: $ambiguous\n"+
++                "בקשות AI חדשות מתוכננות: $remaining\n\n"+
++                "הקריאות עשויות להיות כרוכות בעלות שימוש. כל תשבץ נקרא פעם אחת לתמלול בלבד, ללא מיקומים. " +
++                "כשל רשת עשוי לגרור ניסיון התחברות חוזר בתוך SDK. " +
++                "לא תבוצע כתיבה ל־Firebase/Canonical. נדרש חיבור לרשת והשארת המסך פתוח.")
++            .setNegativeButton("ביטול",null)
++            .setPositiveButton("הפעל"){_,_->start(false)}.show()
++    }
++
++    private fun confirmRetry(){
++        if(!allowed || running)return
++        val uncertain=sources.count{!isFinished(it) && File(issueDir(it),"ai-attempt.json").exists()}
++        if(uncertain==0){update("אין בקשות AI לא גמורות הדורשות ניסיון חוזר.");return}
++        AlertDialog.Builder(this).setTitle("ניסיון חוזר — עלול לעלות בחיוב נוסף")
++            .setMessage("נמצאו $uncertain תשבצים שבהם התחילה קריאת AI אך לא נשמר תמלול. " +
++                "ייתכן שהספק כבר חייב עבור הבקשה הראשונה. האם לבצע ניסיון חוזר מפורש? " +
++                "לא יישלחו בקשות לתשבצים שתמלולם כבר נשמר.")
++            .setNegativeButton("ביטול",null)
++            .setPositiveButton("אשר ניסיון חוזר"){_,_->start(true)}.show()
++    }
++
++    private fun setRunning(value:Boolean){
++        running=value;runButton.isEnabled=!value && allowed
++        exportButton.isEnabled=!value && allowed;retryButton.isEnabled=!value && allowed;stopButton.isEnabled=value
++        if(value)window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
++        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
++    }
++    private fun start(allowAmbiguousRetry:Boolean){
++        if(!allowed || running)return
++        stopping=false;setRunning(true)
++        worker.execute{
++            val result=runCatching{collect(allowAmbiguousRetry)}
++            runOnUiThread{
++                if(isDestroyed)return@runOnUiThread
++                setRunning(false)
++                status.text=result.fold({it},{"ההרצה נעצרה בשגיאה: ${it.message.orEmpty().take(220)}. ניתן לחדש מהנתונים השמורים."})
++            }
++        }
++    }
++
++    private fun issueDir(s:AdminHafuchAiBatchPolicy.Source):File =
++        File(collection,s.date).apply{if(!exists())check(mkdirs()){"Cannot create private issue directory"}}
++
++    private fun sha256(file:File):String {
++        val digest=MessageDigest.getInstance("SHA-256")
++        file.inputStream().buffered().use{input->
++            val buf=ByteArray(32768)
++            while(true){val n=input.read(buf);if(n<0)break;digest.update(buf,0,n)}
++        }
++        return digest.digest().joinToString(""){ "%02x".format(it.toInt() and 255) }
++    }
++    private fun writeAtomic(path:File,bytes:ByteArray){
++        val tmp=File(path.parentFile,"${path.name}.${UUID.randomUUID()}.tmp")
++        try {
++            FileOutputStream(tmp).use{out->out.write(bytes);out.fd.sync()}
++            if(!tmp.renameTo(path)){tmp.copyTo(path,overwrite=true);check(tmp.delete())}
++        }finally{tmp.delete()}
++    }
++    private fun writeJson(path:File,root:JSONObject)=writeAtomic(path,root.toString(2).toByteArray(Charsets.UTF_8))
++    private fun validSource(source:AdminHafuchAiBatchPolicy.Source):Boolean {
++        val file=File(issueDir(source),"source.jpg")
++        return file.isFile && file.length()==source.bytes && sha256(file)==source.sha256
++    }
++    private fun isFinished(s:AdminHafuchAiBatchPolicy.Source):Boolean = runCatching{
++        val f=File(issueDir(s),"transcription.json")
++        val j=JSONObject(f.readText())
++        f.isFile && validSource(s) && j.optString("imageSha256")==s.sha256 &&
++            j.optString("seriesId")==AdminHafuchAiBatchPolicy.SERIES_ID &&
++            j.getJSONArray("clues").length()>0
++    }.getOrDefault(false)
++
++    /** Phase 1 is an ALL-20 preflight; no AI is requested with a missing/changed image. */
++    private fun ensureSources():Int {
++        var ready=0
++        for((index,s) in sources.withIndex()){
++            if(stopping)break
++            update("הורדת מקורות ${index+1}/20: ${s.date}; אומתו: $ready")
++            if(validSource(s)){ready++;continue}
++            val dir=issueDir(s)
++            val target=File(dir,"source.jpg")
++            if(target.exists())target.delete()
++            val temp=ImageDownload.fetch(s.url,WeeklyCrosswordsFetcher.USER_AGENT,cacheDir)
++            try{
++                require(temp.length()==s.bytes && sha256(temp)==s.sha256){"Image changed or mismatch for ${s.date}; no AI will be called"}
++                val b=BitmapFactory.Options().apply{inJustDecodeBounds=true}
++                BitmapFactory.decodeFile(temp.absolutePath,b)
++                require(b.outWidth==s.width && b.outHeight==s.height){"Original pixel dimensions changed"}
++                writeAtomic(target,temp.readBytes())
++                require(validSource(s)){"Source copy verification failed"}
++                ready++
++            }finally{temp.delete()}
++        }
++        return ready
++    }
++
++    private fun collect(allowAmbiguousRetry:Boolean):String {
++        val downloaded=ensureSources()
++        if(downloaded!=20)return "אומתו $downloaded/20 תמונות. ${if(stopping)"נעצר לפי בקשה" else "שגיאה בהורדת המקורות"}. לא בוצעו קריאות AI."
++        var successes=0;var attempted=0;var ambiguous=0;var ocrFailed=0
++        for((index,s) in sources.withIndex()){
++            if(stopping)break
++            update("מעבד ${index+1}/20: ${s.date}; פוענחו: $successes; בקשות AI חדשות: $attempted")
++            val dir=issueDir(s)
++            val aiComplete=isFinished(s)
++            val ambiguousAttempt=File(dir,"ai-attempt.json").exists() && !aiComplete
++            val needsOcr=!File(dir,"local-ocr.json").isFile
++            if(aiComplete && !needsOcr){successes++;continue}
++            val sourceFile=File(dir,"source.jpg")
++            val bitmap=BitmapFactory.decodeFile(sourceFile.absolutePath)
++                ?:throw IllegalStateException("Could not decode verified source ${s.date}")
++            try{
++                if(needsOcr){
++                    val result=runCatching{saveOnePassOcr(s,bitmap,dir)}
++                    result.onFailure{e->
++                        ocrFailed++
++                        writeJson(File(dir,"ocr-error.json"),JSONObject().apply{
++                            put("imageSha256",s.sha256);put("error",e.javaClass.simpleName)
++                            put("message",DebugLog.sanitize(e.message.orEmpty()).take(200))
++                        })
++                    }
++                }
++                if(aiComplete){successes++;continue}
++                if(ambiguousAttempt && !allowAmbiguousRetry){ambiguous++;continue}
++                if(stopping)break
++                // Preserve the earlier attempt record before a deliberate retry.
++                if(ambiguousAttempt){
++                    val prior=File(dir,"ai-attempt.json")
++                    val previous=File(dir,"ai-attempt-prior-${System.currentTimeMillis()}.json")
++                    check(prior.copyTo(previous,overwrite=false).isFile)
++                }
++                // Persist BEFORE provider invocation: if process dies, no hidden second billable call.
++                writeJson(File(dir,"ai-attempt.json"),JSONObject().apply{
++                    put("seriesId",AdminHafuchAiBatchPolicy.SERIES_ID)
++                    put("imageSha256",s.sha256);put("startedAt",System.currentTimeMillis())
++                    put("model",GeminiSmartOcr.PRIMARY_MODEL);put("requestType","verbatim_text_only_no_coordinates")
++                })
++                attempted++
++                update("קריאת AI $attempted (תשבץ ${index+1}/20): ${s.date} — תמלול טקסט בלבד")
++                val decoded=runCatching{runBlocking{
++                    GeminiSmartOcr().transcribeCluesVerbatimForAdmin(bitmap,GeminiSmartOcr.PRIMARY_MODEL)
++                }}
++                decoded.onSuccess{outcome->
++                    val clues=JSONArray()
++                    for(clue in outcome.clues){
++                        clues.put(JSONObject().apply{
++                            put("direction",clue.direction);put("number",clue.number)
++                            put("text",clue.exactText)
++                            put("numbersLeftToRight",clue.physicalNumbersLeftToRight?.let{JSONArray(it)}?:JSONObject.NULL)
++                            put("physicalStatus",clue.physicalStatus)
++                        })
++                    }
++                    check(clues.length()>0)
++                    val meta=JSONObject().apply {
++                        put("seriesId",AdminHafuchAiBatchPolicy.SERIES_ID);put("date",s.date)
++                        put("imageSha256",s.sha256);put("model",outcome.model)
++                        put("elapsedMs",outcome.elapsedMs);put("sourceUrl",s.url)
++                        put("geometryRequested",false);put("aiCallsRequested",1)
++                        put("clues",clues);put("rawResponse",JSONObject(outcome.responseJson))
++                        put("promptTokens",outcome.usage?.promptTokens ?: JSONObject.NULL)
++                        put("candidateTokens",outcome.usage?.candidateTokens ?: JSONObject.NULL)
++                        put("thoughtsTokens",outcome.usage?.thoughtsTokens ?: JSONObject.NULL)
++                        put("totalTokens",outcome.usage?.totalTokens ?: JSONObject.NULL)
++                    }
++                    writeJson(File(dir,"transcription.json"),meta)
++                    val run=AdminVerbatimTranscriptionFormat.Run(outcome.model,outcome.model,outcome.clues,
++                        outcome.elapsedMs,outcome.usage?.promptTokens,outcome.usage?.candidateTokens,
++                        outcome.usage?.thoughtsTokens,outcome.usage?.totalTokens)
++                    writeAtomic(File(dir,"clues.csv"),AdminVerbatimTranscriptionFormat.csv(listOf(run)).toByteArray(Charsets.UTF_8))
++                    successes++
++                }.onFailure{e->
++                    val reason=DebugLog.sanitize(e.message.orEmpty()).ifBlank{e.javaClass.simpleName}
++                    writeJson(File(dir,"ai-error.json"),JSONObject().apply{
++                        put("imageSha256",s.sha256);put("error",e.javaClass.simpleName)
++                        put("message",reason.take(200));put("at",System.currentTimeMillis())
++                    })
++                }
++            }finally{bitmap.recycle()}
++        }
++        val exported=runCatching{saveZip()}
++        return "מקורות מאומתים: $downloaded/20\nתמלולים שמורים: $successes/20\n"+
++            "קריאות AI חדשות: $attempted\nבקשות ישנות שלא יבוצעו שוב אוטומטית: $ambiguous\n"+
++            "שגיאות OCR: $ocrFailed\n"+exported.fold({"נשמר ב־Downloads: $it"},{"שמירה ל־Downloads נכשלה: ${it.message.orEmpty()}; הנתונים נשארו פרטיים במכשיר"})
++    }
++
++    private fun boxJson(rect:CropRect,roiX:Int,roiY:Int,scale:Float):JSONArray {
++        fun x(v:Int)=(roiX+v/scale).toInt()
++        fun y(v:Int)=(roiY+v/scale).toInt()
++        return JSONArray(listOf(x(rect.left),y(rect.top),x(rect.right),y(rect.bottom)))
++    }
++    /** One Tesseract OCR on the original 97.5%-height region, NEVER extend the OCR ROI. */
++    private fun saveOnePassOcr(s:AdminHafuchAiBatchPolicy.Source,image:Bitmap,dir:File){
++        val bounds=HafuchAdminSourceGridV1.verifiedBounds(image)
++        if(bounds==null){
++            writeJson(File(dir,"local-ocr.json"),JSONObject().apply {
++                put("imageSha256",s.sha256);put("grid","UNVERIFIED")
++                put("status","GRID_NOT_PIXEL_PROVEN");put("words",JSONArray());put("lines",JSONArray())
++            })
++            return
++        }
++        val left=(bounds.right+image.width*.003f).toInt().coerceIn(0,image.width-24)
++        val top=(image.height*.035f).toInt().coerceIn(0,image.height-24)
++        val bottom=(image.height*.975f).toInt().coerceIn(top+24,image.height)
++        val region=Bitmap.createBitmap(image,left,top,image.width-left-2,bottom-top)
++        try{
++            val scale=minOf(1f,950f/region.width,1250f/region.height)
++            val w=(region.width*scale).toInt().coerceAtLeast(24)
++            val h=(region.height*scale).toInt().coerceAtLeast(24)
++            val prepared=Bitmap.createScaledBitmap(region,w,h,true)
++            try {
++                val words=mutableListOf<OcrSharedRowSplitterV161.Word>()
++                val lines=LocalHebrewOcrV031(this).use{it.readFullPageLines(prepared,wordBoxes=words)}
++                val wordArray=JSONArray()
++                words.forEach{v->wordArray.put(JSONObject().apply {
++                    put("text",v.text);put("confidence",v.confidence)
++                    put("sourceBox",boxJson(v.box,left,top,scale))
++                })}
++                val lineArray=JSONArray()
++                lines.forEach{v->lineArray.put(JSONObject().apply {
++                    put("text",v.text);put("confidence",v.confidence)
++                    put("sourceBox",boxJson(v.box,left,top,scale))
++                })}
++                writeJson(File(dir,"local-ocr.json"),JSONObject().apply{
++                    put("seriesId",AdminHafuchAiBatchPolicy.SERIES_ID)
++                    put("imageSha256",s.sha256);put("grid","PIXEL_VERIFIED_13x13")
++                    put("gridBounds",JSONArray(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom)))
++                    put("roi",JSONArray(listOf(left,top,image.width-2,bottom)))
++                    put("scale",scale);put("ocrRuns",1)
++                    put("words",wordArray);put("lines",lineArray)
++                    put("note","Original source-pixel bounds; independent of Gemini text; review-only")
++                })
++            }finally{if(prepared!==region)prepared.recycle()}
++        }finally{region.recycle()}
++    }
++
++    private fun exportExisting(){
++        if(!allowed || running)return
++        setRunning(true)
++        worker.execute {
++            val saved=runCatching{saveZip()}
++            runOnUiThread {
++                if(isDestroyed)return@runOnUiThread
++                setRunning(false)
++                status.text=saved.fold({"נשמר ב־Downloads: $it"},{"ייצוא נכשל: ${it.message.orEmpty()}"})
++            }
++        }
++    }
++
++    private fun saveZip():String {
++        check(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q)
++        val name="Higi_HAFUCH_AI_Text_20_${SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(Date())}.zip"
++        val resolver=contentResolver
++        val info=ContentValues().apply {
++            put(MediaStore.MediaColumns.DISPLAY_NAME,name)
++            put(MediaStore.MediaColumns.MIME_TYPE,"application/zip")
++            put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS)
++            put(MediaStore.MediaColumns.IS_PENDING,1)
++        }
++        val uri=resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,info)?:error("Cannot create Downloads archive")
++        try{
++            resolver.openOutputStream(uri)?.use{raw->ZipOutputStream(raw.buffered()).use{zip->
++                fun entry(name:String,bytes:ByteArray){
++                    zip.putNextEntry(ZipEntry(name));zip.write(bytes);zip.closeEntry()
++                }
++                val manifest=JSONObject().apply {
++                    put("schema","higi-hafuch-ai-20-admin-research-v1")
++                    put("seriesId",AdminHafuchAiBatchPolicy.SERIES_ID)
++                    put("sourceManifestAsOf","2026-11-16")
++                    put("expectedSources",20)
++                    put("createdAt",System.currentTimeMillis())
++                    put("coordinateFromAIRequested",false)
++                    put("firebaseWrites",0);put("canonicalWrites",0)
++                    put("results",JSONArray())
++                }
++                val report=manifest.getJSONArray("results")
++                val allClues=StringBuilder("\uFEFFdate,direction,number,verbatim_text,physical_status,model,image_sha256\n")
++                fun csvCell(value:String):String {
++                    // Keep Hebrew punctuation intact and disarm spreadsheet formulas.
++                    val safe=if(value.trimStart().startsWith('=') || value.trimStart().startsWith('+') ||
++                        value.trimStart().startsWith('-') || value.trimStart().startsWith('@')) "'"+value else value
++                    return "\""+safe.replace("\"","\"\"")+"\""
++                }
++                sources.forEach{source->
++                    val dir=issueDir(source)
++                    val result=JSONObject().apply {
++                        put("date",source.date);put("url",source.url)
++                        put("sourceSha256",source.sha256)
++                        put("sourceVerified",validSource(source))
++                        put("ocrSaved",File(dir,"local-ocr.json").isFile)
++                        put("aiSaved",isFinished(source))
++                        put("aiAttemptStarted",File(dir,"ai-attempt.json").exists())
++                    }
++                    report.put(result)
++                    if(isFinished(source)) {
++                        val data=JSONObject(File(dir,"transcription.json").readText())
++                        val values=data.getJSONArray("clues")
++                        for(i in 0 until values.length()){
++                            val clue=values.getJSONObject(i)
++                            allClues.append(listOf(source.date,clue.optString("direction"),
++                                clue.optInt("number",-1).toString(),clue.optString("text"),
++                                clue.optString("physicalStatus"),data.optString("model"),source.sha256)
++                                .joinToString(",",transform=::csvCell)).append('\n')
++                        }
++                    }
++                    (listOf("source.jpg","local-ocr.json","ocr-error.json","ai-attempt.json",
++                        "ai-error.json","transcription.json","clues.csv") +
++                        dir.listFiles().orEmpty().filter{it.name.matches(Regex("ai-attempt-prior-[0-9]+\\.json"))}.map{it.name})
++                        .forEach{fname->
++                        val file=File(dir,fname)
++                        if(file.isFile) {
++                            zip.putNextEntry(ZipEntry("${source.date}/$fname"))
++                            file.inputStream().buffered().use{it.copyTo(zip)}
++                            zip.closeEntry()
++                        }
++                    }
++                }
++                entry("all_20_ai_clues.csv",allClues.toString().toByteArray(Charsets.UTF_8))
++                entry("manifest.json",manifest.toString(2).toByteArray(Charsets.UTF_8))
++                entry("README.txt",("Higi administrator HAFUCH_DEKEL text-only research bundle\n"+
++                    "20 SHA-pinned original images, OCR text/word geometry, existing Gemini verbatim text.\n"+
++                    "No AI image coordinates, no publishing, no Canonical/Firebase writes.\n"+
++                    "Incomplete provider calls are never automatically replayed.\n").toByteArray(Charsets.UTF_8))
++            }} ?:error("Cannot open Downloads file")
++            check(resolver.update(uri,ContentValues().apply{put(MediaStore.MediaColumns.IS_PENDING,0)},null,null)>0)
++            return name
++        }catch(e:Exception){resolver.delete(uri,null,null);throw e}
++    }
++
++    override fun onDestroy() {
++        stopping=true;worker.shutdown()
++        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
++        super.onDestroy()
++    }
++}
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt
+new file mode 100644
+index 0000000..0fa5076
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicy.kt
+@@ -0,0 +1,47 @@
++package com.example.hebrewcrossword
++
++/** Isolated 20-source HAFUCH_DEKEL administrator batch. No other series or source is allowed. */
++internal object AdminHafuchAiBatchPolicy {
++    const val SERIES_ID = "HAFUCH_DEKEL"
++    const val EXPECTED = 20
++    const val SCHEMA = "higi-admin-hafuch-20-sources-v1"
++    data class Source(
++        val date:String, val title:String, val url:String, val thread:String,
++        val sha256:String, val width:Int, val height:Int, val bytes:Long
++    )
++    private val datePattern=Regex("^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
++    private val digestPattern=Regex("^[a-f0-9]{64}$")
++
++    fun validate(sources:List<Source>):List<Source> {
++        require(sources.size==EXPECTED) { "Expected exactly 20 unique originals, not ${sources.size}" }
++        require(sources.map{it.date}.toSet().size==EXPECTED) { "Duplicate source date" }
++        require(sources.map{it.sha256}.toSet().size==EXPECTED) { "Duplicate source image" }
++        val days=mutableListOf<Long>()
++        sources.forEach { row ->
++            require(datePattern.matches(row.date) && row.sha256.matches(digestPattern)) { "Invalid source identity" }
++            val format=java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US).apply {
++                isLenient=false;timeZone=java.util.TimeZone.getTimeZone("UTC")
++            }
++            days+=(requireNotNull(format.parse(row.date)).time/86_400_000L)
++            require(row.title.contains("הפוך על הפוך")) { "Wrong crossword series" }
++            require(row.url.startsWith("https://groups.google.com/group/tartey_mashma/attach/")) {
++                "Untrusted publisher image URL"
++            }
++            require(row.thread.startsWith("https://groups.google.com/g/tartey_mashma/c/")) {
++                "Untrusted source thread"
++            }
++            require(row.width in 300..8000 && row.height in 300..8000 && row.bytes in 10_000L..10_000_000L) {
++                "Unreasonable original source image size"
++            }
++        }
++        require(days.zipWithNext().all { (newer,older) -> newer-older==7L }) { "Not 20 consecutive weekly originals" }
++        return sources
++    }
++
++    /** No silent re-billing when an earlier invocation is incomplete or the app was killed. */
++    fun shouldCallAi(complete:Boolean, attemptRecorded:Boolean, explicitRetry:Boolean=false):Boolean =
++        !complete && (!attemptRecorded || explicitRetry)
++
++    /** A public crop/canonical publishing path MUST NOT be called from this batch. */
++    const val REVIEW_ONLY = true
++}
+diff --git a/app/src/main/java/com/example/hebrewcrossword/HafuchAdminSourceGridV1.kt b/app/src/main/java/com/example/hebrewcrossword/HafuchAdminSourceGridV1.kt
+new file mode 100644
+index 0000000..5fdcc16
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/HafuchAdminSourceGridV1.kt
+@@ -0,0 +1,39 @@
++package com.example.hebrewcrossword
++
++import android.graphics.Bitmap
++
++/** Frozen HAFUCH_DEKEL-only fallback pattern for DATA COLLECTION, not a forced grid. */
++internal object HafuchAdminSourceGridV1 {
++    private val rows=listOf(
++        ".....#.......",
++        ".#.#.#.#.#.#.",
++        ".......#.....",
++        ".#.#.#.#.###.",
++        "...#........#",
++        ".#.###.#.#.#.",
++        "......#......",
++        ".#.#.#.###.#.",
++        "#........#...",
++        ".###.#.#.#.#.",
++        ".....#.......",
++        ".#.#.#.#.#.#.",
++        ".......#....."
++    )
++    private fun template():Crossword = Crossword(13,13,
++        MutableList(13){y->MutableList(13){x->Cell(blocked=rows[y][x]=='#')}}
++    ).also{it.assignNumbers()}
++
++    /** Pixel-proven template candidate, never a blind assignment based on the series name. */
++    fun verifiedBounds(source:Bitmap):BoxF? {
++        val expected=template()
++        val found=GridDetector.locate(source,expected) ?: return null
++        val actual=found.result.crossword
++        if(actual.rows!=13 || actual.cols!=13 ||
++            actual.startNumbers(Direction.HORIZONTAL).size!=14 ||
++            actual.startNumbers(Direction.VERTICAL).size!=14)return null
++        if(!(0 until 13).all { y -> (0 until 13).all { x ->
++                actual.cell(y,x).blocked==expected.cell(y,x).blocked
++            } })return null
++        return found.bounds
++    }
++}
+diff --git a/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt b/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt
+new file mode 100644
+index 0000000..d43c268
+--- /dev/null
++++ b/app/src/test/java/com/example/hebrewcrossword/AdminHafuchAiBatchPolicyTest.kt
+@@ -0,0 +1,49 @@
++package com.example.hebrewcrossword
++
++import org.junit.Assert.*
++import org.junit.Test
++import java.text.SimpleDateFormat
++import java.util.Calendar
++import java.util.Locale
++import java.util.TimeZone
++
++class AdminHafuchAiBatchPolicyTest {
++    private fun twenty():List<AdminHafuchAiBatchPolicy.Source> {
++        val clock=Calendar.getInstance(TimeZone.getTimeZone("UTC"),Locale.US).apply{
++            set(2026,Calendar.NOVEMBER,13,0,0,0);set(Calendar.MILLISECOND,0)
++        }
++        val format=SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{timeZone=TimeZone.getTimeZone("UTC")}
++        return (0 until 20).map { i ->
++            val date=format.format(clock.time)
++            clock.add(Calendar.DATE,-7)
++            AdminHafuchAiBatchPolicy.Source(date,"הפוך על הפוך דקל בנו $date",
++                "https://groups.google.com/group/tartey_mashma/attach/$i/issue.jpg",
++                "https://groups.google.com/g/tartey_mashma/c/$i",
++                i.toString(16).padStart(64,'0'),2048,1600,100000)
++        }
++    }
++    @Test fun acceptsExactlyTwentyWeeklyDifferentImages(){
++        val originals=twenty()
++        assertEquals(20,AdminHafuchAiBatchPolicy.validate(originals).size)
++    }
++    @Test fun rejectsMissingDuplicateWrongSeriesOrURL(){
++        val originals=twenty()
++        val wrongs=listOf(originals.drop(1),
++            originals.toMutableList().apply{this[2]=this[1]},
++            originals.toMutableList().apply{this[6]=this[6].copy(title="דקל בנו שני")},
++            originals.toMutableList().apply{this[8]=this[8].copy(url="https://evil.example/puzzle.jpg")},
++            originals.toMutableList().apply{this[10]=this[10].copy(date="2026-01-03")})
++        wrongs.forEach { rows ->
++            try { AdminHafuchAiBatchPolicy.validate(rows);fail("Expected rejection") }
++            catch (_:IllegalArgumentException){}
++        }
++    }
++    @Test fun neverRepeatsCompletedOrAmbiguousAiAttempts(){
++        assertTrue(AdminHafuchAiBatchPolicy.shouldCallAi(false,false))
++        assertFalse(AdminHafuchAiBatchPolicy.shouldCallAi(true,true))
++        assertFalse(AdminHafuchAiBatchPolicy.shouldCallAi(false,true))
++        assertTrue(AdminHafuchAiBatchPolicy.shouldCallAi(false,true,explicitRetry=true))
++        assertTrue(AdminHafuchAiBatchPolicy.REVIEW_ONLY)
++        assertEquals("HAFUCH_DEKEL",AdminHafuchAiBatchPolicy.SERIES_ID)
++    }
++}
