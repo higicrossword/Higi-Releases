@@ -1,0 +1,62 @@
+name: Higi Hafuch existing-AI neighbor evidence gate (offline WIP)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-hafuch-ai-neighbor-evidence-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/verify_ai_neighbor_20_evidence.py'
+      - 'cloud-tests/hafuch-ocr-crops-wip/hafuch-ai-neighbor-review-v1.tar.br.b64'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check compressed Kotlin WIP files and checksum without app build
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet brotli
+          python3 - <<'PY'
+          import base64,brotli,hashlib,io,tarfile
+          from pathlib import Path
+          path=Path('cloud-tests/hafuch-ocr-crops-wip/hafuch-ai-neighbor-review-v1.tar.br.b64')
+          raw=base64.b64decode(path.read_text().strip(),validate=True)
+          assert hashlib.sha256(raw).hexdigest()=='e9bd7c3773a7fd3a0fc933c808fd4b4f2115f67f7276e9fdb73c4d04a5354584'
+          with tarfile.open(fileobj=io.BytesIO(brotli.decompress(raw)),mode='r:') as tar:
+              names=sorted(tar.getnames())
+              assert names==['HafuchAiNeighborReviewV1.kt','HafuchAiNeighborReviewV1Test.kt'],names
+              source=tar.extractfile('HafuchAiNeighborReviewV1.kt').read().decode()
+              assert 'const val SERIES_ID = "HAFUCH_DEKEL"' in source
+              assert 'requiresManualVisualCheck:Boolean=true' in source
+          print('PASS exact read-only Kotlin WIP bundle checksum, series guard and review-only state')
+          PY
+      - name: Download original 20 photos and existing original OCR evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/original" "$RUNNER_TEMP/ocr"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/original"
+          gh run download 44047765517 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/ocr"
+          (cd "$RUNNER_TEMP/original" && zip -qr "$RUNNER_TEMP/source.zip" hafuch-20-source-results)
+          (cd "$RUNNER_TEMP/ocr" && zip -qr "$RUNNER_TEMP/old-ocr.zip" hafuch-roi-20)
+      - name: Verify original hashes and report real AI text availability truthfully
+        run: |
+          set -euo pipefail
+          mkdir -p hafuch-ai-neighbor-review
+          python3 cloud-tests/hafuch-ocr-crops-wip/verify_ai_neighbor_20_evidence.py             "$RUNNER_TEMP/source.zip" "$RUNNER_TEMP/old-ocr.zip"             hafuch-ai-neighbor-review/20-source-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-existing-ai-neighbor-evidence-wip
+          path: hafuch-ai-neighbor-review/
+          retention-days: 14
+          if-no-files-found: warn
