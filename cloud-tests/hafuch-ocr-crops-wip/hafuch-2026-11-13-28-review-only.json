@@ -1,7 +1,7 @@
 {
   "series_id": "HAFUCH_DEKEL",
   "date": "2026-11-13",
-  "status": "REVIEW_ONLY_NOT_ADMIN_APPROVED",
+  "status": "VISUAL_CROP_CONFIRMED",
   "source_sha256": "d1e3ca66c53d2d68fed682e8c389e55f3061bbf59f31af34044a9896ffaf9d00",
   "image_width": 3000,
   "image_height": 2305,
@@ -37,7 +37,8 @@
           385
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H5",
@@ -55,7 +56,8 @@
           442
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H8",
@@ -67,7 +69,8 @@
           442
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H9",
@@ -91,7 +94,8 @@
           559
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H10",
@@ -109,7 +113,8 @@
           616
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H12",
@@ -127,7 +132,8 @@
           673
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H14",
@@ -145,7 +151,8 @@
           731
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H15",
@@ -163,7 +170,8 @@
           789
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H18",
@@ -181,7 +189,8 @@
           847
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H19",
@@ -205,7 +214,8 @@
           962
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H21",
@@ -223,7 +233,8 @@
           1021
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H22",
@@ -241,7 +252,8 @@
           1078
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H24",
@@ -259,7 +271,8 @@
           1138
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "H25",
@@ -277,7 +290,8 @@
           1195
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V1",
@@ -289,7 +303,8 @@
           1371
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V2",
@@ -307,7 +322,8 @@
           1429
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V3",
@@ -325,7 +341,8 @@
           1489
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V4",
@@ -343,7 +360,8 @@
           1547
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V5",
@@ -361,7 +379,8 @@
           1605
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V6",
@@ -379,7 +398,8 @@
           1664
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V7",
@@ -397,7 +417,8 @@
           1723
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V11",
@@ -415,7 +436,8 @@
           1783
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V13",
@@ -433,7 +455,8 @@
           1845
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V16",
@@ -451,7 +474,8 @@
           1901
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V17",
@@ -475,7 +499,8 @@
           2020
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V19",
@@ -487,7 +512,8 @@
           2020
         ]
       ],
-      "method": "SOURCE_PIXEL_MANUAL_NUMBER"
+      "method": "SOURCE_PIXEL_MANUAL_NUMBER",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V20",
@@ -499,7 +525,8 @@
           2080
         ]
       ],
-      "method": "SOURCE_PIXEL_MANUAL_NUMBER"
+      "method": "SOURCE_PIXEL_MANUAL_NUMBER",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     },
     {
       "key": "V23",
@@ -517,7 +544,17 @@
           2139
         ]
       ],
-      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS",
+      "visual_status": "VISUAL_CROP_CONFIRMED"
     }
-  ]
+  ],
+  "visual_review_status": "ADMIN_CONFIRMED_ALL_28_EXACT_DISPLAYED_CROPS",
+  "review_mode": "DRY_REVIEW_ONLY_NO_CANONICAL_WRITES",
+  "confirmed_date": "2026-11-19",
+  "admin_confirmation": "28 חיתוכים נכונים",
+  "confirmation_scope": "Only the exact 28 displayed source-pixel crop geometries in 2026-11-13 QA package, pinned to original source SHA-256 and combined RGB pixel digest. Different source/image/coordinates require new administrator visual review.",
+  "regression_fixture": true,
+  "auto_propagate_to_canonical": false,
+  "auto_propagate_to_firebase": false,
+  "release_authorized": false
 }
