@@ -1,0 +1,523 @@
+{
+  "series_id": "HAFUCH_DEKEL",
+  "date": "2026-11-13",
+  "status": "REVIEW_ONLY_NOT_ADMIN_APPROVED",
+  "source_sha256": "d1e3ca66c53d2d68fed682e8c389e55f3061bbf59f31af34044a9896ffaf9d00",
+  "image_width": 3000,
+  "image_height": 2305,
+  "source_run": 43939011519,
+  "ocr_run": 44047765517,
+  "proposed_count": 28,
+  "from_existing_ocr": 26,
+  "manual_pixel_number_recoveries": [
+    "V19",
+    "V20"
+  ],
+  "same_section_rectangle_overlap_count": 0,
+  "rgb_all_rectangles_sha256": "8da91a0f54c1c6ce7ebfea89f70a64300b10facb90d13d761e0d570715cd08f1",
+  "rgb_digest_algorithm": "SHA256(header '2026-11-13:HAFUCH_DEKEL:READ_ONLY:V1\\n', then for crops sorted H1,H5,...,V1,V2,... per key append '<key>:<compact-json-rectangles>\\n' UTF8 followed by raw RGB bytes of each rectangle in order)",
+  "automatic_approval": false,
+  "canonical_writes": 0,
+  "firebase_writes": 0,
+  "release_created": false,
+  "crops": [
+    {
+      "key": "H1",
+      "rectangles": [
+        [
+          2194,
+          277,
+          2876,
+          326
+        ],
+        [
+          2679,
+          336,
+          2880,
+          385
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H5",
+      "rectangles": [
+        [
+          2099,
+          336,
+          2668,
+          385
+        ],
+        [
+          2678,
+          390,
+          2881,
+          442
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H8",
+      "rectangles": [
+        [
+          2324,
+          390,
+          2670,
+          442
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H9",
+      "rectangles": [
+        [
+          2156,
+          390,
+          2316,
+          442
+        ],
+        [
+          2169,
+          452,
+          2881,
+          500
+        ],
+        [
+          2718,
+          511,
+          2882,
+          559
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H10",
+      "rectangles": [
+        [
+          2156,
+          511,
+          2710,
+          559
+        ],
+        [
+          2559,
+          570,
+          2882,
+          616
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H12",
+      "rectangles": [
+        [
+          2057,
+          570,
+          2551,
+          616
+        ],
+        [
+          2458,
+          628,
+          2883,
+          673
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H14",
+      "rectangles": [
+        [
+          2182,
+          628,
+          2449,
+          673
+        ],
+        [
+          2462,
+          684,
+          2884,
+          731
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H15",
+      "rectangles": [
+        [
+          2074,
+          684,
+          2453,
+          731
+        ],
+        [
+          2548,
+          744,
+          2884,
+          789
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H18",
+      "rectangles": [
+        [
+          2061,
+          744,
+          2541,
+          789
+        ],
+        [
+          2353,
+          801,
+          2884,
+          847
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H19",
+      "rectangles": [
+        [
+          2100,
+          801,
+          2346,
+          847
+        ],
+        [
+          2143,
+          860,
+          2885,
+          904
+        ],
+        [
+          2713,
+          919,
+          2886,
+          962
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H21",
+      "rectangles": [
+        [
+          2165,
+          919,
+          2701,
+          962
+        ],
+        [
+          2589,
+          978,
+          2886,
+          1021
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H22",
+      "rectangles": [
+        [
+          2218,
+          978,
+          2579,
+          1021
+        ],
+        [
+          2590,
+          1036,
+          2887,
+          1078
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H24",
+      "rectangles": [
+        [
+          2090,
+          1036,
+          2582,
+          1078
+        ],
+        [
+          2737,
+          1093,
+          2888,
+          1138
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "H25",
+      "rectangles": [
+        [
+          2126,
+          1093,
+          2728,
+          1138
+        ],
+        [
+          2432,
+          1150,
+          2888,
+          1195
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V1",
+      "rectangles": [
+        [
+          2497,
+          1327,
+          2887,
+          1371
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V2",
+      "rectangles": [
+        [
+          2216,
+          1327,
+          2489,
+          1371
+        ],
+        [
+          2389,
+          1380,
+          2891,
+          1429
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V3",
+      "rectangles": [
+        [
+          2188,
+          1380,
+          2380,
+          1429
+        ],
+        [
+          2495,
+          1443,
+          2892,
+          1489
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V4",
+      "rectangles": [
+        [
+          2135,
+          1443,
+          2486,
+          1489
+        ],
+        [
+          2361,
+          1501,
+          2893,
+          1547
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V5",
+      "rectangles": [
+        [
+          2120,
+          1501,
+          2351,
+          1547
+        ],
+        [
+          2696,
+          1556,
+          2895,
+          1605
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V6",
+      "rectangles": [
+        [
+          2217,
+          1556,
+          2688,
+          1605
+        ],
+        [
+          2187,
+          1613,
+          2895,
+          1664
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V7",
+      "rectangles": [
+        [
+          2141,
+          1613,
+          2177,
+          1664
+        ],
+        [
+          2271,
+          1671,
+          2897,
+          1723
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V11",
+      "rectangles": [
+        [
+          2134,
+          1671,
+          2259,
+          1723
+        ],
+        [
+          2372,
+          1736,
+          2897,
+          1783
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V13",
+      "rectangles": [
+        [
+          2169,
+          1736,
+          2363,
+          1783
+        ],
+        [
+          2465,
+          1795,
+          2898,
+          1845
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V16",
+      "rectangles": [
+        [
+          2207,
+          1795,
+          2458,
+          1845
+        ],
+        [
+          2226,
+          1854,
+          2899,
+          1901
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V17",
+      "rectangles": [
+        [
+          2157,
+          1854,
+          2216,
+          1901
+        ],
+        [
+          2157,
+          1914,
+          2901,
+          1961
+        ],
+        [
+          2698,
+          1972,
+          2901,
+          2020
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    },
+    {
+      "key": "V19",
+      "rectangles": [
+        [
+          2155,
+          1970,
+          2696,
+          2020
+        ]
+      ],
+      "method": "SOURCE_PIXEL_MANUAL_NUMBER"
+    },
+    {
+      "key": "V20",
+      "rectangles": [
+        [
+          2190,
+          2029,
+          2907,
+          2080
+        ]
+      ],
+      "method": "SOURCE_PIXEL_MANUAL_NUMBER"
+    },
+    {
+      "key": "V23",
+      "rectangles": [
+        [
+          2124,
+          2031,
+          2184,
+          2079
+        ],
+        [
+          2301,
+          2092,
+          2904,
+          2139
+        ]
+      ],
+      "method": "ORIGINAL_ONE_PASS_OCR_WORDS"
+    }
+  ]
+}
