@@ -55,7 +55,7 @@ def check(zip_name, manifest_name):
        if a[0]==b[0] and a!=b and overlap(ar,br)]
   assert not bad, f"Cross-clue overlap: {bad}"
  print("PASS 28/28 pinned REVIEW_ONLY geometries; 55 source row rectangles; zero same-section overlap")
- print("PASS source JPEG SHA-256 and all 28 geometry/pixel combined SHA-256; 6 prior confirmed crops unchanged")
+ print("PASS source JPEG SHA-256 and 28 geometry/pixel combined SHA-256")
 
 if __name__=="__main__":
  if len(sys.argv)!=3: raise SystemExit("Usage: verify_2026_11_13_28_review.py originals.zip manifest.json")
