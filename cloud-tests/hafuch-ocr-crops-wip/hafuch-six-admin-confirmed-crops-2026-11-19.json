@@ -1,0 +1,156 @@
+{
+  "series_id": "HAFUCH_DEKEL",
+  "state": "ADMIN_VISUAL_CONFIRMATION_FIXTURES",
+  "confirmed_date": "2026-11-19",
+  "admin_confirmation": "ששת החיתוכים תקינים",
+  "confirmation_scope": "Only the six exact pictured source-pixel crop proposals with these rectangle coordinates and pinned JPEG bytes; changed boundaries or source images require re-verification.",
+  "pixel_coordinates": "[left,top,right,bottom], right/bottom exclusive in original JPEG pixels",
+  "source_artifact": {
+    "repository": "higicrossword/Higi-Releases",
+    "run_id": 43939011519,
+    "artifact_id": 14261977195
+  },
+  "sources": {
+    "2026-11-06": {
+      "width": 3000,
+      "height": 2433,
+      "sha256": "37e53145854c549f786819cd27e38852ce1deaaae484e9e7e71044db168774ef"
+    },
+    "2026-10-23": {
+      "width": 3008,
+      "height": 2366,
+      "sha256": "6f1c1f8aa3715e1d8d772576bc2108660b53cb7e67d233283e717fc8e46eec0b"
+    },
+    "2026-07-31": {
+      "width": 2048,
+      "height": 1544,
+      "sha256": "3c5f220eef89e4ac509c0f92fb53c5802d5b9887b710dd3e3d35676c6f36ef07"
+    }
+  },
+  "crops": [
+    {
+      "date": "2026-11-06",
+      "direction": "H",
+      "number": 15,
+      "row_rectangles": [
+        [
+          2218,
+          765,
+          2905,
+          820
+        ]
+      ],
+      "rgb_row_sha256": [
+        "f522a99ba316941f4e20e22a8c97fb35b1f0448734136af632ef7e9b508dd393"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    },
+    {
+      "date": "2026-10-23",
+      "direction": "H",
+      "number": 19,
+      "row_rectangles": [
+        [
+          2262,
+          780,
+          2848,
+          829
+        ]
+      ],
+      "rgb_row_sha256": [
+        "7c048519b7fe78e89975b239440221d7ea0d1892077bed078bc4ae0956b12f17"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    },
+    {
+      "date": "2026-07-31",
+      "direction": "H",
+      "number": 14,
+      "row_rectangles": [
+        [
+          1473,
+          449,
+          2005,
+          490
+        ]
+      ],
+      "rgb_row_sha256": [
+        "b2344031db4f0f3e90c868f17c9d3d56b14bcaa420f2b6d4fcc2dbbd3bed2ed5"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    },
+    {
+      "date": "2026-10-23",
+      "direction": "H",
+      "number": 15,
+      "row_rectangles": [
+        [
+          2125,
+          653,
+          2856,
+          717
+        ],
+        [
+          2620,
+          716,
+          2856,
+          773
+        ]
+      ],
+      "rgb_row_sha256": [
+        "b1617d9bb9033e1b0fbbd24dbd42321fb75607e6b0f961b1e8b58eea0d0d769f",
+        "10ec1755339e75a6cf12e619b19e70d5b614ada7ea9e089d48b46f2c71a5ce01"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    },
+    {
+      "date": "2026-10-23",
+      "direction": "V",
+      "number": 16,
+      "row_rectangles": [
+        [
+          2120,
+          1805,
+          2862,
+          1863
+        ],
+        [
+          2790,
+          1865,
+          2862,
+          1919
+        ]
+      ],
+      "rgb_row_sha256": [
+        "64aaffea6c49829874d63a9227bd056767c4af1ed575d61284ae57aff007034b5",
+        "e4f2d6b59a7257735d62c29cf4ea89cc32467291b60d00682a10897c7b86c1cf"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    },
+    {
+      "date": "2026-07-31",
+      "direction": "V",
+      "number": 20,
+      "row_rectangles": [
+        [
+          1576,
+          1427,
+          2006,
+          1475
+        ]
+      ],
+      "rgb_row_sha256": [
+        "6951974e506c284c5c81d5c3930ab0d07348721cbe056db6855be962678b6147"
+      ],
+      "status": "VISUAL_CROP_CONFIRMED"
+    }
+  ],
+  "regression_policy": {
+    "keep_exact_pixels": true,
+    "do_not_modify_frozen_series": true,
+    "may_auto_write_canonical": false,
+    "may_auto_write_firebase": false,
+    "approval_for_other_crops": false,
+    "may_release_app": false
+  }
+}
