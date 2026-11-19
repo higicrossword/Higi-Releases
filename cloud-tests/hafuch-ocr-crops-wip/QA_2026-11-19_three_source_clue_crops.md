@@ -31,3 +31,18 @@ These are **3 individually visually inspected case fixtures**, not evidence that
 - No Canonical/Firebase writes or release/APK actions.
 
 Next: use the same independent source-pixel/adjacent-number/terminal-marker checks to test candidate split rectangles on the remaining 20-source set. App integration requires in-memory OCR words plus existing AI text on an isolated admin DRY build; the public OCR TSV masks Hebrew text.
+
+
+## Three additional source-pixel REVIEW_ONLY crops (manual original-image inspection)
+
+The same tests and original-source visual review were also completed for the other three observed lost-leading-digit examples. These are **multiple physical row rectangles** when needed, not single page-level bounding boxes.
+
+| Date | Clue | Printed number / original OCR | Existing final length | Next printed start excluded | Source-pixel row rectangles |
+| --- | --- | --- | --- | --- | --- |
+| 2026-10-23 | H15 | 15. / 5. | (6); | H18 | (2125,653)–(2856,717); (2620,716)–(2856,773) |
+| 2026-10-23 | V16 | 16. / 6. | (7); | V17 (OCR 17, at confidence 54) | (2120,1805)–(2862,1863); (2790,1865)–(2862,1919) |
+| 2026-07-31 | V20 | 20. / 0. | (4); | V23 | (1576,1427)–(2006,1475) |
+
+For each, the original rendered crop was inspected and the expected printed number, complete text, terminal length marker and separation from the following numbered clue were visible. Existing OCR word geometry independently confirmed inclusion of the terminal marker and exclusion of the next number's observed OCR box. In H15/V16, per-row rectangles avoid ingesting neighboring clues on their last shared row. The source image retains original pixel coordinates.
+
+**Result of 2026-11-19 offline audit:** 6 individual, visually reviewed source-pixel REVIEW_ONLY crop examples across 3 publisher dates, derived from six actual OCR-digit-loss observations. They are *not* a complete batch, not an algorithm success rate, and not administrator-approved. The previously user-confirmed V23 crops remain separate. The two WIP example montages exist only in the temporary QA workspace; they are not shipped with the application.
