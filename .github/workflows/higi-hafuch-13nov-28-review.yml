@@ -1,0 +1,37 @@
+name: Higi Hafuch 13Nov 28 source crop review-only geometry QA
+on:
+  push:
+    branches: [higi/hafuch-number-boundary-guards-wip]
+    paths:
+      - '.github/workflows/higi-hafuch-13nov-28-review.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_13_28_review.py'
+      - 'cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-13-28-review-only.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install image decoder
+        run: python -m pip install --quiet Pillow
+      - name: Fetch pinned original publisher JPEGs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/originals"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/originals"
+          (cd "$RUNNER_TEMP/originals" && zip -qr "$RUNNER_TEMP/originals.zip" hafuch-20-source-results)
+      - name: Validate all 28 REVIEW_ONLY source-pixel crop rectangles and no same-series overlap
+        run: |
+          set -euo pipefail
+          python -m py_compile cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_13_28_review.py
+          python cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_13_28_review.py "$RUNNER_TEMP/originals.zip" cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-13-28-review-only.json
