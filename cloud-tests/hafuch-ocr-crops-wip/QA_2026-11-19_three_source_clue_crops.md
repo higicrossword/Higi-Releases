@@ -1,6 +1,6 @@
-# HAFUCH_DEKEL — three source-pixel REVIEW_ONLY crop proposals, 2026-11-19
+# HAFUCH_DEKEL — six administrator-confirmed source-pixel crop fixtures, 2026-11-19
 
-**Scope:** independent offline geometry experiment on HAFUCH_DEKEL. Not a new application version, not Canonical data, not Firebase, and **not administrator-confirmed**. These fixed coordinates are test fixtures only; never use them as per-series hardcoded production crop coordinates.
+**Scope:** independent offline geometry experiment on HAFUCH_DEKEL. Not a new application version, not Canonical data, not Firebase, and **administrator-confirmed on 2026-11-19 for these six exact source-pixel rectangles only**. These fixed coordinates are test fixtures only; never use them as per-series hardcoded production crop coordinates.
 
 ## Source evidence and bounded crop rectangles
 
@@ -23,7 +23,7 @@ Coordinates are in the **original publisher JPEG pixel space** [left, top, right
 
 ### Restrictions
 
-These are **3 individually visually inspected case fixtures**, not evidence that every one of the previous 389 geometry proposals is correct, not automatic rule discovery, and not user-approved verified crop state. In particular:
+These are **3 individually visually inspected and administrator-confirmed case fixtures**, not evidence that every one of the previous 389 geometry proposals is correct, not automatic rule discovery, and not an approval for any other crop geometry. In particular:
 
 - Do not classify H15 or H19 by replacing the OCR text 5./9. based on crossword expected-number sequence; the printed-source evidence was inspected separately.
 - Do not copy these hardcoded coordinates into application source. An eventual HAFUCH-only matcher must derive start/end positions from actual source pixels and verified neighbor anchors, and withhold ambiguous cases.
@@ -45,4 +45,8 @@ The same tests and original-source visual review were also completed for the oth
 
 For each, the original rendered crop was inspected and the expected printed number, complete text, terminal length marker and separation from the following numbered clue were visible. Existing OCR word geometry independently confirmed inclusion of the terminal marker and exclusion of the next number's observed OCR box. In H15/V16, per-row rectangles avoid ingesting neighboring clues on their last shared row. The source image retains original pixel coordinates.
 
-**Result of 2026-11-19 offline audit:** 6 individual, visually reviewed source-pixel REVIEW_ONLY crop examples across 3 publisher dates, derived from six actual OCR-digit-loss observations. They are *not* a complete batch, not an algorithm success rate, and not administrator-approved. The previously user-confirmed V23 crops remain separate. The two WIP example montages exist only in the temporary QA workspace; they are not shipped with the application.
+**Result of 2026-11-19 offline audit:** 6 individual, visually reviewed source-pixel REVIEW_ONLY crop examples across 3 publisher dates, derived from six actual OCR-digit-loss observations. They are *not* a complete batch or an algorithm success rate. The administrator explicitly confirmed **all six exact displayed crop geometries** on 2026-11-19 ("ששת החיתוכים תקינים"). This does not authorize a future coordinate change, another image, or a production/canonical write. The previously user-confirmed V23 crops remain separate. The two WIP example montages exist only in the temporary QA workspace; they are not shipped with the application.
+
+## Administrator confirmation (2026-11-19)
+
+The administrator's explicit response after inspecting the six-crop QA montage was: **"ששת החיתוכים תקינים"**. Accordingly, all six exact proposed crop geometries are now `VISUAL_CROP_CONFIRMED` fixtures; the confirmation has **not** been generalized to the rest of the corpus. Each exact original JPEG SHA-256, original pixel row rectangle and extracted RGB crop checksum is pinned separately in [`hafuch-six-admin-confirmed-crops-2026-11-19.json`](hafuch-six-admin-confirmed-crops-2026-11-19.json). Any different image or coordinate must be manually reviewed again. This approval is QA evidence only: no Firebase, Canonical, installed app or release change.
