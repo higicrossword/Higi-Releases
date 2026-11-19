@@ -1,0 +1,70 @@
+name: Higi Hafuch OCR numbered-boundary guards (read-only WIP)
+on:
+  push:
+    branches: [higi/hafuch-number-boundary-guards-wip]
+    paths:
+      - '.github/workflows/higi-hafuch-number-boundary-guards-wip.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/audit_ambiguous_number_guard.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate read-only source and synthetic pure geometry safety tests
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'higi/hafuch-number-boundary-guards-wip'
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/audit_ambiguous_number_guard.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_ambiguous_number_guard.py --self-test
+          ! grep -Eq '(firebase_admin|requests|urllib.request|subprocess)' cloud-tests/hafuch-ocr-crops-wip/audit_ambiguous_number_guard.py
+      - name: Fetch only preexisting original JPEG and one-pass masked OCR artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/original" "$RUNNER_TEMP/ocr"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/original"
+          gh run download 44047765517 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/ocr"
+          (cd "$RUNNER_TEMP/original" && zip -qr "$RUNNER_TEMP/original.zip" hafuch-20-source-results)
+          (cd "$RUNNER_TEMP/ocr" && zip -qr "$RUNNER_TEMP/ocr.zip" hafuch-roi-20)
+      - name: Check all 20 original SHA-pinned images and zero auto approvals
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/report"
+          python3 cloud-tests/hafuch-ocr-crops-wip/audit_ambiguous_number_guard.py "$RUNNER_TEMP/original.zip" "$RUNNER_TEMP/ocr.zip" "$RUNNER_TEMP/report/guards.json"
+          python3 - "$RUNNER_TEMP/report/guards.json" <<'PY'
+          import json,sys
+          a=json.load(open(sys.argv[1]))
+          assert a['series_id']=='HAFUCH_DEKEL'
+          assert a['original_sources_sha_verified']==20
+          assert a['risk_guards']==36 and a['guarded_sources']==15
+          assert a['sources_with_both_headings_verified']==13
+          assert a['sources_with_provisional_H_for_guards_only']==3
+          assert len(a['sources'])==20
+          assert all(s['automatically_approved_crops']==0 for s in a['sources'])
+          assert a['ocr_calls_made']==a['ai_calls_made']==a['firebase_writes']==a['canonical_writes']==0
+          assert not a['production_changed'] and not a['new_apk_or_release']
+          bad=[('2026-10-23','H','5.'),('2026-10-23','H','9.'),('2026-10-23','V','6.'),
+               ('2026-07-31','H','4.'),('2026-07-31','V','0.'),('2026-11-06','H','5.')]
+          for date,d,t in bad:
+              guards=next(s['boundary_guards'] for s in a['sources'] if s['date']==date)
+              assert any(g['direction']==d and g['token']==t and g['boundary_status']=='BLOCK_CROP_CROSSING_TOKEN'
+                         for g in guards), (date,d,t)
+          print('PASS 20 publisher SHA checks; 36 ambiguity guards; 6 verified OCR mismatches; zero crop approvals')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: higi-hafuch-number-boundary-guards-wip
+          path: ${{ runner.temp }}/report/
+          retention-days: 7
+          if-no-files-found: warn
