@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Read-only QA for exact 28 HAFUCH_DEKEL source-pixel review proposals.
-The two manually source-inspected anchors remain *review-only*.
+The two manually located anchors are administrator-confirmed only at pinned coordinates.
 No application, OCR/AI, Firebase, canonical, or release operation.
 """
 import hashlib, io, json, sys, zipfile
@@ -19,7 +19,12 @@ def overlap(a,b):
 def check(zip_name, manifest_name):
  m=json.loads(Path(manifest_name).read_text(encoding="utf-8"))
  assert m["series_id"]=="HAFUCH_DEKEL" and m["date"]=="2026-11-13"
- assert m["status"]=="REVIEW_ONLY_NOT_ADMIN_APPROVED"
+ assert m["status"]=="VISUAL_CROP_CONFIRMED"
+ assert m["visual_review_status"]=="ADMIN_CONFIRMED_ALL_28_EXACT_DISPLAYED_CROPS"
+ assert m["confirmed_date"]=="2026-11-19"
+ assert m["admin_confirmation"]=="28 חיתוכים נכונים"
+ assert m["regression_fixture"] and not m["auto_propagate_to_canonical"]
+ assert not m["auto_propagate_to_firebase"] and not m["release_authorized"]
  assert m["proposed_count"]==28 and m["from_existing_ocr"]==26
  assert m["manual_pixel_number_recoveries"]==["V19","V20"]
  assert m["canonical_writes"]==m["firebase_writes"]==0
@@ -38,6 +43,7 @@ def check(zip_name, manifest_name):
   for c in ordered:
    key=c["key"]
    assert c["method"]==("SOURCE_PIXEL_MANUAL_NUMBER" if key in ("V19","V20") else "ORIGINAL_ONE_PASS_OCR_WORDS")
+   assert c["visual_status"]=="VISUAL_CROP_CONFIRMED"
    rects=c["rectangles"]
    assert 1<=len(rects)<=5
    digest.update((key+":"+json.dumps(rects,separators=(",",":"))+"\n").encode("utf8"))
@@ -54,7 +60,7 @@ def check(zip_name, manifest_name):
        for b,br in all_pieces[i+1:]
        if a[0]==b[0] and a!=b and overlap(ar,br)]
   assert not bad, f"Cross-clue overlap: {bad}"
- print("PASS 28/28 pinned REVIEW_ONLY geometries; 55 source row rectangles; zero same-section overlap")
+ print("PASS 28/28 administrator-confirmed exact DRY geometries; 55 source row rectangles; zero same-section overlap")
  print("PASS source JPEG SHA-256 and 28 geometry/pixel combined SHA-256")
 
 if __name__=="__main__":
