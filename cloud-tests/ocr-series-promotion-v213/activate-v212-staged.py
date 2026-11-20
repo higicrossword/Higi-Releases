@@ -83,8 +83,10 @@ insert="""        // Exact-series V213 promotion. A review rectangle is not auto
             val all=(verified+previews).mapKeys{wire(it.key)}.mapValues{pixels(it.value)}
             val clashes=OcrWeeklySourceAnchorsV199.conflictingKeys(all,words)
             previews.toMap().forEach { (key,proposal) ->
-                if(key in verified || key in finalReview || key in detected.geometryNeedsReview ||
-                    key in detected.sharedRowNeedsReview || key in detected.review) return@forEach
+                if(key in verified || key in detected.geometryNeedsReview ||
+                    key in detected.sharedRowNeedsReview ||
+                    !OcrSeriesPromotionV213.onlyNoOldCrop(finalReview[key]) ||
+                    !OcrSeriesPromotionV213.onlyNoOldCrop(detected.review[key])) return@forEach
                 val reason=previewWhy[key].orEmpty()
                 val label=wire(key)
                 val strong=OcrSeriesPromotionV213.mayTrustWeeklyV199(
@@ -118,6 +120,10 @@ policy.write_text("""package com.example.hebrewcrossword
  * review/geometry safeguards or supersede saved manual/canonical coordinates.
  */
 object OcrSeriesPromotionV213 {
+    // NO_SAFE_OCR_CROP describes the absent previous geometry, not the independently
+    // located V199 candidate. Every other review status stays blocking.
+    fun onlyNoOldCrop(note:String?):Boolean = note.isNullOrBlank() || note.trim()=="NO_SAFE_OCR_CROP"
+
     fun mayTrustWeeklyV199(
         seriesId:String?,diagnostic:String,ownStart:Boolean,hasConflict:Boolean,
         sourceWidth:Int,sourceHeight:Int
@@ -153,6 +159,13 @@ class OcrSeriesPromotionV213Test {
         assertFalse(check(diag=clear+" V201_FINAL_GEOMETRY_BLOCK"))
         assertFalse(check(diag=clear+" V208_INVALID_REPAIR"))
     }
+    @Test fun oldMissingGeometryDoesNotVetoIndependentCandidate() {
+        assertTrue(OcrSeriesPromotionV213.onlyNoOldCrop(null))
+        assertTrue(OcrSeriesPromotionV213.onlyNoOldCrop("NO_SAFE_OCR_CROP"))
+        assertFalse(OcrSeriesPromotionV213.onlyNoOldCrop("V201_FINAL_GEOMETRY_BLOCK"))
+        assertFalse(OcrSeriesPromotionV213.onlyNoOldCrop("LOCAL_OCR_REVIEW:AMBIGUOUS_START"))
+        assertFalse(OcrSeriesPromotionV213.onlyNoOldCrop("NO_SAFE_OCR_CROP | V201_FINAL_GEOMETRY_REVIEW_ONLY"))
+    }
     @Test fun weeklyOnly() {
         assertFalse(check(series="HAFUCH_DEKEL"))
         assertFalse(check(series="TARTEY_DEKEL"))
@@ -162,3 +175,17 @@ class OcrSeriesPromotionV213Test {
 }
 """)
 print("PROMOTION_FILES",crop.name,policy.name,tests.name)
+
+# Preserve source-matched Canonical/previously verified geometry over new automatic
+# OCR proposals. In particular, a stronger OCR suggestion is not user consent to
+# retire an existing manual or canonical region.
+main=base/"MainActivity.kt"
+source=main.read_text()
+old="""            putAll(oldTrusted)
+            putAll(current)"""
+new="""            putAll(current)
+            // Source-matched canonical/manual coordinates have precedence.
+            putAll(oldTrusted)"""
+assert source.count(old)==1,("source matched canonical precedence",source.count(old))
+main.write_text(source.replace(old,new))
+print("SAFETY_GUARDS: no-old-crop candidate eligible; canonical/manual geometry preserved")
