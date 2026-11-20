@@ -63,3 +63,31 @@ jobs:
               for i in range(lo-1,min(hi,len(lines))):
                 print(f'{i+1:05d} {lines[i][:280]}')
           PY
+
+      - name: Inspect crop evidence and downstream use sites
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          b=Path('/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for n in ['ClueGeometryEvidencePolicy.kt','ClueGeometry.kt','ClueRegionStore.kt','OcrWeeklyCropRepairV208.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyOverlapReviewV200.kt','HigiLocalOcrCropEngine.kt','MainActivity.kt']:
+            p=b/n
+            if not p.exists():continue
+            l=p.read_text().splitlines()
+            print('## FILE',n,len(l))
+            if n in ('ClueGeometryEvidencePolicy.kt','ClueGeometry.kt','OcrWeeklyCropRepairV208.kt','OcrWeeklyOverlapReviewV200.kt'):
+              for i,line in enumerate(l[:170],1):print(f'{i:05d} {line[:265]}')
+            elif n=='HigiLocalOcrCropEngine.kt':
+              for i,line in enumerate(l[:120],1):print(f'{i:05d} {line[:265]}')
+              for i in range(815,min(len(l),845)):print(f'{i+1:05d} {l[i][:265]}')
+            elif n=='ClueRegionStore.kt':
+              for i,line in enumerate(l):
+                if 'fun putVerified' in line or 'fun getVerified' in line or 'hasManualOverride' in line:
+                  for j in range(max(0,i-1),min(len(l),i+5)):
+                    print(f'{j+1:05d} {l[j][:265]}')
+            elif n=='MainActivity.kt':
+              for i,line in enumerate(l):
+                if 'LocalOcrCropPass.run(' in line or 'enrichClueGeometry(' in line:
+                  for j in range(max(0,i-7),min(len(l),i+8)):
+                    print(f'{j+1:05d} {l[j][:265]}')
+          PY
