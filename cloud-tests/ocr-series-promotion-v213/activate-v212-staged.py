@@ -92,6 +92,7 @@ insert="""        // Exact-series V213 promotion. A review rectangle is not auto
                 val strong=OcrSeriesPromotionV213.mayTrustWeeklyV199(
                     layoutSeriesId, reason,
                     ownStart=OcrWeeklySourceAnchorsV199.ownsPrintedNumber(label,pixels(proposal),words),
+                    terminalVisible=OcrSeriesPromotionV213.terminalEnumerationInLastRow(pixels(proposal),words),
                     hasConflict=label in clashes,
                     sourceWidth=source.width,sourceHeight=source.height
                 )
@@ -120,12 +121,28 @@ policy.write_text("""package com.example.hebrewcrossword
  * review/geometry safeguards or supersede saved manual/canonical coordinates.
  */
 object OcrSeriesPromotionV213 {
+    // For automatic use, a crop needs the actual printed answer-length token.
+    // Review candidates lacking this proof instead of silently dropping "(3)".
+    private val enumeration=Regex("""^\\(\\d{1,2}(?:[, ]\\d{1,2})*\\)[.:;,]?$""")
+    fun terminalEnumerationInLastRow(
+        parts:List<CropRect>,words:List<OcrSharedRowSplitterV161.Word>
+    ):Boolean {
+        val end=parts.lastOrNull()?:return false
+        return words.any { word ->
+            val b=word.box
+            b.valid && word.confidence>=15 &&
+                enumeration.matches(word.text.trim()) &&
+                b.left>=end.left && b.right<=end.right &&
+                b.top>=end.top && b.bottom<=end.bottom
+        }
+    }
+
     // NO_SAFE_OCR_CROP describes the absent previous geometry, not the independently
     // located V199 candidate. Every other review status stays blocking.
     fun onlyNoOldCrop(note:String?):Boolean = note.isNullOrBlank() || note.trim()=="NO_SAFE_OCR_CROP"
 
     fun mayTrustWeeklyV199(
-        seriesId:String?,diagnostic:String,ownStart:Boolean,hasConflict:Boolean,
+        seriesId:String?,diagnostic:String,ownStart:Boolean,terminalVisible:Boolean,hasConflict:Boolean,
         sourceWidth:Int,sourceHeight:Int
     ):Boolean =
         seriesId==OcrSeriesProfilesV197.WEEKLY.id &&
@@ -135,7 +152,7 @@ object OcrSeriesPromotionV213 {
         !diagnostic.contains("V200_") &&
         !diagnostic.contains("V201_") &&
         !diagnostic.contains("V208_") &&
-        ownStart && !hasConflict && sourceWidth>=600 && sourceHeight>=350
+        ownStart && terminalVisible && !hasConflict && sourceWidth>=600 && sourceHeight>=350
 }
 """)
 tests=root/"app/src/test/java/com/example/hebrewcrossword/OcrSeriesPromotionV213Test.kt"
@@ -148,13 +165,14 @@ import org.junit.Test
 class OcrSeriesPromotionV213Test {
     private val clear="V199_SOURCE_ANCHORED_REVIEW_ONLY: independent start=5, next=7, inferred=false, pieces=2; no Canonical write"
     private fun check(diag:String=clear,series:String?="YEDIOTH_DEKEL_WEEKLY",
-        own:Boolean=true,conflict:Boolean=false,w:Int=1426,h:Int=1103)=
-        OcrSeriesPromotionV213.mayTrustWeeklyV199(series,diag,own,conflict,w,h)
+        own:Boolean=true,terminal:Boolean=true,conflict:Boolean=false,w:Int=1426,h:Int=1103)=
+        OcrSeriesPromotionV213.mayTrustWeeklyV199(series,diag,own,terminal,conflict,w,h)
     @Test fun onlyStrongPrintedBoundaries() {
         assertTrue(check())
         assertFalse(check(diag=clear.replace("inferred=false","inferred=true")))
         assertFalse(check(diag=clear.replace("next=7","next=END_OF_COLUMN")))
         assertFalse(check(own=false))
+        assertFalse(check(terminal=false))
         assertFalse(check(conflict=true))
         assertFalse(check(diag=clear+" V201_FINAL_GEOMETRY_BLOCK"))
         assertFalse(check(diag=clear+" V208_INVALID_REPAIR"))
