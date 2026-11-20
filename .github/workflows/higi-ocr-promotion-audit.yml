@@ -130,3 +130,29 @@ jobs:
           }
           tail -35 /tmp/higi-ocr/gradle.log
           echo "DRY_COMPILE_PASS; NO APK RELEASE OR CANONICAL WRITE"
+
+      - name: Inspect downstream crop selection and evidence for safe active promotion
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175')
+          b=root/'app/src/main/java/com/example/hebrewcrossword'
+          look=[
+            ('HigiLocalOcrCropEngine.kt',[(95,145),(285,345),(500,560),(725,845)]),
+            ('OcrWeeklySourceAnchorsV199.kt',[(25,120),(120,225)]),
+            ('OcrWeeklyCropRepairV208.kt',[(110,185)]),
+            ('MainActivity.kt',[(3900,3955),(4050,4100)]),
+            ('AdminLibraryRedecodeRunner.kt',[(110,260)]),
+            ('ClueRegionStore.kt',[(125,172)]),
+            ('AdminOcrRecropActivity.kt',[(360,455),(785,985)])
+          ]
+          for name,ranges in look:
+            p=b/name
+            if not p.exists():continue
+            lines=p.read_text().splitlines()
+            print('===== SELECTED',name)
+            for lo,hi in ranges:
+              for i in range(lo-1,min(hi,len(lines))):
+                print(f'{i+1:05d} {lines[i][:315]}')
+          PY
