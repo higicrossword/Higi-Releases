@@ -195,3 +195,30 @@ new="""            if(ocrSeriesId==null) {
 assert source.count(old)==1,("source matched canonical precedence",source.count(old))
 main.write_text(source.replace(old,new))
 print("SAFETY_GUARDS: no-old-crop candidate eligible; canonical/manual geometry preserved")
+
+# Enable the already-frozen V199 source-word candidate producer in ordinary builds
+# exclusively when the caller has selected the exact weekly series id. No geometry
+# rule, threshold, mask or source-number inference algorithm changes.
+engine=base/"HigiLocalOcrCropEngine.kt"
+src=engine.read_text()
+old="""if(BuildConfig.HIGI_DRY_BUILD && refineSharedRows &&
+            layoutSeriesId==OcrSeriesProfilesV197.WEEKLY.id &&
+            auditWords.isNotEmpty()) {"""
+new="""if(refineSharedRows &&
+            layoutSeriesId==OcrSeriesProfilesV197.WEEKLY.id &&
+            auditWords.isNotEmpty()) {"""
+assert src.count(old)==1,("V199 weekly producer guard",src.count(old))
+src=src.replace(old,new)
+engine.write_text(src)
+
+# The final independent V201 audit must run in normal builds too; otherwise
+# the newly promoted boxes would bypass the source-grid and overlap vetoes.
+crop=base/"LocalOcrCropPass.kt"
+src=crop.read_text()
+old="""if(BuildConfig.HIGI_DRY_BUILD && refineSharedRows &&
+            layoutSeriesId==OcrSeriesProfilesV197.WEEKLY.id && detected!=null){"""
+new="""if(refineSharedRows &&
+            layoutSeriesId==OcrSeriesProfilesV197.WEEKLY.id && detected!=null){"""
+assert src.count(old)==1,("V201 final audit guard",src.count(old))
+crop.write_text(src.replace(old,new))
+print("PRODUCTION_WEEKLY_V199_ACTIVATION: series-only; DRY V208 repair remains review-only")
