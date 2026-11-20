@@ -129,3 +129,21 @@ jobs:
           for i in range(3710,min(3750,len(ls))):
               print(f'MAIN_PREPARE {i+1:05d} {ls[i][:300]}')
           PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higiaudit/HebrewCrosswordApp_v0.15.175')
+          base=root/'app/src/main/java/com/example/hebrewcrossword'
+          for name,ranges in [('MainActivity.kt',[(3710,3710+80)]),('CrosswordCatalog.kt',[(1,100)]),('HafuchAdminSourceGridV1.kt',[(1,80)])]:
+              p=base/name
+              print('==== TARGET',name)
+              lines=p.read_text().splitlines()
+              for lo,hi in ranges:
+                  for j in range(lo-1,min(hi,len(lines))):
+                      print(f'{j+1:05d} {lines[j][:260]}')
+          print('HAFUCH_TEMPLATE_CALLS')
+          for p in base.rglob('*.kt'):
+              for i,line in enumerate(p.read_text(errors='replace').splitlines(),1):
+                  if 'HafuchAdminSourceGridV1' in line:
+                      print(p.name,i,line.strip()[:250])
+          PY
