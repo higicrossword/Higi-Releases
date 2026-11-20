@@ -160,3 +160,31 @@ jobs:
           }
           tail -20 /tmp/higi-room/test.log
           echo ROOM_PROTECTION_SCOPE_TEST_PASS_NO_RELEASE
+
+      - name: Full Android JVM regression suite and local DRY debug compile (no publishing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/higi-room/HebrewCrosswordApp_v0.15.175
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi-room/full-regression.log 2>&1 || {
+             tail -100 /tmp/higi-room/full-regression.log
+             exit 1
+          }
+          tail -30 /tmp/higi-room/full-regression.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          p=Path('app/build/test-results/testDebugUnitTest')
+          cases=failures=errors=0
+          for file in p.glob('TEST-*.xml'):
+              root=ET.parse(file).getroot()
+              cases+=int(root.attrib.get('tests','0'))
+              failures+=int(root.attrib.get('failures','0'))
+              errors+=int(root.attrib.get('errors','0'))
+          assert cases>=5,(cases,failures,errors)
+          assert failures==errors==0,(cases,failures,errors)
+          apk=Path('app/build/outputs/apk/debug/app-debug.apk')
+          assert apk.is_file() and apk.stat().st_size>10_000_000
+          print(f'FULL_ROOM_REGRESSION_PASS tests={cases} failures={failures} errors={errors}')
+          print('Debug APK compiled on temporary CI runner only; not uploaded or published')
+          PY
