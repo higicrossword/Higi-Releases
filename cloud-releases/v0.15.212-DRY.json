@@ -4,5 +4,5 @@
   "versionCode": 362,
   "patchFile": "cloud-patches/v0.15.212-from-v0.15.175.patch.xz.b64",
   "patchSha256": "d5e17cc2c8a494d20cc0b9ad35e8f50d3c16ca5143e8bd101335455242fbc794",
-  "notes": "Administrator-only DRY. Pixel-verified 13x13 HAFUCH_DEKEL grid fallback for single, multiple, review and re-decode source flows. Original 20-image reference verified in prior QA; source-matched only, no forced grid, no invented OCR text. Frozen Yedioth algorithms unchanged. No Firebase or Canonical deployment. Existing Gemini/OpenAI remote errors not fixed; on-device runtime proof still pending. Original signer and updater-manifest checks required before release."
+  "notes": "Administrator-only DRY. Pixel-verified 13x13 HAFUCH_DEKEL grid fallback for single, multiple, review and re-decode source flows. Original 20-image reference verified in prior QA; source-matched only, no forced grid, no invented OCR text. Frozen Yedioth algorithms unchanged. No Firebase or Canonical deployment. Existing Gemini/OpenAI remote errors not fixed; on-device runtime proof still pending. Original signer and updater-manifest checks required before release. Android compile and JVM gates passed in staging run 44707787834; signed release still gated by independent Windows build."
 }
