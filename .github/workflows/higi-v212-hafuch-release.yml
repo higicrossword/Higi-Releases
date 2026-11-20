@@ -1,0 +1,155 @@
+name: Higi 0.15.212 HAFUCH verified-grid DRY staging
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/higi-v212-hafuch-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: higi-v212-hafuch-staging
+  cancel-in-progress: false
+jobs:
+  validate-and-stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      ROOT: /tmp/higi212/HebrewCrosswordApp_v0.15.175
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Preflight no existing release and cryptographic source checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e cloud-releases/v0.15.212-DRY.json
+          test ! -e cloud-patches/v0.15.212-from-v0.15.175.patch.xz.b64
+          if gh release view v0.15.212-DRY --repo "$REPO" >/dev/null 2>&1; then
+            echo 'Release tag already exists: refuse overwrite'; exit 1
+          fi
+          mkdir -p /tmp/higi212
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi212/base.zip \
+            "https://api.github.com/repos/$REPO/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi212/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi212/base.zip -d /tmp/higi212
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'pinned v175 source'
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          repo=pathlib.Path('.')
+          cfg=json.loads((repo/'cloud-releases/v0.15.211-DRY.json').read_text())
+          assert cfg['version']=='0.15.211' and cfg['versionCode']==361
+          data=lzma.decompress(base64.b64decode(''.join((repo/cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(data).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi212/v211.patch').write_bytes(data)
+          filename=repo/'cloud-tests/hafuch-grid-fallback-wip/hafuch-grid-fallback.patch.xz.b64'
+          overlay=lzma.decompress(base64.b64decode(''.join(filename.read_text().split()),validate=True))
+          assert hashlib.sha256(overlay).hexdigest()=='2b85ad6574c58b0ef3db5018f8008614d1ddbb1b47e7f6241e4bd5b5793165f8'
+          pathlib.Path('/tmp/higi212/hafuch.patch').write_bytes(overlay)
+          r=json.loads((repo/'cloud-tests/hafuch-grid-fallback-wip/hafuch-13x13-reference.json').read_text())
+          mask=r['blocked_cells_image_top_to_bottom']
+          assert len(mask)==13 and all(len(s)==13 for s in mask)
+          assert sum(x.count('#') for x in mask)==49
+          assert hashlib.sha256(('\n'.join(mask)+'\n').encode()).hexdigest()=='cae53eb21dad1e97e410aadaa854755042699c49e4330c978b1b91c3e58661b1'
+          print('PASS immutable v175, published v211 patch, 20-source WIP overlay hash, frozen 13x13 mask')
+          PY
+      - name: Reconstruct exact v211 and apply isolated 20-source HAFUCH patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" apply --check /tmp/higi212/v211.patch
+          git -C "$ROOT" apply /tmp/higi212/v211.patch
+          grep -q 'versionCode = 361' "$ROOT/app/build.gradle.kts"
+          grep -q 'versionName = "0.15.211"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" apply --check /tmp/higi212/hafuch.patch
+          git -C "$ROOT" apply /tmp/higi212/hafuch.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/higi212/HebrewCrosswordApp_v0.15.175/app/build.gradle.kts')
+          s=p.read_text()
+          for old,new in [('versionCode = 361','versionCode = 362'),('versionName = "0.15.211"','versionName = "0.15.212"')]:
+              assert s.count(old)==1,old
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          python3 "$ROOT/tools/sync-release-version.py" --write --root "$ROOT"
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          root=Path('/tmp/higi212/HebrewCrosswordApp_v0.15.175')
+          prefix='app/src/main/java/com/example/hebrewcrossword/'
+          expected={prefix+n for n in ['AdminLibraryRedecodeRunner.kt','AdminOcrRecropActivity.kt','HafuchGridTemplate.kt','MainActivity.kt','WeeklyImageSelector.kt']}
+          expected.add('app/src/test/java/com/example/hebrewcrossword/HafuchGridTemplateFallbackTest.kt')
+          changed=set(subprocess.check_output(['git','-C',str(root),'diff','--name-only'],text=True).splitlines())
+          actual={p for p in changed if p.startswith(prefix) or p.startswith('app/src/test/')}
+          assert actual==expected,('Unexpected Kotlin modifications',sorted(actual^expected))
+          frozen=['GridDetector.kt','GridAnalysis.kt','HigiLocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','LocalOcrCropPass.kt','OcrWeeklyFinalGeometryV201.kt','OcrSeriesProfilesV197.kt','MakorRishonGridTemplate.kt']
+          assert not any(prefix+name in changed for name in frozen)
+          template=(root/(prefix+'HafuchGridTemplate.kt')).read_text()
+          assert 'HAFUCH_DEKEL' in template
+          assert (root/'app/src/test/java/com/example/hebrewcrossword/HafuchGridTemplateFallbackTest.kt').exists()
+          app=(root/'app/build.gradle.kts').read_text()
+          assert 'versionCode = 362' in app and 'versionName = "0.15.212"' in app
+          print('PASS source scope, frozen algorithms unchanged, version metadata and regression test present')
+          PY
+      - name: Run complete JVM unit tests and compile DRY package (publication gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi212/gradle.log 2>&1 || {
+            tail -160 /tmp/higi212/gradle.log
+            exit 1
+          }
+          tail -42 /tmp/higi212/gradle.log
+          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify full sealed v175-to-v212 reconstruction and stage DRY manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --binary HEAD > /tmp/higi212/v212.patch
+          test -s /tmp/higi212/v212.patch
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          raw=pathlib.Path('/tmp/higi212/v212.patch').read_bytes()
+          path=pathlib.Path('cloud-patches/v0.15.212-from-v0.15.175.patch.xz.b64')
+          path.write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          cfg={'channel':'dry','version':'0.15.212','versionCode':362,
+            'patchFile':str(path),'patchSha256':hashlib.sha256(raw).hexdigest(),
+            'notes':'Administrator-only DRY. Pixel-verified 13x13 HAFUCH_DEKEL grid fallback for single, multiple, review and re-decode source flows. Original 20-image reference verified in prior QA; source-matched only, no forced grid, no invented OCR text. Frozen Yedioth algorithms unchanged. No Firebase or Canonical deployment. Existing Gemini/OpenAI remote errors not fixed; on-device runtime proof still pending. Original signer and updater-manifest checks required before release.'}
+          pathlib.Path('cloud-releases/v0.15.212-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('STAGED_V212_SHA256',cfg['patchSha256'])
+          PY
+          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" clean -fdq
+          git -C "$ROOT" apply --check /tmp/higi212/v212.patch
+          git -C "$ROOT" apply /tmp/higi212/v212.patch
+          python3 "$ROOT/tools/sync-release-version.py" --check --root "$ROOT"
+          grep -q 'versionCode = 362' "$ROOT/app/build.gradle.kts"
+          git add cloud-patches/v0.15.212-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.212-DRY.json
+          git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage verified Higi 0.15.212 HAFUCH DRY source and manifest'
+          git push origin HEAD:main
+          echo 'STAGED_NOT_PUBLISHED: existing Windows DRY workflow must check original signer, APK version, and manifest'
