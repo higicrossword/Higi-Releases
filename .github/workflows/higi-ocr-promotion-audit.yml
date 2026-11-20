@@ -113,12 +113,14 @@ jobs:
           'app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt',
           'app/src/main/java/com/example/hebrewcrossword/OcrSeriesPromotionV213.kt',
           'app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt',
+          'app/src/main/java/com/example/hebrewcrossword/HafuchOcrWordReviewV214.kt',
+          'app/src/test/java/com/example/hebrewcrossword/HafuchOcrWordReviewV214Test.kt',
           'app/src/test/java/com/example/hebrewcrossword/OcrSeriesPromotionV213Test.kt'
           }
           assert names==expected,('Unexpected source changes',sorted(names.symmetric_difference(expected)))
           for file in ['OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','HafuchGridTemplate.kt']:
               assert 'app/src/main/java/com/example/hebrewcrossword/'+file not in names,file
-          print('PASS eight-file guarded promotion; fixed OCR geometry algorithms unchanged')
+          print('PASS ten-file guarded promotion; frozen Yedioth OCR rules unchanged')
           PY
           git -C "$ROOT" diff --binary > /tmp/higi-ocr/ocr-v213-staged.patch
           sha256sum /tmp/higi-ocr/ocr-v213-staged.patch
