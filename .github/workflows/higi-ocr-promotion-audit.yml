@@ -109,12 +109,15 @@ jobs:
           'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt',
           'app/src/main/java/com/example/hebrewcrossword/AdminLibraryRedecodeRunner.kt',
           'app/src/main/java/com/example/hebrewcrossword/OcrSeriesActivationV213.kt',
-          'app/src/test/java/com/example/hebrewcrossword/OcrSeriesActivationV213Test.kt'
+          'app/src/test/java/com/example/hebrewcrossword/OcrSeriesActivationV213Test.kt',
+          'app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt',
+          'app/src/main/java/com/example/hebrewcrossword/OcrSeriesPromotionV213.kt',
+          'app/src/test/java/com/example/hebrewcrossword/OcrSeriesPromotionV213Test.kt'
           }
           assert names==expected,('Unexpected source changes',sorted(names.symmetric_difference(expected)))
-          for file in ['HigiLocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','LocalOcrCropPass.kt','HafuchGridTemplate.kt']:
+          for file in ['HigiLocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','HafuchGridTemplate.kt']:
               assert 'app/src/main/java/com/example/hebrewcrossword/'+file not in names,file
-          print('PASS four-file-only guarded integration; frozen OCR engines untouched')
+          print('PASS seven-file guarded promotion; frozen OCR engines untouched')
           PY
           git -C "$ROOT" diff --binary > /tmp/higi-ocr/ocr-v213-staged.patch
           sha256sum /tmp/higi-ocr/ocr-v213-staged.patch
@@ -143,3 +146,16 @@ jobs:
               for i in range(lo-1,min(hi,len(lines))):
                 print(f'{i+1:05d} {lines[i][:315]}')
           PY
+
+      - name: Android JVM regression and DRY compilation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi-ocr/gradle-v213.log 2>&1 || {
+            tail -120 /tmp/higi-ocr/gradle-v213.log
+            exit 1
+          }
+          tail -24 /tmp/higi-ocr/gradle-v213.log
+          echo "OCR_PROMOTION_COMPILE_OK; SOURCE_ONLY_NO_RELEASE"
