@@ -1,0 +1,67 @@
+name: Higi v212 three-series OCR read-only source audit
+on:
+  push:
+    branches: ['feature/ocr-promote-3series-v212']
+    paths: ['.github/workflows/higi-three-series-ocr-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct verified v212 without touching production
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-3series
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi-3series/base.zip \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-3series/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi-3series/base.zip -d /tmp/higi-3series
+          ROOT=/tmp/higi-3series/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" init -q
+          python3 - <<'PY'
+          import base64,lzma,hashlib,json,pathlib
+          cfg=json.loads(pathlib.Path('cloud-releases/v0.15.212-DRY.json').read_text())
+          assert cfg['version']=='0.15.212' and cfg['versionCode']==362
+          data=lzma.decompress(base64.b64decode(''.join(pathlib.Path(cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(data).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi-3series/v212.patch').write_bytes(data)
+          print('VERIFIED_V212_SOURCE_SHA',cfg['patchSha256'])
+          PY
+          git -C "$ROOT" apply --check /tmp/higi-3series/v212.patch
+          git -C "$ROOT" apply /tmp/higi-3series/v212.patch
+      - name: Inspect active OCR/REVIEW gating and exact profile routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higi-3series/HebrewCrosswordApp_v0.15.175')
+          base=root/'app/src/main/java/com/example/hebrewcrossword'
+          ranges={
+          'LocalOcrCropPass.kt':[(1,220)],
+          'HigiLocalOcrCropEngine.kt':[(640,830)],
+          'OcrSeriesPreviewV197.kt':[(1,210)],
+          'AdminOcrRecropActivity.kt':[(265,365)],
+          'HafuchGridTemplate.kt':[(1,100)],
+          'OcrSeriesProfilesV197.kt':[(1,90)]
+          }
+          for name,rr in ranges.items():
+            path=base/name
+            print('### FILE',name,'exists',path.exists())
+            if not path.exists():continue
+            l=path.read_text(errors='replace').splitlines()
+            for lo,hi in rr:
+              for i in range(lo-1,min(hi,len(l))):
+                print(f'{i+1:04d} {l[i][:350]}')
+          PY
