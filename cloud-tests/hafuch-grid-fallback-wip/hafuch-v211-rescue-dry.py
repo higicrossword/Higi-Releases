@@ -37,7 +37,7 @@ new='''        return found
     fun verifiedBounds(source:Bitmap):BoxF? = verifiedLocated(source)?.bounds
 }'''
 assert s.count(old)==1,"template return anchor"
-print('TEMPLATE_BEFORE_ASSERT',repr(s[-550:]))
+s=s.replace(old,new)
 assert 'fun verifiedBounds(source:Bitmap):BoxF? = verifiedLocated(source)?.bounds' in s
 assert 'return found.bounds' not in s
 template.write_text(s)
