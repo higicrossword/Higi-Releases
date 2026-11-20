@@ -240,3 +240,192 @@ new="""if(refineSharedRows &&
 assert src.count(old)==1,("V201 final audit guard",src.count(old))
 crop.write_text(src.replace(old,new))
 print("PRODUCTION_WEEKLY_V199_ACTIVATION: series-only; DRY V208 repair remains review-only")
+
+# HAFUCH_DEKEL: separate, conservative, source-word based REVIEW ONLY candidate
+# proposal path. Reuses the existing OCR word pass, never the Yedioth V199 rules.
+hafuch=base/"HafuchOcrWordReviewV214.kt"
+assert not hafuch.exists()
+hafuch.write_text("""package com.example.hebrewcrossword
+
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Exactly HAFUCH_DEKEL, not a publisher-wide shared OCR rule.
+ * Source-grounded physical word crops for administrator review only.
+ * Neither AUTO-TRUSTED nor Canonical/Firebase writes occur here.
+ */
+internal object HafuchOcrWordReviewV214 {
+    data class Result(val proposals:Map<String,List<CropRect>>,
+                      val reasons:Map<String,String>)
+    private val start=Regex("^[0-9]{1,2}[.:]$")
+    private val enumToken=Regex("^\\\\(\\\\d{1,2}(?:[, ]\\\\d{1,2})*\\\\)[.:;,]?$")
+    fun allowedSeries(id:String?):Boolean=id=="HAFUCH_DEKEL"
+    fun printedNumber(token:String):Int? {
+        val s=token.trim()
+        return if(start.matches(s))s.dropLast(1).toIntOrNull() else null
+    }
+    fun printedLength(token:String):Boolean=enumToken.matches(token.trim())
+    private fun cx(b:CropRect)=(b.left+b.right)/2
+    private fun cy(b:CropRect)=(b.top+b.bottom)/2
+
+    fun inspect(
+        seriesId:String?,
+        words:List<OcrSharedRowSplitterV161.Word>,
+        lines:List<OcrTextLocatorV033.Line>,
+        expected:Set<String>,
+        gridRightPx:Int?,w:Int,h:Int
+    ):Result {
+        val rejected=Result(emptyMap(),emptyMap())
+        if(!allowedSeries(seriesId) || gridRightPx==null || w<600 || h<350 ||
+           gridRightPx !in (w*.35).toInt()..(w*.80).toInt() ||
+           expected.count{it.startsWith("H")}!=14 ||
+           expected.count{it.startsWith("V")}!=14) return rejected
+        val margin=max(3,w/350)
+        val minLeft=gridRightPx+margin
+        val horizontal=lines.filter{it.box.valid && it.box.left>=minLeft &&
+            it.text.trim().startsWith("מאוזן")}
+        val vertical=lines.filter{it.box.valid && it.box.left>=minLeft &&
+            it.text.trim().startsWith("מאונך")}
+        // Missing/duplicate printed headings are not permission to invent sections.
+        if(horizontal.size!=1 || vertical.size!=1) return rejected
+        val hTop=horizontal.single().box.top
+        val vTop=vertical.single().box.top
+        if(hTop !in 0 until vTop || vTop !in 0 until h) return rejected
+
+        val src=words.filter{it.box.valid && it.confidence>=15 &&
+            it.box.left>=minLeft && it.box.right<w && it.box.top>=hTop &&
+            it.box.bottom<=h}
+        if(src.isEmpty())return rejected
+        val heights=src.map{it.box.bottom-it.box.top}.filter{it>=5}.sorted()
+        if(heights.isEmpty())return rejected
+        val tolerance=(heights[heights.size/2]/2).coerceIn(5,15)
+        val proposals=linkedMapOf<String,List<CropRect>>()
+        val reasons=linkedMapOf<String,String>()
+        for(dir in listOf('H','V')) {
+            val begin=if(dir=='H')hTop else vTop
+            val end=if(dir=='H')vTop else h
+            val inSection=src.filter{cy(it.box)>=begin && cy(it.box)<end}
+            val nums=expected.filter{it.firstOrNull()==dir}
+                .mapNotNull{it.drop(1).toIntOrNull()}.sorted()
+            val anchors=inSection.filter{it.confidence>=60 &&
+                printedNumber(it.text) in nums}
+                .groupBy{printedNumber(it.text)}
+            // The final clue requires additional independent end-of-section evidence.
+            // No unconditional extension into the footer or opposite heading.
+            for(index in 0 until nums.lastIndex) {
+                val label=dir.toString()+nums[index]
+                val own=anchors[nums[index]]?.singleOrNull()
+                val next=anchors[nums[index+1]]?.singleOrNull()
+                if(own==null || next==null) {
+                    reasons[label]="HAFUCH_START_OR_NEXT_UNVERIFIED"
+                    continue
+                }
+                val a=own.box;val b=next.box
+                if(cy(a)>cy(b)+tolerance ||
+                   (abs(cy(a)-cy(b))<=tolerance && cx(a)<=cx(b))) {
+                    reasons[label]="HAFUCH_NON_MONOTONIC_PRINTED_ANCHORS"
+                    continue
+                }
+                val selected=inSection.filter{token->
+                    val box=token.box
+                    val y=cy(box)
+                    val afterStart=y>cy(a)+tolerance ||
+                        (abs(y-cy(a))<=tolerance && cx(box)<=cx(a))
+                    val beforeNext=y<cy(b)-tolerance ||
+                        (abs(y-cy(b))<=tolerance && cx(box)>cx(b))
+                    afterStart && beforeNext
+                }.distinct().sortedWith(compareBy({cy(it.box)},{-cx(it.box)}))
+                if(own !in selected || selected.size<3 ||
+                   selected.any{it!==own && printedNumber(it.text)!=null}) {
+                    reasons[label]="HAFUCH_SHARED_ROW_OR_OWNERSHIP_AMBIGUOUS"
+                    continue
+                }
+                val rows=mutableListOf<MutableList<OcrSharedRowSplitterV161.Word>>()
+                selected.forEach{word->
+                    val previous=rows.lastOrNull()
+                    if(previous!=null && abs(cy(word.box)-previous.map{cy(it.box)}.average())<=tolerance)
+                        previous.add(word)
+                    else rows.add(mutableListOf(word))
+                }
+                if(rows.size !in 1..6)continue
+                val rects=rows.map { row ->
+                    CropRect((row.minOf{it.box.left}-2).coerceAtLeast(minLeft),
+                        (row.minOf{it.box.top}-2).coerceAtLeast(begin),
+                        (row.maxOf{it.box.right}+2).coerceAtMost(w),
+                        (row.maxOf{it.box.bottom}+2).coerceAtMost(end))
+                }
+                if(rects.any{!it.valid || it.right-it.left<9})continue
+                // Without source OCR recognition of the terminal enumeration,
+                // keep a visible candidate, but NEVER make it trusted.
+                val lengthRecognized=selected.any{printedLength(it.text)}
+                proposals[label]=rects
+                reasons[label]=if(lengthRecognized)
+                    "HAFUCH_SOURCE_WORD_REVIEW_ONLY: numbered boundaries and length seen"
+                    else "HAFUCH_LENGTH_UNVERIFIED_REVIEW_ONLY"
+            }
+        }
+        return Result(proposals,reasons)
+    }
+}
+""")
+engine=base/"HigiLocalOcrCropEngine.kt"
+src=engine.read_text()
+anchor="""        expected.forEach{e->val k=key(e.key); if(k !in accepted)unresolved.putIfAbsent(k,"NO_SAFE_OCR_CROP")}"""
+assert src.count(anchor)==1,("HAFUCH insertion point",src.count(anchor))
+replacement="""        // Hafuch source-word candidates are independent and strictly review-only.
+        // Do not replace a verified candidate or a more-specific existing preview.
+        if(refineSharedRows && layoutSeriesId==OcrSeriesProfilesV197.HAFUCH.id &&
+            auditWords.isNotEmpty() && crossword.rows==13 && crossword.cols==13 &&
+            HafuchGridTemplate.forSeries(layoutSeriesId)?.let{
+                GridConsistency.blockedMask(it)==GridConsistency.blockedMask(crossword)
+            }==true) {
+            val gridRight=gridPoints.takeIf{it.size==4}?.maxOf{it.x}?.roundToInt()
+            val hafuch=HafuchOcrWordReviewV214.inspect(layoutSeriesId,auditWords,lines,
+                expectedWires,gridRight,w,h)
+            hafuch.proposals.forEach { (label,parts) ->
+                val k=key(label)
+                if(k !in accepted && k !in newPreviews) {
+                    val candidate=geometry(parts,w,h)
+                    if(ClueRegionValidation.validateGeometryNormalized(
+                            candidate,w,h,gridPoints).usable) {
+                        newPreviews[k]=candidate
+                        newPreviewReasons[k]=hafuch.reasons[label].orEmpty()
+                    }
+                }
+            }
+            DebugLog.i("LOCAL_OCR_HAFUCH","reviewOnly="+hafuch.proposals.size+
+                " expected=28 noCanonicalWrite=true")
+        }
+""" + anchor
+src=src.replace(anchor,replacement)
+engine.write_text(src)
+test=root/"app/src/test/java/com/example/hebrewcrossword/HafuchOcrWordReviewV214Test.kt"
+assert not test.exists()
+test.write_text("""package com.example.hebrewcrossword
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class HafuchOcrWordReviewV214Test {
+    @Test fun exactSeriesOnlyAndStrictNumbers() {
+        assertTrue(HafuchOcrWordReviewV214.allowedSeries("HAFUCH_DEKEL"))
+        for(id in listOf<String?>(null,"","YEDIOTH_DEKEL_WEEKLY",
+            "YEDIOTH_MONDAY_DEKEL","YEDIOTH_WEDNESDAY_DEKEL","TARTEY_DEKEL"))
+            assertFalse(HafuchOcrWordReviewV214.allowedSeries(id))
+        assertEquals(23,HafuchOcrWordReviewV214.printedNumber("23."))
+        assertEquals(1,HafuchOcrWordReviewV214.printedNumber("1:"))
+        assertNull(HafuchOcrWordReviewV214.printedNumber("23"))
+        assertNull(HafuchOcrWordReviewV214.printedNumber("(3)"))
+        assertNull(HafuchOcrWordReviewV214.printedNumber("123."))
+    }
+    @Test fun printedLengthGrammar() {
+        assertTrue(HafuchOcrWordReviewV214.printedLength("(3)"))
+        assertTrue(HafuchOcrWordReviewV214.printedLength("(3,4,2);"))
+        assertFalse(HafuchOcrWordReviewV214.printedLength("3"))
+        assertFalse(HafuchOcrWordReviewV214.printedLength("23."))
+    }
+}
+""")
+print("HAFUCH_REVIEW_ONLY_STAGE",hafuch.name,test.name)
