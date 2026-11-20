@@ -153,6 +153,8 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=/tmp/higiaudit/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm "verified reconstructed v211 baseline"
           python3 cloud-tests/hafuch-grid-fallback-wip/hafuch-v211-rescue-dry.py "$ROOT"
           git -C "$ROOT" diff --check
           python3 - <<'PY'
