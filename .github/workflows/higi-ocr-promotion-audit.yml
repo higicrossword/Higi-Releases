@@ -4,7 +4,7 @@ on:
     branches: ['feature/ocr-promote-3series-v212']
     paths: ['.github/workflows/higi-ocr-promotion-audit.yml']
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
