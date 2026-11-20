@@ -99,3 +99,22 @@ jobs:
               for i in range(lo-1,min(hi,len(lines))):
                 print(f'{i+1:05d} {lines[i]}')
           PY
+
+      - name: Inspect room creation seeded cells and room connection cache
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/higi-room/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          sections={
+          'FirebaseSharing.kt':[(112,190),(215,320),(320,425),(631,653),(1100,1155)],
+          'MainActivity.kt':[(1940,2027),(875,911)],
+          'SharingLogic.kt':[(150,255)]
+          }
+          for name,rs in sections.items():
+            lines=(p/name).read_text().splitlines()
+            for lo,hi in rs:
+              print(f'=== {name} {lo}-{hi}')
+              for i in range(lo-1,min(hi,len(lines))):
+                print(f'{i+1:05d} {lines[i]}')
+          PY
