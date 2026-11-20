@@ -39,6 +39,31 @@ jobs:
           pathlib.Path('/tmp/higiaudit/v211.patch').write_bytes(patch)
           print('PATCH_VERIFIED',len(patch))
           PY
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higiaudit/HebrewCrosswordApp_v0.15.175')
+
+          print('---- OTHER_DIAGNOSTICS ----')
+          for relative,lo,hi in [
+              ('app/src/main/java/com/example/hebrewcrossword/OpenAiWorkerClient.kt',125,205),
+              ('app/src/main/java/com/example/hebrewcrossword/MainActivity.kt',3700,3830),
+          ]:
+              p=root/relative
+              print('CONTEXT',relative,'exists',p.exists())
+              if p.exists():
+                  ls=p.read_text(errors='replace').splitlines()
+                  for i in range(lo-1,min(hi,len(ls))):
+                      print(f'{i+1:05d} {ls[i][:300]}')
+          needles=['HAFUCH_DEKEL','HafuchGrid','hafuchGrid','fallbackGrid','fallback-grid','fingerprint','refinementSource','source-image-size']
+          matches=[]
+          for p in (root/'app/src/main/java').rglob('*.kt'):
+              for i,line in enumerate(p.read_text(errors='replace').splitlines(),1):
+                  if any(n in line for n in needles) and not p.name.startswith('MainActivity'):
+                      matches.append((str(p.relative_to(root)),i,line.strip()))
+          print('SOURCE_SEARCH_TOTAL',len(matches))
+          for path,line,s in matches[:75]:
+              print('SOURCE_SEARCH',path,line,s[:180])
+          PY
           git -C "$ROOT" apply --check /tmp/higiaudit/v211.patch
           git -C "$ROOT" apply /tmp/higiaudit/v211.patch
           echo 'RECONSTRUCTED_VERSION:'
