@@ -37,7 +37,10 @@ new='''        return found
     fun verifiedBounds(source:Bitmap):BoxF? = verifiedLocated(source)?.bounds
 }'''
 assert s.count(old)==1,"template return anchor"
+assert 'fun verifiedBounds(source:Bitmap):BoxF? = verifiedLocated(source)?.bounds' in s
+assert 'return found.bounds' not in s
 template.write_text(s)
+print('TEMPLATE_FINAL',repr(s[-600:]))
 
 s=main.read_text()
 old='''        val located=GridDetector.locate(original, knownLayout) ?: error("לא זוהתה רשת באופן אוטומטי")
