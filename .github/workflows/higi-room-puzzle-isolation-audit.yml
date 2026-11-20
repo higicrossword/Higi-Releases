@@ -4,7 +4,7 @@ on:
     branches: [analysis/shared-room-puzzle-isolation-20261120]
     paths: ['.github/workflows/higi-room-puzzle-isolation-audit.yml', 'cloud-tests/room-puzzle-isolation/**']
 permissions:
-  contents: read
+  contents: write
 jobs:
   audit:
     runs-on: ubuntu-latest
