@@ -180,7 +180,7 @@ jobs:
           python3 - <<'PY'
           import base64,lzma,hashlib,pathlib
           p=pathlib.Path('cloud-tests/hafuch-grid-fallback-wip/hafuch-grid-fallback.patch.xz.b64')
-          raw=lzma.decompress(base64.b64decode(p.read_text().strip(),validate=True))
+          raw=lzma.decompress(base64.b64decode(''.join(p.read_text().split()),validate=True))
           digest=hashlib.sha256(raw).hexdigest()
           assert digest=='2b85ad6574c58b0ef3db5018f8008614d1ddbb1b47e7f6241e4bd5b5793165f8',digest
           pathlib.Path('/tmp/higiaudit/hafuch-reference.patch').write_bytes(raw)
@@ -188,6 +188,7 @@ jobs:
           for line in raw.decode().splitlines():
               if line.startswith('diff --git '): print('HAFUCH_WIP_PATH',line)
           PY
+          git -C "$ROOT" reset --hard -q HEAD
           if git -C "$ROOT" apply --check /tmp/higiaudit/hafuch-reference.patch;then
             echo 'HAFUCH_V211_DIRECT_APPLY=YES'
           else
