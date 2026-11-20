@@ -1,0 +1,65 @@
+name: Higi active OCR promotion read-only investigation
+on:
+  push:
+    branches: ['feature/ocr-promote-3series-v212']
+    paths: ['.github/workflows/higi-ocr-promotion-audit.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: reconstruct and inspect v212 crop pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-ocr
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi-ocr/base.zip \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-ocr/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi-ocr/base.zip -d /tmp/higi-ocr
+          ROOT=/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm baseline
+          python3 - <<'PY'
+          import base64,lzma,hashlib,json,pathlib
+          cfg=json.loads(pathlib.Path('cloud-releases/v0.15.212-DRY.json').read_text())
+          raw=lzma.decompress(base64.b64decode(''.join(pathlib.Path(cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi-ocr/v212.patch').write_bytes(raw)
+          PY
+          git -C "$ROOT" apply /tmp/higi-ocr/v212.patch
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm v212
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175')
+          p=root/'app/src/main/java/com/example/hebrewcrossword'
+          for name,ranges in [
+            ('HigiLocalOcrCropEngine.kt',[(635,825)]),
+            ('LocalOcrCropPass.kt',[(1,195)]),
+            ('OcrSeriesPreviewV197.kt',[(1,210)]),
+            ('AdminOcrRecropActivity.kt',[(285,360),(480,570),(920,990)]),
+            ('OcrWeeklySourceAnchorsV199.kt',[(1,105),(195,225)]),
+            ('MainActivity.kt',[(1170,1230),(3890,3940)]),
+          ]:
+            fp=p/name
+            if not fp.exists():continue
+            lines=fp.read_text().splitlines()
+            print('=== SOURCE',name,len(lines))
+            for lo,hi in ranges:
+              print('--- RANGE',lo,hi)
+              for i in range(lo-1,min(hi,len(lines))):
+                print(f'{i+1:05d} {lines[i][:280]}')
+          PY
