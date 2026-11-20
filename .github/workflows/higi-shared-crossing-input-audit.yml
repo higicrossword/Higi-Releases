@@ -13,6 +13,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
       - name: Rebuild source 0.15.212 and find keyboard-cell/room handlers
         shell: bash
         run: |
@@ -98,3 +105,37 @@ jobs:
               for i in range(lo-1,min(hi,len(lines))):
                 print(f'{i+1:05d} {lines[i][:295]}')
           PY
+
+      - name: Apply strictly isolated crossword session input fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higi-audit/HebrewCrosswordApp_v0.15.175
+          python3 cloud-tests/shared-crossing-input-stall/fix-protected-crossing-input.py "$ROOT"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          p=Path('/tmp/higi-audit/HebrewCrosswordApp_v0.15.175')
+          changed=set(subprocess.check_output(['git','-C',str(p),'diff','--name-only'],text=True).splitlines())
+          original=subprocess.check_output(['git','-C',str(p),'diff','--name-only','--','app/src/main/java/com/example/hebrewcrossword'],text=True).splitlines()
+          expected={
+          'app/src/main/java/com/example/hebrewcrossword/CrosswordSession.kt',
+          'app/src/test/java/com/example/hebrewcrossword/CrosswordProtectedCrossingTypingRegressionTest.kt'
+          }
+          assert changed==expected,('Unexpected files altered',changed)
+          assert original==['app/src/main/java/com/example/hebrewcrossword/CrosswordSession.kt'],original
+          print('SOURCE_DIFF_SCOPE_PASS only CrosswordSession and regression test')
+          PY
+      - name: Build unit-test corrected crossing input without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/higi-audit/HebrewCrosswordApp_v0.15.175
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --tests '*CrosswordProtectedCrossingTypingRegressionTest' > /tmp/higi-audit/tests.log 2>&1 || {
+             tail -90 /tmp/higi-audit/tests.log
+             exit 1
+          }
+          tail -18 /tmp/higi-audit/tests.log
+          echo CROSSING_INPUT_TEST_PASS_NO_RELEASE
