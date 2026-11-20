@@ -111,6 +111,8 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=/tmp/higi-audit/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm v212
           python3 cloud-tests/shared-crossing-input-stall/fix-protected-crossing-input.py "$ROOT"
           git -C "$ROOT" add -N -A
           git -C "$ROOT" diff --check
