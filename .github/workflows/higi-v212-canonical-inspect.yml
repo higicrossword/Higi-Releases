@@ -1,0 +1,92 @@
+name: Higi 0.15.212 Canonical publish route inspection (read only)
+on:
+  push:
+    branches: ['analysis/pressreader-v211-20261120']
+    paths: ['.github/workflows/higi-v212-canonical-inspect.yml']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Reconstruct validated v212 and find real Canonical publishing UI & DRY guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-canon
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi-canon/base.zip \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-canon/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi-canon/base.zip -d /tmp/higi-canon
+          ROOT=/tmp/higi-canon/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" init -q
+          python3 - <<'PY'
+          import base64,lzma,hashlib,json,pathlib
+          cfg=json.loads(pathlib.Path('cloud-releases/v0.15.212-DRY.json').read_text())
+          assert cfg['version']=='0.15.212' and cfg['versionCode']==362
+          data=lzma.decompress(base64.b64decode(''.join(pathlib.Path(cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(data).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi-canon/v212.patch').write_bytes(data)
+          PY
+          git -C "$ROOT" apply --check /tmp/higi-canon/v212.patch
+          git -C "$ROOT" apply /tmp/higi-canon/v212.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higi-canon/HebrewCrosswordApp_v0.15.175')
+          pkg=root/'app/src/main/java/com/example/hebrewcrossword'
+          print('CONFIRMED_VERSION',[(s.strip()) for s in (root/'app/build.gradle.kts').read_text().splitlines() if 'versionCode =' in s or 'versionName =' in s][:4])
+          search=[
+            'גרסת DRY אינה מפרסמת',
+            'DRY local-only',
+            'canonical-publish-skipped',
+            'single publish-failed',
+            'ADMIN_REDECODE_CANONICAL',
+            'HIGI_DRY_BUILD',
+            'publishCanonical',
+            'publishRe',
+            'saveToCanonical',
+            'CanonicalPuzzleCloud',
+            'עדכן קנוני',
+            'שמור בקנוני',
+            'פרסם לקנוני',
+            'לקנוני',
+          ]
+          paths=['AdminLibraryRedecodeRunner.kt','MainActivity.kt','CanonicalPuzzleCloud.kt','AdminOcrRecropActivity.kt','AdminPuzzleMenu.kt','PuzzleLibraryDialog.kt','RecentCrosswordsActivity.kt','AdminClueRegionsActivity.kt']
+          for name in paths:
+            p=pkg/name
+            if not p.is_file(): continue
+            l=p.read_text(errors='replace').splitlines()
+            hits=[i for i,x in enumerate(l) if any(t in x for t in search)]
+            print('FILE',name,'LINES',len(l),'HITS',len(hits))
+            positions=set()
+            for i in hits:
+              if name in ('AdminLibraryRedecodeRunner.kt','CanonicalPuzzleCloud.kt'):
+                lo,hi=max(0,i-5),min(len(l),i+12)
+              else: lo,hi=max(0,i-3),min(len(l),i+7)
+              for j in range(lo,hi):positions.add(j)
+            if len(positions)>270:
+              print('EXCESS MATCHES; showing only first 270 relevant context lines')
+              positions=set(sorted(positions)[:270])
+            prev=-2
+            for j in sorted(positions):
+              if j>prev+1:print('..')
+              print(f'{j+1:05d} {l[j][:260]}')
+              prev=j
+          print('SPECIFIC_WRITE_GUARDS')
+          for p in pkg.rglob('*.kt'):
+            if p.name in paths:continue
+            l=p.read_text(errors='replace').splitlines()
+            for i,line in enumerate(l):
+              if any(t in line for t in ['גרסת DRY אינה מפרסמת','DRY local-only','publish-failed','canonical-publish-skipped']):
+                print(p.name,i+1,line[:220])
+          PY
