@@ -112,12 +112,13 @@ jobs:
           'app/src/test/java/com/example/hebrewcrossword/OcrSeriesActivationV213Test.kt',
           'app/src/main/java/com/example/hebrewcrossword/LocalOcrCropPass.kt',
           'app/src/main/java/com/example/hebrewcrossword/OcrSeriesPromotionV213.kt',
+          'app/src/main/java/com/example/hebrewcrossword/HigiLocalOcrCropEngine.kt',
           'app/src/test/java/com/example/hebrewcrossword/OcrSeriesPromotionV213Test.kt'
           }
           assert names==expected,('Unexpected source changes',sorted(names.symmetric_difference(expected)))
-          for file in ['HigiLocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','HafuchGridTemplate.kt']:
+          for file in ['OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','HafuchGridTemplate.kt']:
               assert 'app/src/main/java/com/example/hebrewcrossword/'+file not in names,file
-          print('PASS seven-file guarded promotion; frozen OCR engines untouched')
+          print('PASS eight-file guarded promotion; fixed OCR geometry algorithms unchanged')
           PY
           git -C "$ROOT" diff --binary > /tmp/higi-ocr/ocr-v213-staged.patch
           sha256sum /tmp/higi-ocr/ocr-v213-staged.patch
@@ -159,3 +160,9 @@ jobs:
           }
           tail -24 /tmp/higi-ocr/gradle-v213.log
           echo "OCR_PROMOTION_COMPILE_OK; SOURCE_ONLY_NO_RELEASE"
+          gradle --no-daemon -PhigiDryBuild=false :app:compileDebugKotlin > /tmp/higi-ocr/gradle-normal.log 2>&1 || {
+            tail -100 /tmp/higi-ocr/gradle-normal.log
+            exit 1
+          }
+          tail -12 /tmp/higi-ocr/gradle-normal.log
+          echo "NORMAL_COMPILE_OK; NO_CANONICAL_WRITES"
