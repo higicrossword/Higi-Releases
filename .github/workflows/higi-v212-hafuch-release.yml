@@ -80,6 +80,8 @@ jobs:
           git -C "$ROOT" apply /tmp/higi212/v211.patch
           grep -q 'versionCode = 361' "$ROOT/app/build.gradle.kts"
           grep -q 'versionName = "0.15.211"' "$ROOT/app/build.gradle.kts"
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Higi -c user.email=higi@localhost commit -qm 'verified published v211 source'
           git -C "$ROOT" apply --check /tmp/higi212/hafuch.patch
           git -C "$ROOT" apply /tmp/higi212/hafuch.patch
           python3 - <<'PY'
@@ -130,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           git -C "$ROOT" add -N -A
-          git -C "$ROOT" diff --binary HEAD > /tmp/higi212/v212.patch
+          git -C "$ROOT" diff --binary HEAD~1 > /tmp/higi212/v212.patch
           test -s /tmp/higi212/v212.patch
           python3 - <<'PY'
           import base64,hashlib,json,lzma,pathlib
@@ -143,7 +145,7 @@ jobs:
           pathlib.Path('cloud-releases/v0.15.212-DRY.json').write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
           print('STAGED_V212_SHA256',cfg['patchSha256'])
           PY
-          git -C "$ROOT" reset --hard -q HEAD
+          git -C "$ROOT" reset --hard -q HEAD~1
           git -C "$ROOT" clean -fdq
           git -C "$ROOT" apply --check /tmp/higi212/v212.patch
           git -C "$ROOT" apply /tmp/higi212/v212.patch
