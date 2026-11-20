@@ -2,14 +2,14 @@ name: Higi v211 PressReader reconstructed-source read-only audit
 on:
   push:
     branches: ['analysis/pressreader-v211-20261120']
-    paths: ['.github/workflows/higi-pressreader-v211-audit.yml']
+    paths: ['.github/workflows/higi-pressreader-v211-audit.yml', 'cloud-tests/hafuch-grid-fallback-wip/hafuch-v211-rescue-dry.py']
   workflow_dispatch:
 permissions:
   contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 28
     steps:
       - uses: actions/checkout@v4
       - name: Reconstruct verified full source and examine parser context
@@ -147,3 +147,31 @@ jobs:
                   if 'HafuchAdminSourceGridV1' in line:
                       print(p.name,i,line.strip()[:250])
           PY
+
+      - name: Apply isolated HAFUCH rescue in reconstructed temporary tree and run JVM tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higiaudit/HebrewCrosswordApp_v0.15.175
+          python3 cloud-tests/hafuch-grid-fallback-wip/hafuch-v211-rescue-dry.py "$ROOT"
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          root='/tmp/higiaudit/HebrewCrosswordApp_v0.15.175'
+          names=subprocess.check_output(['git','-C',root,'diff','--name-only'],text=True).splitlines()
+          expected={'app/src/main/java/com/example/hebrewcrossword/HafuchAdminSourceGridV1.kt','app/src/main/java/com/example/hebrewcrossword/MainActivity.kt'}
+          assert set(names)==expected,(names,expected)
+          main=Path(root,'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt').read_text()
+          assert 'fromCanonicalTitle(cleanSuggested.orEmpty())?.id=="HAFUCH_DEKEL"' in main
+          assert 'verifiedLocated(original)' in main
+          assert 'hafuchVerified!=null || located.variant.startsWith("template-")' in main
+          print('PASS isolated HAFUCH series guard and pixel verification')
+          PY
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higiaudit/gradle.log 2>&1 || {
+            tail -130 /tmp/higiaudit/gradle.log
+            exit 1
+          }
+          tail -30 /tmp/higiaudit/gradle.log
+          echo "DRY_VERIFIED_ONLY_NO_RELEASE_NO_CANONICAL_WRITE"
