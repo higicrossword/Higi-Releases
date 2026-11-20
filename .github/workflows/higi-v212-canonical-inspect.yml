@@ -90,3 +90,39 @@ jobs:
               if any(t in line for t in ['גרסת DRY אינה מפרסמת','DRY local-only','publish-failed','canonical-publish-skipped']):
                 print(p.name,i+1,line[:220])
           PY
+
+      - name: Verify active series crop routing versus DRY previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path('/tmp/higi-canon/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          terms=['HAFUCH_DEKEL','HafuchGridTemplate','YEDIOT','YEDIOTH','MONDAY','WEDNESDAY','SECOND','FOURTH','WEEKLY','HIGI_DRY_BUILD','DRY_REVIEW_ONLY','DRY_PREVIEW_ONLY','noCloudWrite','canonicalWrite','PREVIEW_ONLY','accept','persist']
+          files=['OcrSeriesProfilesV197.kt','AdminOcrRecropActivity.kt','LocalOcrCropPass.kt','LocalOcrGeometryAuthority.kt','LocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','HafuchGridTemplate.kt','MainActivity.kt']
+          for file in files:
+            p=base/file
+            if not p.exists():continue
+            lines=p.read_text(errors='replace').splitlines()
+            print('####',file,'lines',len(lines))
+            if file in ('OcrSeriesProfilesV197.kt','OcrWeeklyFinalGeometryV201.kt','HafuchGridTemplate.kt'):
+              for i,line in enumerate(lines[:260],1):
+                print(f'{i:05d} {line[:265]}')
+              continue
+            hits=[i for i,line in enumerate(lines) if any(x in line for x in terms[:9]) and (file!='MainActivity.kt' or any(x in line for x in terms[:8]))]
+            print('MATCHES',len(hits))
+            for i in hits[:65]:
+              for j in range(max(0,i-2),min(len(lines),i+3)):
+                print(f'{j+1:05d} {lines[j][:260]}')
+              print('...')
+          print('#### CROPPER CLASS REFERENCES')
+          names=['OcrWeeklySourceAnchorsV199','OcrWeeklyFinalGeometryV201','HafuchGridTemplate','OcrSeriesProfilesV197','LocalOcrCropPass']
+          for name in names:
+            matches=[]
+            for p in base.rglob('*.kt'):
+              if p.name.startswith(name):continue
+              for i,line in enumerate(p.read_text(errors='replace').splitlines(),1):
+                if name in line:matches.append((p.name,i,line.strip()[:205]))
+            print(name,'count',len(matches))
+            for x in matches[:35]:print('REF',*x)
+          PY
