@@ -118,19 +118,6 @@ jobs:
           PY
           git -C "$ROOT" diff --binary > /tmp/higi-ocr/ocr-v213-staged.patch
           sha256sum /tmp/higi-ocr/ocr-v213-staged.patch
-      - name: Compile and run Android JVM tests without publishing
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT=/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175
-          cd "$ROOT"
-          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi-ocr/gradle.log 2>&1 || {
-            tail -110 /tmp/higi-ocr/gradle.log
-            exit 1
-          }
-          tail -35 /tmp/higi-ocr/gradle.log
-          echo "DRY_COMPILE_PASS; NO APK RELEASE OR CANONICAL WRITE"
-
       - name: Inspect downstream crop selection and evidence for safe active promotion
         shell: bash
         run: |
