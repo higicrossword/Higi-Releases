@@ -112,3 +112,20 @@ jobs:
               if 'class WeeklyGridSanity' in s or 'object WeeklyGridSanity' in s or 'class GridRefinement' in s or 'object GridRefinement' in s or 'class Hafuch' in s or 'object Hafuch' in s:
                   print('CLASS_PATH',p.relative_to(root))
           PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higiaudit/HebrewCrosswordApp_v0.15.175')
+          for name in ['HafuchAdminSourceGridV1.kt','GridDetector.kt']:
+              p=root/'app/src/main/java/com/example/hebrewcrossword'/name
+              print('==== CRITICAL',name,p.exists())
+              if p.exists():
+                  ls=p.read_text().splitlines()
+                  for i,line in enumerate(ls[:300]):
+                      if name=='GridDetector.kt' and i>140:break
+                      print(f'{i+1:05d} {line[:260]}')
+          p=root/'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt'
+          ls=p.read_text().splitlines()
+          for i in range(3710,min(3750,len(ls))):
+              print(f'MAIN_PREPARE {i+1:05d} {ls[i][:300]}')
+          PY
