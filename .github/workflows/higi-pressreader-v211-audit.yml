@@ -177,3 +177,25 @@ jobs:
           }
           tail -30 /tmp/higiaudit/gradle.log
           echo "DRY_VERIFIED_ONLY_NO_RELEASE_NO_CANONICAL_WRITE"
+
+      - name: Check historic six-path Hafuch template patch applies cleanly onto v211
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higiaudit/HebrewCrosswordApp_v0.15.175
+          python3 - <<'PY'
+          import base64,lzma,hashlib,pathlib
+          p=pathlib.Path('cloud-tests/hafuch-grid-fallback-wip/hafuch-grid-fallback.patch.xz.b64')
+          raw=lzma.decompress(base64.b64decode(p.read_text().strip(),validate=True))
+          digest=hashlib.sha256(raw).hexdigest()
+          assert digest=='2b85ad6574c58b0ef3db5018f8008614d1ddbb1b47e7f6241e4bd5b5793165f8',digest
+          pathlib.Path('/tmp/higiaudit/hafuch-reference.patch').write_bytes(raw)
+          print('HAFUCH_WIP_PATCH_SHA_VERIFIED',digest,len(raw))
+          for line in raw.decode().splitlines():
+              if line.startswith('diff --git '): print('HAFUCH_WIP_PATH',line)
+          PY
+          if git -C "$ROOT" apply --check /tmp/higiaudit/hafuch-reference.patch;then
+            echo 'HAFUCH_V211_DIRECT_APPLY=YES'
+          else
+            echo 'HAFUCH_V211_DIRECT_APPLY=NO; requires context reconciliation'
+          fi
