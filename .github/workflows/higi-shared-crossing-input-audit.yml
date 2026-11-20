@@ -73,3 +73,28 @@ jobs:
               if i<900:continue
               print(f'MAIN {i+1:05d} {line[:255]}')
           PY
+
+      - name: Focused source dump for typed key acceptance and solved crosses
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/higi-audit/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for name,ranges in [
+            ('CrosswordView.kt',[(1,160),(280,441)]),
+            ('CrosswordSession.kt',[(1,142)]),
+            ('CrosswordModel.kt',[(1,165)]),
+            ('SharedRoomFocus.kt',[(1,260)]),
+            ('SharedAnswerUiScheduler.kt',[(1,180)]),
+            ('ClueRaceActivity.kt',[(60,160),(420,650),(1000,1250),(1710,1950)]),
+            ('MainActivity.kt',[(2450,2550),(4300,4440)])
+          ]:
+            f=p/name
+            if not f.exists():continue
+            lines=f.read_text().splitlines()
+            print("==== FILE",name,"LINES",len(lines))
+            for lo,hi in ranges:
+              print("==== RANGE",lo,hi)
+              for i in range(lo-1,min(hi,len(lines))):
+                print(f'{i+1:05d} {lines[i][:295]}')
+          PY
