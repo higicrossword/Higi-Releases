@@ -1,0 +1,75 @@
+name: Higi crossing cell keyboard freeze source audit (read-only)
+on:
+  push:
+    branches: [analysis/shared-crossing-input-stall-20261120]
+    paths: ['.github/workflows/higi-shared-crossing-input-audit.yml']
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild source 0.15.212 and find keyboard-cell/room handlers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi-audit
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o /tmp/higi-audit/base.zip \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi-audit/base.zip' | sha256sum -c -
+          unzip -q /tmp/higi-audit/base.zip -d /tmp/higi-audit
+          ROOT=/tmp/higi-audit/HebrewCrosswordApp_v0.15.175
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm baseline
+          python3 - <<'PY'
+          import base64,lzma,hashlib,json,pathlib
+          cfg=json.loads(pathlib.Path('cloud-releases/v0.15.212-DRY.json').read_text())
+          data=lzma.decompress(base64.b64decode(''.join(pathlib.Path(cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(data).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi-audit/v212.patch').write_bytes(data)
+          PY
+          git -C "$ROOT" apply /tmp/higi-audit/v212.patch
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          p=Path('/tmp/higi-audit/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          files=sorted(p.rglob('*.kt'))
+          print('### KOTLIN FILE COUNT',len(files))
+          print('### LIKELY INPUT / ROOM CLASS FILENAMES')
+          for f in files:
+            if re.search('Input|Keyboard|CrosswordView|GridView|Room|Duel|Shared|Cell|GameActivity|Solve|ClueEditor|Play|Key',f.name,re.I):
+              print('FILE',f.relative_to(p))
+          patterns=['commitText','InputConnection','onKeyListener','OnKeyListener',
+              'onTextChanged','TextWatcher','keyEvent','onKeyDown','onKeyUp',
+              'keyboard','editable','selection','cursor','advance','skip',
+              'crossing','isSolved','locked','onLetter','setCell','updateCell',
+              'selectedClue','selectedCell','nextCell','prevCell',
+              'roomState','roomUpdate','roomId','activeDirection','setText',
+              'onInput','onCharacter','onChar','inputType','TextWatcher']
+          print('### INPUT HANDLER TERM COUNTS BY FILE')
+          counts=[]
+          for f in files:
+            lines=f.read_text(errors='replace').splitlines()
+            hits=[(i,line) for i,line in enumerate(lines,1) if any(x.lower() in line.lower() for x in patterns)]
+            if hits:counts.append((len(hits),f,hits))
+          for n,f,hits in sorted(counts,reverse=True)[:45]:
+            print('MATCHFILE',f.name,'hits',n,'total',len(f.read_text(errors='replace').splitlines()))
+            if re.search('Input|Keyboard|CrosswordView|GridView|Room|Duel|Shared|Game|Play|Solve',f.name,re.I):
+              for lineNum,line in hits[:35]:print('HIT',f.name,lineNum,line[:255])
+          print('### COMPANION INPUT CALLS MAIN')
+          main=p/'MainActivity.kt'
+          lines=main.read_text().splitlines()
+          for i,line in enumerate(lines):
+            if re.search('onLetter|selectedCell|onInput|keyboard|TextWatcher|commitText|nextCell|skip.*Cell|advance',line,re.I) and not 'import' in line:
+              if i<900:continue
+              print(f'MAIN {i+1:05d} {line[:255]}')
+          PY
