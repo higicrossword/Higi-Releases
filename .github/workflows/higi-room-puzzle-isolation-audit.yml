@@ -78,3 +78,24 @@ jobs:
               for j in range(max(0,i-9),min(len(lines),i+15)):
                 print(f'{j+1:05d} {lines[j][:260]}')
           PY
+
+      - name: Focused join and puzzle migration code
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/higi-room/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          sections={
+          'MainActivity.kt':[(1093,1155),(1830,1917),(2027,2140),(2395,2475)],
+          'FirebaseSharing.kt':[(645,740),(740,880),(880,990),(1104,1140)],
+          'SharingCodec.kt':[(1,120)],
+          'RoomPuzzleSafety.kt':[(1,110)],
+          'SharingLogic.kt':[(1,150)]
+          }
+          for name,rs in sections.items():
+            f=p/name; lines=f.read_text().splitlines()
+            for lo,hi in rs:
+              print(f'=== {name} {lo}-{hi}')
+              for i in range(lo-1,min(hi,len(lines))):
+                print(f'{i+1:05d} {lines[i]}')
+          PY
