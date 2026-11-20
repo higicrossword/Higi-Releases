@@ -62,3 +62,103 @@ class OcrSeriesActivationV213Test {
 }
 """)
 print("STAGED 4 Kotlin files",main,runner,policy,test)
+
+# Promote ONLY exact-number, bounded, non-inferred V199 weekly proposals.
+crop=base/"LocalOcrCropPass.kt"
+source=crop.read_text()
+anchor="""        return Result(verified,finalReview,detected?.wrapped.orEmpty(),"""
+assert source.count(anchor)==1,("return anchor",source.count(anchor))
+insert="""        // Exact-series V213 promotion. A review rectangle is not automatically trusted:
+        // require both printed numbers, a fully measured source, non-inferred start,
+        // no other clue collision, and existing geometry evidence validation.
+        if(layoutSeriesId==OcrSeriesProfilesV197.WEEKLY.id && refineSharedRows &&
+            detected!=null && detected.geometryWords.isNotEmpty()) {
+            val words=detected.geometryWords
+            fun wire(k:ClueEditorModel.Key)=
+                (if(k.direction==Direction.HORIZONTAL)"H" else "V")+k.number
+            fun pixels(g:ClueGeometry):List<CropRect> = g.lines.map { part ->
+                CropRect((part.left*source.width).roundToInt(),(part.top*source.height).roundToInt(),
+                    (part.right*source.width).roundToInt(),(part.bottom*source.height).roundToInt())
+            }
+            val all=(verified+previews).mapKeys{wire(it.key)}.mapValues{pixels(it.value)}
+            val clashes=OcrWeeklySourceAnchorsV199.conflictingKeys(all,words)
+            previews.toMap().forEach { (key,proposal) ->
+                if(key in verified || key in finalReview || key in detected.geometryNeedsReview ||
+                    key in detected.sharedRowNeedsReview || key in detected.review) return@forEach
+                val reason=previewWhy[key].orEmpty()
+                val label=wire(key)
+                val strong=OcrSeriesPromotionV213.mayTrustWeeklyV199(
+                    layoutSeriesId, reason,
+                    ownStart=OcrWeeklySourceAnchorsV199.ownsPrintedNumber(label,pixels(proposal),words),
+                    hasConflict=label in clashes,
+                    sourceWidth=source.width,sourceHeight=source.height
+                )
+                if(!strong)return@forEach
+                val supported=proposal.copy(evidence=ClueGeometryEvidence.LOCAL_OCR_ANCHORED)
+                val valid=ClueRegionValidation.validateGeometryNormalized(
+                    supported,source.width,source.height,gridPoints).usable
+                if(valid && ClueGeometryEvidencePolicy.canPublish(supported)) {
+                    verified[key]=supported
+                    previews.remove(key)
+                    previewWhy.remove(key)
+                    DebugLog.i("LOCAL_OCR_V213","key=$label series=YEDIOTH_DEKEL_WEEKLY " +
+                        "status=EXACT_ANCHOR_LOCAL_TRUSTED noOverwrite=true")
+                }
+            }
+        }
+"""
+source=source.replace(anchor,insert+anchor)
+crop.write_text(source)
+policy=base/"OcrSeriesPromotionV213.kt"
+assert not policy.exists()
+policy.write_text("""package com.example.hebrewcrossword
+
+/**
+ * Only promote independently numbered weekly source crops. This does NOT remove
+ * review/geometry safeguards or supersede saved manual/canonical coordinates.
+ */
+object OcrSeriesPromotionV213 {
+    fun mayTrustWeeklyV199(
+        seriesId:String?,diagnostic:String,ownStart:Boolean,hasConflict:Boolean,
+        sourceWidth:Int,sourceHeight:Int
+    ):Boolean =
+        seriesId==OcrSeriesProfilesV197.WEEKLY.id &&
+        diagnostic.startsWith("V199_SOURCE_ANCHORED_REVIEW_ONLY:") &&
+        diagnostic.contains("inferred=false") &&
+        !diagnostic.contains("next=END_OF_COLUMN") &&
+        !diagnostic.contains("V200_") &&
+        !diagnostic.contains("V201_") &&
+        !diagnostic.contains("V208_") &&
+        ownStart && !hasConflict && sourceWidth>=600 && sourceHeight>=350
+}
+""")
+tests=root/"app/src/test/java/com/example/hebrewcrossword/OcrSeriesPromotionV213Test.kt"
+assert not tests.exists()
+tests.write_text("""package com.example.hebrewcrossword
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class OcrSeriesPromotionV213Test {
+    private val clear="V199_SOURCE_ANCHORED_REVIEW_ONLY: independent start=5, next=7, inferred=false, pieces=2; no Canonical write"
+    private fun check(diag:String=clear,series:String?="YEDIOTH_DEKEL_WEEKLY",
+        own:Boolean=true,conflict:Boolean=false,w:Int=1426,h:Int=1103)=
+        OcrSeriesPromotionV213.mayTrustWeeklyV199(series,diag,own,conflict,w,h)
+    @Test fun onlyStrongPrintedBoundaries() {
+        assertTrue(check())
+        assertFalse(check(diag=clear.replace("inferred=false","inferred=true")))
+        assertFalse(check(diag=clear.replace("next=7","next=END_OF_COLUMN")))
+        assertFalse(check(own=false))
+        assertFalse(check(conflict=true))
+        assertFalse(check(diag=clear+" V201_FINAL_GEOMETRY_BLOCK"))
+        assertFalse(check(diag=clear+" V208_INVALID_REPAIR"))
+    }
+    @Test fun weeklyOnly() {
+        assertFalse(check(series="HAFUCH_DEKEL"))
+        assertFalse(check(series="TARTEY_DEKEL"))
+        assertFalse(check(series=null))
+        assertFalse(check(w=500))
+    }
+}
+""")
+print("PROMOTION_FILES",crop.name,policy.name,tests.name)
