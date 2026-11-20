@@ -91,3 +91,42 @@ jobs:
                   for j in range(max(0,i-7),min(len(l),i+8)):
                     print(f'{j+1:05d} {l[j][:265]}')
           PY
+
+      - name: Apply guarded three-series integration and verify narrow source diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175
+          python3 cloud-tests/ocr-series-promotion-v213/activate-v212-staged.py "$ROOT"
+          git -C "$ROOT" add -N -A
+          git -C "$ROOT" diff --check
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          root=Path('/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175')
+          names=set(subprocess.check_output(['git','-C',str(root),'diff','--name-only'],text=True).splitlines())
+          expected={
+          'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt',
+          'app/src/main/java/com/example/hebrewcrossword/AdminLibraryRedecodeRunner.kt',
+          'app/src/main/java/com/example/hebrewcrossword/OcrSeriesActivationV213.kt',
+          'app/src/test/java/com/example/hebrewcrossword/OcrSeriesActivationV213Test.kt'
+          }
+          assert names==expected,('Unexpected source changes',sorted(names.symmetric_difference(expected)))
+          for file in ['HigiLocalOcrCropEngine.kt','OcrWeeklySourceAnchorsV199.kt','OcrWeeklyFinalGeometryV201.kt','OcrWeeklyCropRepairV208.kt','LocalOcrCropPass.kt','HafuchGridTemplate.kt']:
+              assert 'app/src/main/java/com/example/hebrewcrossword/'+file not in names,file
+          print('PASS four-file-only guarded integration; frozen OCR engines untouched')
+          PY
+          git -C "$ROOT" diff --binary > /tmp/higi-ocr/ocr-v213-staged.patch
+          sha256sum /tmp/higi-ocr/ocr-v213-staged.patch
+      - name: Compile and run Android JVM tests without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/higi-ocr/HebrewCrosswordApp_v0.15.175
+          cd "$ROOT"
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi-ocr/gradle.log 2>&1 || {
+            tail -110 /tmp/higi-ocr/gradle.log
+            exit 1
+          }
+          tail -35 /tmp/higi-ocr/gradle.log
+          echo "DRY_COMPILE_PASS; NO APK RELEASE OR CANONICAL WRITE"
