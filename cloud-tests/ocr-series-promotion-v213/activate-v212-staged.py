@@ -183,9 +183,15 @@ main=base/"MainActivity.kt"
 source=main.read_text()
 old="""            putAll(oldTrusted)
             putAll(current)"""
-new="""            putAll(current)
-            // Source-matched canonical/manual coordinates have precedence.
-            putAll(oldTrusted)"""
+new="""            if(ocrSeriesId==null) {
+                // Preserve the unchanged v212 behavior for unrelated series.
+                putAll(oldTrusted)
+                putAll(current)
+            } else {
+                putAll(current)
+                // Source-matched canonical/manual coordinates have precedence.
+                putAll(oldTrusted)
+            }"""
 assert source.count(old)==1,("source matched canonical precedence",source.count(old))
 main.write_text(source.replace(old,new))
 print("SAFETY_GUARDS: no-old-crop candidate eligible; canonical/manual geometry preserved")
