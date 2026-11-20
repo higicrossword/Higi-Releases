@@ -123,7 +123,7 @@ policy.write_text("""package com.example.hebrewcrossword
 object OcrSeriesPromotionV213 {
     // For automatic use, a crop needs the actual printed answer-length token.
     // Review candidates lacking this proof instead of silently dropping "(3)".
-    private val enumeration=Regex("""^\\(\\d{1,2}(?:[, ]\\d{1,2})*\\)[.:;,]?$""")
+    private val enumeration=Regex("^\\\\(\\\\d{1,2}(?:[, ]\\\\d{1,2})*\\\\)[.:;,]?$")
     fun terminalEnumerationInLastRow(
         parts:List<CropRect>,words:List<OcrSharedRowSplitterV161.Word>
     ):Boolean {
