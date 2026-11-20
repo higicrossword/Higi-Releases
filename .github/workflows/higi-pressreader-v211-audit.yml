@@ -93,3 +93,22 @@ jobs:
                       if any(x in p.name.lower() for x in ('press','structured','israel')):
                           print(p.relative_to(root))
           PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('/tmp/higiaudit/HebrewCrosswordApp_v0.15.175')
+          base='app/src/main/java/com/example/hebrewcrossword/'
+          files=[('MainActivity.kt',3570,3712),('WeeklyGridSanity.kt',1,260),('GridRefinement.kt',1,240),('GridConsistency.kt',1,220),('HafuchGridFallback.kt',1,240)]
+          for name,start,end in files:
+              p=root/base/name
+              print('==== SOURCE_FILE',name,'exists',p.is_file(),'====')
+              if p.is_file():
+                  lines=p.read_text().splitlines()
+                  for i in range(start-1,min(end,len(lines))):
+                      print(f'{i+1:05d} {lines[i][:280]}')
+          print('==== CLASS_MATCHES ====')
+          for p in (root/base).rglob('*.kt'):
+              s=p.read_text(errors='replace')
+              if 'class WeeklyGridSanity' in s or 'object WeeklyGridSanity' in s or 'class GridRefinement' in s or 'object GridRefinement' in s or 'class Hafuch' in s or 'object Hafuch' in s:
+                  print('CLASS_PATH',p.relative_to(root))
+          PY
