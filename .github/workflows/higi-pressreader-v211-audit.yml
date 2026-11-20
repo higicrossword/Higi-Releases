@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-pressreader-v211-audit.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   inspect:
     runs-on: ubuntu-latest
@@ -20,8 +20,11 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/higiaudit
           curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/octet-stream' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
             -o /tmp/higiaudit/base.zip \
-            "https://github.com/higicrossword/Higi-Releases/releases/download/untagged-8213bd4240764314288c/HebrewCrosswordApp_v0.15.175_SOURCE.zip"
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
           echo 'ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higiaudit/base.zip' | sha256sum -c -
           unzip -q /tmp/higiaudit/base.zip -d /tmp/higiaudit
           ROOT=/tmp/higiaudit/HebrewCrosswordApp_v0.15.175
