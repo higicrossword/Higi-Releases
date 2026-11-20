@@ -1,0 +1,50 @@
+name: Higi v211 PressReader parser read-only audit
+on:
+  push:
+    branches: ['analysis/pressreader-v211-20261120']
+    paths: ['.github/workflows/higi-pressreader-v211-audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify patch checksum and inspect failure guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          root=pathlib.Path('.')
+          cfg=json.loads((root/'cloud-releases/v0.15.211-DRY.json').read_text())
+          raw=lzma.decompress(base64.b64decode((root/cfg['patchFile']).read_text().strip()))
+          digest=hashlib.sha256(raw).hexdigest()
+          assert digest==cfg['patchSha256'],(digest,cfg['patchSha256'])
+          lines=raw.decode('utf-8').splitlines()
+          print('PASS source-patch-sha256',digest,'lines',len(lines))
+          active=''
+          hits=[]
+          paths=set()
+          for i,line in enumerate(lines):
+              if line.startswith('diff --git a/'):
+                  active=line.split(' b/',1)[-1]
+              if any(s in active.lower() for s in ['pressreader','israelhayom','structured']):
+                  paths.add(active)
+              if any(t in line.lower() for t in ['pressreader-bidi-tuple-shape','bidi-tuple','tuple-shape']):
+                  hits.append((i,active))
+          print('MATCHING_FILES',sorted(paths))
+          print('GUARD_MATCHES',len(hits))
+          for i,path in hits[:6]:
+              print('---- MATCH',i,'PATH',path,'----')
+              for j in range(max(0,i-65),min(len(lines),i+55)):
+                  print(f'{j+1:05d} {lines[j][:250]}')
+          if not hits:
+              print('NO_EXACT_MATCH_FOUND')
+              for i,line in enumerate(lines):
+                  if 'PressReader' in line or 'pressreader' in line.lower():
+                      print(f'{i+1:05d}',line[:250])
+                      if i>100000: break
+          PY
