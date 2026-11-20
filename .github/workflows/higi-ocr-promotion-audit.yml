@@ -15,6 +15,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/ocr-promote-3series-v212
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
       - name: reconstruct and inspect v212 crop pipeline
         shell: bash
         run: |
