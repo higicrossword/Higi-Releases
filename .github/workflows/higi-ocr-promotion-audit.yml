@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: feature/ocr-promote-3series-v212
       - name: reconstruct and inspect v212 crop pipeline
         shell: bash
         run: |
