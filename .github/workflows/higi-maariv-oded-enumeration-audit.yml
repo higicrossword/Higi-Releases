@@ -87,3 +87,34 @@ jobs:
               for a,b in ranges[:5]:
                   for j in range(a,b):print(f'{j+1:05d} {lines[j][:240]}')
           PY
+
+      - name: Focused source inspection for RTL length tuple reversal
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('/tmp/higi-inspect/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for name,spans in {
+          'AnswerLengths.kt':[(1,75)],
+          'ClueAnnotationSemantics.kt':[(1,95)],
+          'ClueDisplay.kt':[(1,38)],
+          'CrosswordModel.kt':[(75,98)],
+          'ClueParser.kt':[(235,279)],
+          'GeminiSmartOcr.kt':[(1,120)],
+          'ClueEditorDialog.kt':[(250,332)]
+          }.items():
+              f=p/name
+              if not f.exists():continue
+              lines=f.read_text().splitlines()
+              for lo,hi in spans:
+                  print('===',name,lo,hi)
+                  for i in range(lo-1,min(hi,len(lines))):
+                      print(f'{i+1:04d} {lines[i]}')
+          print('=== LENGTH TUPLE MODEL CALLS')
+          for f in p.rglob('*.kt'):
+              lines=f.read_text().splitlines()
+              for i,line in enumerate(lines):
+                  if any(x in line for x in ('lengths_right_to_left','mergeAuthoritativePrintedLength','reverseLastPrintedEnumeration','printedParts.reversed()')):
+                      print(f'{f.name}:{i+1} {line[:290]}')
+          PY
