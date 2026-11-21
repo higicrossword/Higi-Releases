@@ -1,0 +1,87 @@
+name: Higi v213 targeted length and export code audit
+on:
+  push:
+    branches: ['release/v0.15.213-oded-length-export']
+    paths: ['.github/workflows/higi-v213-length-export-audit.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROOT: /tmp/higi213/HebrewCrosswordApp_v0.15.175
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned source and reconstruct v212
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/higi213
+          curl --silent --show-error --fail --location --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' \
+            -o /tmp/higi213/base.zip \
+            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi213/base.zip" | sha256sum -c -
+          unzip -q /tmp/higi213/base.zip -d /tmp/higi213
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          root=pathlib.Path('.')
+          cfg=json.loads((root/'cloud-releases/v0.15.212-DRY.json').read_text())
+          assert cfg['version']=='0.15.212' and cfg['versionCode']==362
+          raw=lzma.decompress(base64.b64decode(''.join((root/cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==cfg['patchSha256']
+          pathlib.Path('/tmp/higi213/v212.patch').write_bytes(raw)
+          PY
+          git -C "$ROOT" init -q
+          git -C "$ROOT" add -A
+          git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm pinned
+          git -C "$ROOT" apply --check /tmp/higi213/v212.patch
+          git -C "$ROOT" apply /tmp/higi213/v212.patch
+          echo V212_SOURCE_REBUILT
+      - name: Inspect exact file save flow and dialog UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('/tmp/higi213/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for filename in ('AdminAiPromptDiagnostic.kt','AdminAiWordLengthsDialog.kt','AnswerLengths.kt','ClueDisplay.kt','ClueAnnotationSemantics.kt'):
+              f=p/filename
+              if not f.exists():
+                  print('FILE_NOT_FOUND',filename)
+                  continue
+              lines=f.read_text().splitlines()
+              print('FILE_START',filename,'LINES',len(lines))
+              for i,line in enumerate(lines):
+                  if filename=='AdminAiPromptDiagnostic.kt' and i>=700: break
+                  print(f'{i+1:04d} {line}')
+              print('FILE_END',filename)
+          PY
+      - name: Inspect length processing call sites and source-specific choices
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('/tmp/higi213/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for name in ('GeminiSmartOcr.kt','RecentCrosswordsActivity.kt','ClueParser.kt','MainActivity.kt'):
+              f=p/name
+              if not f.exists(): continue
+              lines=f.read_text().splitlines()
+              terms=('AdminAiWordLengthsDialog','AdminAiPromptDiagnostic','saveCsvToDownloads','saveZipToDownloads','verifyRightToLeftParts','mergeAuthoritativePrintedLength','parseArray(','sourceSeries','MAARIV','ODED_ROSEN','getSeries')
+              hits=[i for i,l in enumerate(lines) if any(t in l for t in terms)]
+              print('CALL_SITE_FILE',name,'lines',len(lines),'hits',len(hits))
+              windows=[]
+              for i in hits[:45]:
+                  a=max(0,i-5);b=min(len(lines),i+12)
+                  if windows and a<=windows[-1][1]:windows[-1]=(windows[-1][0],max(b,windows[-1][1]))
+                  else:windows.append((a,b))
+              for a,b in windows[:30]:
+                  print(f'WINDOW {a+1}-{b}')
+                  for i in range(a,b):
+                      print(f'{i+1:04d} {lines[i]}')
+          PY
