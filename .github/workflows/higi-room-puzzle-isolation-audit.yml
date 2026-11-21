@@ -173,6 +173,19 @@ jobs:
           cd /tmp/higi-room/HebrewCrosswordApp_v0.15.175
           gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest :app:assembleDebug > /tmp/higi-room/full-regression.log 2>&1 || {
              tail -100 /tmp/higi-room/full-regression.log
+             python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for f in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'):
+              root=ET.parse(f).getroot()
+              if int(root.attrib.get('failures','0')) or int(root.attrib.get('errors','0')):
+                  print('FAILED_XML',str(f))
+                  for t in root.findall('.//testcase'):
+                      for e in list(t.findall('failure'))+list(t.findall('error')):
+                          print('TEST',t.attrib.get('name'))
+                          print('ERROR',e.attrib.get('message'))
+                          print('TRACE',((e.text or '')[:10000]))
+          PY
              exit 1
           }
           tail -30 /tmp/higi-room/full-regression.log
