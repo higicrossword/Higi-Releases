@@ -134,6 +134,7 @@ jobs:
           git -C "$ROOT" add -A
           git -C "$ROOT" -c user.name=Audit -c user.email=audit@localhost commit -qm v212
           python3 cloud-tests/room-puzzle-isolation/fix-puzzle-protected-cells.py "$ROOT"
+          python3 cloud-tests/room-puzzle-isolation/fix-protected-crossing-input.py "$ROOT"
           git -C "$ROOT" add -N -A
           git -C "$ROOT" diff --check
           python3 - <<'PY'
@@ -142,8 +143,12 @@ jobs:
           changed=set(subprocess.check_output(['git','-C',p,'diff','--name-only'],text=True).splitlines())
           expected={
             'app/src/main/java/com/example/hebrewcrossword/CrosswordView.kt',
+            'app/src/main/java/com/example/hebrewcrossword/CrosswordSession.kt',
+            'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt',
+            'app/src/main/java/com/example/hebrewcrossword/FirebaseSharing.kt',
             'app/src/main/java/com/example/hebrewcrossword/PuzzleProtectedCellsScope.kt',
-            'app/src/test/java/com/example/hebrewcrossword/PuzzleProtectedCellsScopeTest.kt'
+            'app/src/test/java/com/example/hebrewcrossword/PuzzleProtectedCellsScopeTest.kt',
+            'app/src/test/java/com/example/hebrewcrossword/CrosswordProtectedCrossingTypingRegressionTest.kt'
           }
           assert changed==expected,('unexpected changes',changed)
           assert 'PuzzleProtectedCellsScope.forPuzzle' in open(p+'/app/src/main/java/com/example/hebrewcrossword/CrosswordView.kt').read()
@@ -154,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/higi-room/HebrewCrosswordApp_v0.15.175
-          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --tests '*PuzzleProtectedCellsScopeTest' > /tmp/higi-room/test.log 2>&1 || {
+          gradle --no-daemon -PhigiDryBuild=true :app:testDebugUnitTest --tests '*PuzzleProtectedCellsScopeTest' --tests '*CrosswordProtectedCrossingTypingRegressionTest' > /tmp/higi-room/test.log 2>&1 || {
             tail -95 /tmp/higi-room/test.log
             exit 1
           }
