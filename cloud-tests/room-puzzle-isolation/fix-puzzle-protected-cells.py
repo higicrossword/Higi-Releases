@@ -90,3 +90,19 @@ class PuzzleProtectedCellsScopeTest {
 }
 """)
 print("CROSSWORD_PROTECTION_SCOPE_PATCH_READY")
+
+# Keep shared-room UI attribution and locks separate even when the puzzle is
+# reactivated through an existing library record or the remote letters are late.
+main=root/'app/src/main/java/com/example/hebrewcrossword/MainActivity.kt'
+src=main.read_text()
+old="""        chatMessages=emptyList();chatKnownIds.clear();chatInitialized=false;chatUnread=0;solvedAttributions=emptyMap();sharingParticipants=emptyList();sharedRemoteCells=emptyMap();updateChatButton(true);updateStatsButton(true);updateSolutionsBadge();updateAnswerColors()"""
+new="""        chatMessages=emptyList();chatKnownIds.clear();chatInitialized=false;chatUnread=0;solvedAttributions=emptyMap();sharingParticipants=emptyList();sharedRemoteCells=emptyMap()
+        // A new room must never inherit answer locks/attribution from the prior room,
+        // even before Firebase supplies the new room's first onSolvedBy snapshot.
+        board.lockedSolvedEntries=emptySet()
+        board.solvedByLabels=emptyMap()
+        board.setProtectedSolutionCells(emptyMap())
+        updateChatButton(true);updateStatsButton(true);updateSolutionsBadge();updateAnswerColors()"""
+assert src.count(old)==1,("connectShared room reset anchor",src.count(old))
+main.write_text(src.replace(old,new))
+print("SHARED_ROOM_UI_RESET_PRECONNECT_APPLIED")
