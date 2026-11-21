@@ -19,10 +19,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/higi213
-          curl --silent --show-error --fail --location --retry 3 \
-            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' \
-            -o /tmp/higi213/base.zip \
-            "https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          API="https://api.github.com/repos/higicrossword/Higi-Releases/releases/assets/720424907"
+          RELEASE_URL="https://github.com/higicrossword/Higi-Releases/releases/download/v0.15.175/HebrewCrosswordApp_v0.15.175_SOURCE.zip"
+          echo "Retrieving the immutable v175 baseline asset (redacted diagnostics on failure)"
+          if ! curl -fLsS --retry 2 -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/octet-stream' -o /tmp/higi213/base.zip "$API"; then
+            echo "API asset retrieval failed; trying the public release tag URL"
+            if ! curl -fLsS --retry 2 -o /tmp/higi213/base.zip "$RELEASE_URL"; then
+              echo "Release-tag URL unavailable; last fallback using GitHub CLI"
+              gh release download v0.15.175 --repo higicrossword/Higi-Releases \
+                --pattern HebrewCrosswordApp_v0.15.175_SOURCE.zip --dir /tmp/higi213
+              mv /tmp/higi213/HebrewCrosswordApp_v0.15.175_SOURCE.zip /tmp/higi213/base.zip
+            fi
+          fi
           echo "ad14647edf7facd1d20309cfd2ae48cca779288ad06488c4d80b2404d8933dd7  /tmp/higi213/base.zip" | sha256sum -c -
           unzip -q /tmp/higi213/base.zip -d /tmp/higi213
           python3 - <<'PY'
