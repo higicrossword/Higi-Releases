@@ -171,7 +171,6 @@ jobs:
         run: |
           sed -n '678,709p' /tmp/higi-room/HebrewCrosswordApp_v0.15.175/app/src/test/java/com/example/hebrewcrossword/RegressionSuite.kt
       - name: Full Android JVM regression suite and local DRY debug compile (no publishing)
-        if: ${{ false }}
         shell: bash
         run: |
           set -euo pipefail
