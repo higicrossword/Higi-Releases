@@ -106,3 +106,19 @@ new="""        chatMessages=emptyList();chatKnownIds.clear();chatInitialized=fal
 assert src.count(old)==1,("connectShared room reset anchor",src.count(old))
 main.write_text(src.replace(old,new))
 print("SHARED_ROOM_UI_RESET_PRECONNECT_APPLIED")
+
+# Leaving an active ROOM for a DIFFERENT room should remove only current online
+# presence; do not remove the user's permanent membership or saved progress.
+sharing=root/'app/src/main/java/com/example/hebrewcrossword/FirebaseSharing.kt'
+src=sharing.read_text()
+old="""        DebugLog.i("SHARE","connect room=${DebugLog.compactId(room)} puzzle=${DebugLog.compactId(puzzleId)}")
+        disconnect(false)
+        val requestEpoch=connectionEpoch"""
+new="""        DebugLog.i("SHARE","connect room=${DebugLog.compactId(room)} puzzle=${DebugLog.compactId(puzzleId)}")
+        // Switching rooms must not leave this user shown online in the old room.
+        // Reconnecting to the same room preserves its existing presence.
+        disconnect(removePresence=activeRoom!=null && activeRoom!=room)
+        val requestEpoch=connectionEpoch"""
+assert src.count(old)==1,("room-switch active presence guard",src.count(old))
+sharing.write_text(src.replace(old,new))
+print("ROOM_SWITCH_PRESENCE_ONLY_GUARD_APPLIED")
