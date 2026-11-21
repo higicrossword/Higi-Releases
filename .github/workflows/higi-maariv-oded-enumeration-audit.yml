@@ -118,3 +118,25 @@ jobs:
                   if any(x in line for x in ('lengths_right_to_left','mergeAuthoritativePrintedLength','reverseLastPrintedEnumeration','printedParts.reversed()')):
                       print(f'{f.name}:{i+1} {line[:290]}')
           PY
+
+      - name: Trace v212 AI printed tuple normalization and source-specific guard
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/higi-inspect/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
+          for name,lo,hi in [
+              ('GeminiSmartOcr.kt',1890,2000),
+              ('GeminiSmartOcr.kt',968,1042),
+              ('GeminiSmartOcr.kt',765,800),
+              ('GeminiSmartOcr.kt',1360,1422),
+              ('AdminAiWordLengthsDialog.kt',1,130),
+              ('ClueParser.kt',240,278),
+          ]:
+              f=p/name
+              if not f.exists():continue
+              lines=f.read_text().splitlines()
+              print('===',name,lo,hi)
+              for i in range(lo-1,min(hi,len(lines))):
+                  print(f'{i+1:04d} {lines[i]}')
+          PY
