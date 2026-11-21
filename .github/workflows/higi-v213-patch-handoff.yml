@@ -1,0 +1,34 @@
+name: Higi v213 read-only pinned v212 patch handoff
+on:
+  push:
+    branches: ['release/v0.15.213-oded-length-export']
+    paths: ['.github/workflows/higi-v213-patch-handoff.yml']
+permissions:
+  contents: read
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate v212 manifest and immutable patch hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,json,lzma,pathlib
+          root=pathlib.Path('.')
+          cfg=json.loads((root/'cloud-releases/v0.15.212-DRY.json').read_text())
+          assert cfg['version']=='0.15.212' and cfg['versionCode']==362
+          raw=lzma.decompress(base64.b64decode((root/cfg['patchFile']).read_text().strip(),validate=True))
+          assert hashlib.sha256(raw).hexdigest()==cfg['patchSha256']
+          print('V212_PATCH_SHA256_VERIFIED',len(raw))
+          PY
+      - name: Upload verified text patch to Actions artifact for local source reconstruction
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-v212-source-patch-handoff
+          path: |
+            cloud-releases/v0.15.212-DRY.json
+            cloud-patches/v0.15.212-from-v0.15.175.patch.xz.b64
+          retention-days: 3
