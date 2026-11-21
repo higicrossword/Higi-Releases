@@ -17,9 +17,10 @@ old="""            if(protected!=null){
 new="""            if(protected!=null){
                 crossword.cell(p.first,p.second).letter=protected
                 if(protected!=chars[charIndex].toString()) {
-                    // A fixed crossing has its own letter. The user is typing the
-                    // next unsolved square: skip this protected cell without
-                    // consuming the keystroke (otherwise keyboard appears frozen).
+                    // If the cursor arrived by automatic typing advancement,
+                    // skip the fixed crossing without consuming this character.
+                    // An explicitly selected fixed cell must reject a wrong key.
+                    if(cellIndex==index && !autoAdvancedByTyping)break
                     cellIndex++
                     continue
                 }
@@ -30,6 +31,33 @@ new="""            if(protected!=null){
             charIndex++
             nextIndex=cellIndex.coerceAtMost(cells.lastIndex)"""
 assert s.count(old)==1,(p,s.count(old))
+s=s.replace("    private var protectedCells: Map<Pair<Int,Int>,String> = emptyMap()",
+"""    private var protectedCells: Map<Pair<Int,Int>,String> = emptyMap()
+    private var autoAdvancedByTyping=false""")
+s=s.replace("        finishComposition(); wordOverride = next",
+"""        finishComposition(); autoAdvancedByTyping=false; wordOverride = next""")
+s=s.replace("        finishComposition(); wordOverride=null",
+"""        finishComposition(); autoAdvancedByTyping=false; wordOverride=null""")
+s=s.replace("        lastTapToggledDirection=false\n        if ((r to c) in word)",
+"""        autoAdvancedByTyping=false
+        lastTapToggledDirection=false
+        if ((r to c) in word)""")
+s=s.replace("        lastTapToggledDirection=false\n        row=r; col=c;",
+"""        autoAdvancedByTyping=false
+        lastTapToggledDirection=false
+        row=r; col=c;""")
+s=s.replace("        if (charIndex > 0) { val next=cells[nextIndex]; row=next.first; col=next.second }",
+"""        if (charIndex > 0) {
+            val next=cells[nextIndex]; row=next.first; col=next.second
+            autoAdvancedByTyping=true
+        }""")
+s=s.replace("        finishComposition(); lastTap=null\n        val cells=word;",
+"""        finishComposition(); lastTap=null; autoAdvancedByTyping=false
+        val cells=word;""")
+s=s.replace("        finishComposition();if(row<0||col<0)return",
+"""        finishComposition();autoAdvancedByTyping=false;if(row<0||col<0)return""")
+s=s.replace("    fun move(delta: Int) { finishComposition(); val cells=word;",
+"""    fun move(delta: Int) { finishComposition(); autoAdvancedByTyping=false; val cells=word;""")
 p.write_text(s.replace(old,new))
 t=root/'app/src/test/java/com/example/hebrewcrossword/CrosswordProtectedCrossingTypingRegressionTest.kt'
 assert not t.exists()
@@ -59,6 +87,16 @@ class CrosswordProtectedCrossingTypingRegressionTest {
         assertEquals(0 to 1,s.row to s.col)
         s.commitIme("ד")
         assertEquals("ד",cw.cell(0,1).letter)
+    }
+
+    @Test fun explicitlySelectedProtectedCrossingRejectsWrongLetterWithoutSkipping() {
+        val (cw,s)=setup()
+        s.setProtectedCells(mapOf((0 to 3) to "ב"))
+        s.restoreSelection(0,3,Direction.HORIZONTAL)
+        s.commitIme("ז")
+        assertEquals("ב",cw.cell(0,3).letter)
+        assertEquals("",cw.cell(0,2).letter)
+        assertEquals(0 to 3,s.row to s.col)
     }
 
     @Test fun matchingProtectedCrossingConsumesMatchingLetter() {
