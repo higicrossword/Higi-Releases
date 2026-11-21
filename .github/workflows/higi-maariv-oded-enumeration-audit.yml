@@ -48,7 +48,7 @@ jobs:
           import re
           p=Path('/tmp/higi-inspect/HebrewCrosswordApp_v0.15.175/app/src/main/java/com/example/hebrewcrossword')
           arr=list(p.rglob('*.kt'))
-          terms=[r'הפוך סדר אורכי',r'אורכי המילים',r'(?i)enumeration',r'(?i)wordLengths',r'(?i)lengths?',r'(?i)clue.*edit',r'(?i)edit.*clue',r'(?i)clue.*text',r'(?i)split.*word',r'(?i)space.*answer',r'(?i)answer.*pattern']
+          terms=[r'הפוך סדר אורכי',r'אורכי המילים',r'enumeration',r'wordLengths',r'lengths?',r'clue.*edit',r'edit.*clue',r'clue.*text',r'split.*word',r'space.*answer',r'answer.*pattern']
           sig=[x for x in arr if re.search('|'.join(terms),x.read_text(),re.I)]
           print('KOTLIN_FILES',len(arr),'MATCH_FILES',len(sig))
           for f in sig:
