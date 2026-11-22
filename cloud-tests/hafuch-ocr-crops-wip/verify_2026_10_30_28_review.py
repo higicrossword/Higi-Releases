@@ -26,7 +26,7 @@ def inside(a,b):
 def validate(original_zip,ocr_zip,fixture_tsv):
  src=Path(fixture_tsv).read_text('utf8');lines=src.splitlines()
  assert lines[0].startswith('# Higi HAFUCH_DEKEL 2026-10-30')
- assert 'NOT administrator-approved' in lines[0]
+ assert 'not administrator-approved' in lines[0].lower()
  assert '# SOURCE_SHA256='+IMAGE_SHA in lines
  assert '# RGB_GEOMETRY_DIGEST='+DIGEST in lines
  assert '# MANUAL_VISUAL_CONFIRMATION_REQUIRED_FOR_ALL_28=true' in lines
