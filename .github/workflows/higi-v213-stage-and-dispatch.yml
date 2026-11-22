@@ -38,6 +38,7 @@ jobs:
           if($LASTEXITCODE -eq 0){throw 'Release already exists: refuse overwrite'}
           if(Test-Path 'cloud-releases/v0.15.213-DRY.json'){throw 'Version already staged'}
           Write-Host 'V213_SIGNED_QA_GATE_PASS'
+          exit 0
       - name: Retrieve sealed private v175 baseline and verify SHA256
         shell: pwsh
         run: |
