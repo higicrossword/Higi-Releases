@@ -1,0 +1,184 @@
+name: Higi v214 stage verified word-length evidence DRY and dispatch publisher
+on:
+  push:
+    branches: ['qa/v0.15.214-word-length-evidence']
+    paths: ['.github/workflows/higi-v214-stage-and-dispatch.yml']
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: higi-v214-release-staging
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASE_SHA: AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fail closed until v214 original-signer Android QA has succeeded
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $qa=(& gh api "repos/$env:REPO/actions/runs/45069423280" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or $qa.conclusion -ne 'success' -or $qa.head_sha -ne '7bb81d89dcea2fe700503ccc0ee635a3fbd02862'){
+            throw 'Pinned v214 Android QA has not passed; staging forbidden'
+          }
+          if($qa.head_branch -ne 'qa/v0.15.214-word-length-evidence'){throw 'Wrong QA branch'}
+          & gh release view v0.15.214-DRY --repo $env:REPO *> $null
+          if($LASTEXITCODE -eq 0){throw 'Release already exists: refuse overwrite'}
+          if(Test-Path 'cloud-releases/v0.15.214-DRY.json'){throw 'Version already staged'}
+          Write-Host 'V214_SIGNED_QA_GATE_PASS'
+          exit 0
+      - name: Retrieve sealed private v175 baseline and verify SHA256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=(& gh api "repos/$env:REPO/releases/437513599" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or $release.draft -ne $true -or $release.tag_name -ne 'v0.15.175'){throw 'Sealed private draft unavailable'}
+          $asset=@($release.assets|Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1 -or [long]$asset[0].size -ne 8145322){throw 'Wrong source asset'}
+          $z=Join-Path $env:RUNNER_TEMP 'higi-v175-private.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header 'Accept: application/octet-stream' --header 'X-GitHub-Api-Version: 2022-11-28' --output $z "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0 -or (Get-FileHash $z -Algorithm SHA256).Hash -ne $env:BASE_SHA){throw 'Immutable source checksum failed'}
+          $dir=Join-Path $env:RUNNER_TEMP 'higi-v214-stage-source'
+          Expand-Archive $z -DestinationPath $dir -Force
+          $root=Join-Path $dir 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $root 'app/build.gradle.kts'))){throw 'Source archive format invalid'}
+          Add-Content -Path $env:GITHUB_ENV -Value "HIGI_SRC=$root"
+      - name: Reconstruct verified v213 and v214 evidence overlay; stage sealed full source delta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo=$env:GITHUB_WORKSPACE
+          $root=$env:HIGI_SRC
+          $script=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]); dest=pathlib.Path(sys.argv[2])
+          def decode(filename):
+              return lzma.decompress(base64.b64decode(''.join(filename.read_text().split()),validate=True))
+          cfg=json.loads((repo/'cloud-releases/v0.15.213-DRY.json').read_text())
+          assert cfg['version']=='0.15.213' and cfg['versionCode']==363
+          v213=decode(repo/cfg['patchFile'])
+          assert hashlib.sha256(v213).hexdigest()==cfg['patchSha256']=='62875d7237d46b19eb877512b28268be5ff970aca04fd8e7a95faeb640390328'
+          (dest/'v213-full.patch').write_bytes(v213)
+          overlay=decode(repo/'cloud-tests/v214-length-evidence/overlay.patch.xz.b64')
+          assert hashlib.sha256(overlay).hexdigest()=='cbc7fb2b987673807e82142097d342c756db8c3de503ea038659fce9bcb2ae55'
+          (dest/'v214-overlay.patch').write_bytes(overlay)
+          print('V214_VERIFIED_V213_SOURCE_AND_V214_QA_OVERLAY')
+          '@
+          $scriptFile=Join-Path $env:RUNNER_TEMP 'decode-v214-stage.py'
+          [IO.File]::WriteAllText($scriptFile,$script)
+          & python $scriptFile $repo $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Verified patches unavailable or checksum invalid'}
+          & git -C $root init -q
+          & git -C $root add -A
+          & git -C $root -c user.name=Higi -c user.email=higi@localhost commit -qm sealed-v175
+          if($LASTEXITCODE -ne 0){throw 'Cannot create sealed v175 baseline'}
+          $baselinePatch=Join-Path $env:RUNNER_TEMP 'v213-full.patch'
+          & git -C $root apply --check $baselinePatch
+          if($LASTEXITCODE -ne 0){throw 'Published v213 patch does not match sealed v175'}
+          & git -C $root apply $baselinePatch
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct published v213'}
+          & git -C $root add -A
+          & git -C $root -c user.name=Higi -c user.email=higi@localhost commit -qm pinned-v213
+          if($LASTEXITCODE -ne 0){throw 'Cannot pin published v213'}
+          $overlay=Join-Path $env:RUNNER_TEMP 'v214-overlay.patch'
+          & git -C $root apply --check $overlay
+          if($LASTEXITCODE -ne 0){throw 'Reviewed v214 overlay mismatch'}
+          & git -C $root apply $overlay
+          if($LASTEXITCODE -ne 0){throw 'Cannot apply reviewed v214 overlay'}
+          $versionFile=Join-Path $root 'app/build.gradle.kts'
+          $contents=[IO.File]::ReadAllText($versionFile)
+          if(([regex]::Matches($contents,'versionCode\s*=\s*363\b')).Count -ne 1 -or
+             ([regex]::Matches($contents,'versionName\s*=\s*"0\.15\.213"')).Count -ne 1){
+            throw 'Unexpected source version before bump'
+          }
+          $contents=$contents.Replace('versionCode = 363','versionCode = 364').Replace('versionName = "0.15.213"','versionName = "0.15.214"')
+          [IO.File]::WriteAllText($versionFile,$contents)
+          & python (Join-Path $root 'tools/sync-release-version.py') --write --root $root
+          if($LASTEXITCODE -ne 0){throw 'Version metadata write failed'}
+          & python (Join-Path $root 'tools/sync-release-version.py') --check --root $root
+          if($LASTEXITCODE -ne 0){throw 'Version metadata check failed'}
+          & git -C $root add -N -A
+          $changed=@(& git -C $root diff --name-only HEAD)
+          $allowed=@(
+            'app/build.gradle.kts',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminLengthEvidenceV214.kt',
+            'tools/tests/AdminLengthEvidenceV214Test.kt',
+            'firebase/public/app-version.json',
+            'firebase/public/update/index.html'
+          )
+          if($changed.Count -ne 7 -or @($changed|Where-Object{$_ -notin $allowed}).Count -ne 0){
+            throw "Scope violation; changed files: $($changed -join ',')"
+          }
+          if(@($allowed|Where-Object{$_ -notin $changed}).Count -ne 0){
+            throw 'Expected admin-only evidence or metadata file was not changed'
+          }
+          $patch=Join-Path $env:RUNNER_TEMP 'higi214-full.patch'
+          & git -C $root diff --binary "--output=$patch" HEAD~1
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $patch)){throw 'Cannot generate sealed v175-to-v214 patch'}
+          $make=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);src=pathlib.Path(sys.argv[2])
+          raw=src.read_bytes()
+          assert 10000<len(raw)<3000000, ('Unsafe patch size',len(raw))
+          path=repo/'cloud-patches/v0.15.214-from-v0.15.175.patch.xz.b64'
+          assert not path.exists(), 'Do not overwrite an existing release patch'
+          path.write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode()+'\n')
+          manifest=repo/'cloud-releases/v0.15.214-DRY.json'
+          assert not manifest.exists(), 'Do not overwrite an existing manifest'
+          cfg={'channel':'dry','version':'0.15.214','versionCode':364,
+             'patchFile':str(path.relative_to(repo)), 'patchSha256':hashlib.sha256(raw).hexdigest(),
+             'notes':'Administrator-only DRY QA: distinguish AI same-response consistency from independent local OCR evidence; add explicit reason when local comparison is unavailable; improve diagnosis of multipart Hebrew word lengths without changing production answer-length conversion, grid word separators, existing frozen Dekel series or crosswords. No Firebase/Canonical deployment. Device UI review remains pending.'}
+          manifest.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V214_FULL_RELEASE_PATCH_SHA256',cfg['patchSha256'])
+          '@
+          $makeFile=Join-Path $env:RUNNER_TEMP 'make-v214-full-delta.py'
+          [IO.File]::WriteAllText($makeFile,$make)
+          & python $makeFile $repo $patch
+          if($LASTEXITCODE -ne 0){throw 'Could not stage full source patch and manifest'}
+          & git -C $root reset --hard HEAD~1
+          if($LASTEXITCODE -ne 0){throw 'Cannot restore original sealed v175'}
+          & git -C $root clean -fdq
+          & git -C $root apply --check $patch
+          if($LASTEXITCODE -ne 0){throw 'Full v214 patch does not reconstruct from v175'}
+          & git -C $root apply $patch
+          if($LASTEXITCODE -ne 0){throw 'Full v214 round trip reapply failed'}
+          & python (Join-Path $root 'tools/sync-release-version.py') --check --root $root
+          if($LASTEXITCODE -ne 0){throw 'Full v214 round trip metadata verification failed'}
+          Write-Host 'V214_FULL_DELTA_RECONSTRUCTS_AND_ADMIN_ONLY_SCOPE_VERIFIED'
+      - name: Commit staged v214 source delta and manifest to main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:GITHUB_WORKSPACE
+          & git fetch origin main
+          if($LASTEXITCODE -ne 0){throw 'Cannot fetch main'}
+          & git checkout -B main origin/main
+          if($LASTEXITCODE -ne 0){throw 'Cannot switch to latest main'}
+          & git add cloud-patches/v0.15.214-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.214-DRY.json
+          if($LASTEXITCODE -ne 0){throw 'Could not stage v214 files'}
+          & git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage signed-QA-validated Higi 0.15.214 DRY source and manifest'
+          if($LASTEXITCODE -ne 0){throw 'Cannot commit v214 manifest'}
+          & git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'GitHub main push failed: no release'}
+          Write-Host 'V214_SOURCE_STAGED_MAIN'
+      - name: Dispatch the existing signed Android DRY publisher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & gh workflow run higi-cloud-dry-release.yml --repo $env:REPO --ref main -f manifest_file=cloud-releases/v0.15.214-DRY.json
+          if($LASTEXITCODE -ne 0){throw 'Could not dispatch official Android DRY publisher'}
+          Write-Host 'V214_SIGNED_ANDROID_PUBLISHER_DISPATCHED'
