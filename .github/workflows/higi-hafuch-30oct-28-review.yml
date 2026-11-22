@@ -1,0 +1,50 @@
+name: Higi Hafuch 30Oct 28 exact crop candidates QA (read-only)
+on:
+  push:
+    branches: [higi/hafuch-number-boundary-guards-wip]
+    paths:
+      - '.github/workflows/higi-hafuch-30oct-28-review.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-10-30-28-review-only.tsv'
+      - 'cloud-tests/hafuch-ocr-crops-wip/verify_2026_10_30_28_review.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify previously approved fixtures are byte-identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object cloud-tests/hafuch-ocr-crops-wip/hafuch-six-admin-confirmed-crops-2026-11-19.json)" = '82db5399b7f95e4e7100c00df0eb193c89a8cb11'
+          test "$(git hash-object cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-13-28-review-only.json)" = '56c2000a8d6b6600471518cf10a8da77b8ecdc6d'
+          test "$(git hash-object cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-06-28-review-only.tsv)" = '0d4b8676b51329d71ab5b9fde352306bc352f90b'
+          echo 'PASS six + Nov13 28 + Nov06 28 approved fixtures untouched'
+      - name: Read-only pinned source and original one-pass OCR download
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/original" "$RUNNER_TEMP/ocr"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/original"
+          gh run download 44047765517 --repo "$REPO" --name higi-hafuch-twenty-roi-ocr-word-geometry-wip --dir "$RUNNER_TEMP/ocr"
+          (cd "$RUNNER_TEMP/original" && zip -qr "$RUNNER_TEMP/original.zip" hafuch-20-source-results)
+          (cd "$RUNNER_TEMP/ocr" && zip -qr "$RUNNER_TEMP/ocr.zip" hafuch-roi-20)
+      - name: Verify 28 REVIEW_ONLY candidates and exact published-source pixel geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet Pillow
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/verify_2026_10_30_28_review.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/verify_2026_10_30_28_review.py \
+            "$RUNNER_TEMP/original.zip" "$RUNNER_TEMP/ocr.zip" \
+            cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-10-30-28-review-only.tsv
