@@ -1,4 +1,4 @@
-# HAFUCH_DEKEL 2026-11-06 fixture — REVIEW_ONLY; NOT admin-approved
+# HAFUCH_DEKEL 2026-11-06 fixture — ADMIN VISUAL CONFIRMED EXACT 28 CROPS (DRY only)
 # SOURCE_SHA256=37e53145854c549f786819cd27e38852ce1deaaae484e9e7e71044db168774ef
 # SOURCE_SIZE=3000x2433
 # RGB_GEOMETRY_DIGEST=7617ae136407c6fd68db8c8f5287fc596d2c14fb5ef9ad34c0e76bd730b2239b
@@ -6,7 +6,15 @@
 # Missing/misread printed start manually visually source-proven: H8, H15, H19, V20.
 # Coordinates are original source-pixel rectangles [x0,y0,x1,y1); may not be used in production.
 # 28 clues, 55 non-overlapping same-direction strips. NO Firebase / Canonical / release.
-# The administrator has not approved THESE 28 2026-11-06 crops.
+# ADMIN_APPROVAL_DATE=2026-11-22
+# ADMIN_EXACT_REPLY=החיתוכים נכונין
+# VISUAL_STATUS=VISUAL_CROP_CONFIRMED (all exact 28 displayed crops)
+# REVIEW_ONLY_NO_CANONICAL_FIREBASE_APP_WRITES=true
+# KEEP_SOURCE_AND_RECTANGLES_UNCHANGED=true
+# IMPORTANT: H15 was independently approved earlier at [2218,765,2905,820],
+# while this approved 28-crop QA package contains H15 [2216,766,2903,818].
+# Both are separately approved alternatives; do not replace or erase the earlier fixture.
+# The RGB_GEOMETRY_DIGEST above is kept unchanged, with its original REVIEW_ONLY:V1 hash-domain prefix.
 key	rectangles
 H1	2118,287,2902,344;2555,344,2908,399
 H5	2197,344,2555,399;2331,402,2908,461
