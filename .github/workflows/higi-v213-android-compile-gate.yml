@@ -1,0 +1,135 @@
+name: Higi v213 Windows Android signed compile gate (WIP only)
+on:
+  push:
+    branches: ['release/v0.15.213-oded-length-export']
+    paths: ['.github/workflows/higi-v213-android-compile-gate.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  signed-wip:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: \${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+      BASELINE_SHA: AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Fetch immutable private source and existing signed APK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=$null
+          for($page=1;$page -le 20;$page++){
+            $r=(& gh api "repos/$env:REPO/releases?per_page=100&page=$page" | Out-String)
+            if($LASTEXITCODE -ne 0){throw 'Cannot list releases'}
+            $items=@(($r | ConvertFrom-Json))
+            $found=@($items | Where-Object {$_.tag_name -eq 'v0.15.175'})
+            if($found.Count -gt 1){throw 'Ambiguous baseline'}
+            if($found.Count -eq 1){$release=$found[0];break}
+            if($items.Count -lt 100){break}
+          }
+          if($null -eq $release -or $release.draft -ne $true){throw 'Private source draft unavailable'}
+          $asset=@($release.assets|Where-Object{$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1){throw 'Missing source archive'}
+          $z=Join-Path $env:RUNNER_TEMP 'v175.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $z "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0 -or (Get-FileHash $z -Algorithm SHA256).Hash -ne $env:BASELINE_SHA){throw 'Source SHA256 mismatch'}
+          $dir=Join-Path $env:RUNNER_TEMP 'higi213src'
+          Expand-Archive $z -DestinationPath $dir -Force
+          $root=Join-Path $dir 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $root 'app/build.gradle.kts'))){throw 'Bad source tree'}
+          Add-Content -Path $env:GITHUB_ENV -Value "SRC_ROOT=$root"
+          & gh release download --repo $env:REPO --pattern Higi-latest.apk --dir $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Missing baseline signed APK'}
+      - name: Reconstruct v212, apply reviewed v213 overlay, and check scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=$env:SRC_ROOT
+          & git -C $root init -q
+          & git -C $root add -A
+          & git -C $root -c user.name=QA -c user.email=qa@localhost commit -qm source175
+          $repo=$env:GITHUB_WORKSPACE
+          $manifest=Join-Path $repo 'cloud-releases/v0.15.212-DRY.json'
+          $script=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          work=pathlib.Path(sys.argv[1]);out=pathlib.Path(sys.argv[2])
+          cfg=json.loads((work/'cloud-releases/v0.15.212-DRY.json').read_text())
+          assert cfg['version']=='0.15.212' and cfg['versionCode']==362
+          b=lzma.decompress(base64.b64decode(''.join((work/cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(b).hexdigest()==cfg['patchSha256']
+          (out/'v212.patch').write_bytes(b)
+          overlay=lzma.decompress(base64.b64decode(''.join((work/'cloud-tests/v213/overlay-u0.patch.xz.b64').read_text().split()),validate=True))
+          assert hashlib.sha256(overlay).hexdigest()=='1f002113485fdb017f78b1c084922cf6183672e5e784bd1c75e0b30cf76d702b'
+          (out/'overlay.patch').write_bytes(overlay)
+          '@
+          $scriptFile=Join-Path $env:RUNNER_TEMP 'decode.py'
+          [IO.File]::WriteAllText($scriptFile,$script)
+          & python $scriptFile $repo $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Patch hash failure'}
+          & git -C $root apply --check (Join-Path $env:RUNNER_TEMP 'v212.patch')
+          if($LASTEXITCODE -ne 0){throw 'v212 patch mismatch'}
+          & git -C $root apply (Join-Path $env:RUNNER_TEMP 'v212.patch')
+          & git -C $root add -A
+          & git -C $root -c user.name=QA -c user.email=qa@localhost commit -qm rebuilt212
+          & git -C $root apply --unidiff-zero --check (Join-Path $env:RUNNER_TEMP 'overlay.patch')
+          if($LASTEXITCODE -ne 0){throw 'Overlay patch mismatch'}
+          & git -C $root apply --unidiff-zero (Join-Path $env:RUNNER_TEMP 'overlay.patch')
+          if($LASTEXITCODE -ne 0){throw 'Overlay apply failed'}
+          $f=Join-Path $root 'app/build.gradle.kts'
+          $s=[IO.File]::ReadAllText($f)
+          if(!$s.Contains('versionCode = 362') -or !$s.Contains('versionName = "0.15.212"')){throw 'Wrong v212 version'}
+          $s=$s.Replace('versionCode = 362','versionCode = 363').Replace('versionName = "0.15.212"','versionName = "0.15.213"')
+          [IO.File]::WriteAllText($f,$s)
+          & python (Join-Path $root 'tools/sync-release-version.py') --write --root $root
+          & python (Join-Path $root 'tools/sync-release-version.py') --check --root $root
+          if($LASTEXITCODE -ne 0){throw 'v213 version sync failed'}
+          $changes=@(& git -C $root diff --name-only HEAD)
+          $allowed=@('app/build.gradle.kts','app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt','app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt','app/src/main/java/com/example/hebrewcrossword/AdminLocalOcrLengthV213.kt','app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt','firebase/public/app-version.json','firebase/public/update/index.html')
+          if(@($changes|Where-Object{$_ -notin $allowed}).Count -ne 0){throw "Unexpected modified source path"}
+          Write-Host 'V213_LOCAL_ADMIN_SCOPE_VERIFIED'
+      - name: Restore original debug signing key for certified candidate
+        shell: pwsh
+        env:
+          HIGI_DEBUG_KEYSTORE_B64: \${{ secrets.HIGI_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)){throw 'Original signer secret missing'}
+          $dir=Join-Path $env:USERPROFILE '.android'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $dir 'debug.keystore'),[Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
+      - name: Android debug DRY tests + signed compile gate
+        shell: pwsh
+        run: |
+          Set-Location $env:SRC_ROOT
+          & gradle --no-daemon -PhigiDryBuild=true clean testDebugUnitTest assembleDebug
+          if($LASTEXITCODE -ne 0){throw 'Android tests/compile failed'}
+          $apk=Join-Path $env:SRC_ROOT 'app/build/outputs/apk/debug/app-debug.apk'
+          if(!(Test-Path $apk)){throw 'No APK after compile'}
+          $cfg=Join-Path $env:SRC_ROOT 'app/build/generated/source/buildConfig/debug/com/example/hebrewcrossword/BuildConfig.java'
+          if(!(Test-Path $cfg) -or (Get-Content -Raw $cfg) -notmatch 'HIGI_DRY_BUILD\s*=\s*true'){throw 'Not DRY'}
+          $sdk=$env:ANDROID_HOME;if(!$sdk){$sdk=$env:ANDROID_SDK_ROOT}
+          $aapt=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter aapt.exe|Sort-Object FullName -Descending|Select-Object -First 1
+          $sig=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat|Sort-Object FullName -Descending|Select-Object -First 1
+          $line=(& $aapt.FullName dump badging $apk|Select-String '^package:').ToString()
+          if(!$line.Contains("name='com.example.hebrewcrossword' versionCode='363' versionName='0.15.213'")){throw "Wrong package/version $line"}
+          $prev=(& $sig.FullName verify --print-certs (Join-Path $env:RUNNER_TEMP 'Higi-latest.apk') 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'Previous signature invalid'}
+          $next=(& $sig.FullName verify --print-certs $apk 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'New signature invalid'}
+          $pattern='(?i)certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $old=([regex]::Match($prev,$pattern).Groups[1].Value-replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          $new=([regex]::Match($next,$pattern).Groups[1].Value-replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          if($old.Length -ne 64 -or $old -ne $new){throw 'Signer mismatch'}
+          Write-Host 'V213_WIP_ANDROID_TESTS_COMPILE_AND_SIGNER_PASS_NO_RELEASE'
