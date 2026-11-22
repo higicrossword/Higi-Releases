@@ -5,7 +5,7 @@ on:
     paths: ['.github/workflows/higi-v213-windows-source-preflight.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   source-access:
     runs-on: windows-2022
