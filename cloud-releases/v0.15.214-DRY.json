@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.214",
+  "versionCode": 364,
+  "patchFile": "cloud-patches\\v0.15.214-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "94f5fa423aa9fc28cf8fe3efa5ca1d4aff6566afb46d9fb463b9ce1b8a142817",
+  "notes": "Administrator-only DRY QA: distinguish AI same-response consistency from independent local OCR evidence; add explicit reason when local comparison is unavailable; improve diagnosis of multipart Hebrew word lengths without changing production answer-length conversion, grid word separators, existing frozen Dekel series or crosswords. No Firebase/Canonical deployment. Device UI review remains pending."
+}
