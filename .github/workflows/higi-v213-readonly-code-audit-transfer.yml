@@ -1,0 +1,39 @@
+name: Higi v213 pinned release-source diff audit transfer (no code edits)
+on:
+  push:
+    branches: ['release/v0.15.213-oded-length-export']
+    paths: ['.github/workflows/higi-v213-readonly-code-audit-transfer.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-source-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Verify pinned v213 release patch SHA256 read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, base64, lzma, hashlib
+          p=pathlib.Path('cloud-releases/v0.15.213-DRY.json')
+          cfg=json.loads(p.read_text())
+          assert cfg['version']=='0.15.213' and cfg['versionCode']==363
+          data=lzma.decompress(base64.b64decode(''.join(pathlib.Path(cfg['patchFile']).read_text().split()), validate=True))
+          sha=hashlib.sha256(data).hexdigest()
+          assert sha==cfg['patchSha256'], (sha,cfg['patchSha256'])
+          pathlib.Path('v213-pinned-release-source.patch').write_bytes(data)
+          print('PINNED_V213_RELEASE_DIFF_OK',sha,len(data))
+          PY
+      - name: Preserve pinned patch and manifest for independent review
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-v213-source-diff-readonly-audit
+          path: |
+            v213-pinned-release-source.patch
+            cloud-releases/v0.15.213-DRY.json
+          retention-days: 3
