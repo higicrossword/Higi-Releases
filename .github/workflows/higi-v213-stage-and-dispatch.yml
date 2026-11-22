@@ -2,7 +2,7 @@ name: Higi v213 stage signed-QA-approved DRY manifest and dispatch publisher
 on:
   push:
     branches: ['release/v0.15.213-oded-length-export']
-    paths: ['DO_NOT_RUN_UNTIL_SIGNED_QA_PASS']
+    paths: ['.github/workflows/higi-v213-stage-and-dispatch.yml']
 permissions:
   contents: write
   actions: write
