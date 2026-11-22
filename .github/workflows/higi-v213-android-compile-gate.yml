@@ -103,7 +103,7 @@ jobs:
       - name: Restore original debug signing key for certified candidate
         shell: pwsh
         env:
-          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.HIGI_DEBUG_KEYSTORE_B64 }}
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
         run: |
           if([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)){throw 'Original signer secret missing'}
           $dir=Join-Path $env:USERPROFILE '.android'
