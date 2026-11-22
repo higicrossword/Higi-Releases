@@ -2,7 +2,7 @@
   "channel": "dry",
   "version": "0.15.213",
   "versionCode": 363,
-  "patchFile": "cloud-patches\\v0.15.213-from-v0.15.175.patch.xz.b64",
+  "patchFile": "cloud-patches/v0.15.213-from-v0.15.175.patch.xz.b64",
   "patchSha256": "62875d7237d46b19eb877512b28268be5ff970aca04fd8e7a95faeb640390328",
   "notes": "Administrator-only DRY: source-only independent local Tesseract word-length cross-check for Maariv Oded Rosen; CSV and ZIP save actions in native dialog footer; Downloads save verification; compare and flag OCR disagreements without automatic corrections. No Canonical or Firebase deployment. Frozen Dekel Monday and Wednesday OCR and other production algorithms unchanged. On-device review still required."
 }
