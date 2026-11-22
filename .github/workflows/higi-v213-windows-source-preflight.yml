@@ -24,6 +24,7 @@ jobs:
             if($LASTEXITCODE -ne 0){throw 'Cannot list releases'}
             $items = @(($raw | ConvertFrom-Json))
             $found=@($items | Where-Object { $_.tag_name -eq 'v0.15.175' -and $_.draft -eq $true })
+            Write-Host "source-list page=$page count=$($items.Count) draft-count=$(@($items | Where-Object { $_.draft }).Count) tag-match=$($found.Count)"
             if($found.Count -gt 1){throw "Ambiguous private draft"}
             if($found.Count -eq 1){$release=$found[0];break}
             if($items.Count -lt 100){break}
