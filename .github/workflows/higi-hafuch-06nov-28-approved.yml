@@ -1,0 +1,37 @@
+name: Higi Hafuch 06Nov administrator-approved 28 exact pixel fixtures (DRY)
+on:
+  push:
+    branches: [higi/hafuch-number-boundary-guards-wip]
+    paths:
+      - '.github/workflows/higi-hafuch-06nov-28-approved.yml'
+      - 'cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_06_28_approved.py'
+      - 'cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-06-28-review-only.tsv'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Pillow
+        run: python3 -m pip install --quiet Pillow
+      - name: Fetch pinned 20 original publisher images
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/original"
+          gh run download 43939011519 --repo "$REPO" --name higi-hafuch-20-original-images-grid-audit --dir "$RUNNER_TEMP/original"
+          (cd "$RUNNER_TEMP/original" && zip -qr "$RUNNER_TEMP/original.zip" hafuch-20-source-results)
+      - name: Verify 28 exact 06Nov user-approved source-pixel crops with unchanged original digest
+        run: |
+          set -euo pipefail
+          python3 -m py_compile cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_06_28_approved.py
+          python3 cloud-tests/hafuch-ocr-crops-wip/verify_2026_11_06_28_approved.py "$RUNNER_TEMP/original.zip" cloud-tests/hafuch-ocr-crops-wip/hafuch-2026-11-06-28-review-only.tsv
