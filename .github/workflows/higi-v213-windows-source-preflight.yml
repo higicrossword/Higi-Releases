@@ -1,0 +1,32 @@
+name: Higi v213 Windows source access preflight (no build or release)
+on:
+  push:
+    branches: ['release/v0.15.213-oded-length-export']
+    paths: ['.github/workflows/higi-v213-windows-source-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-access:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - name: Verify unchanged sealed source from private draft
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $response = (& gh api "repos/$env:REPO/releases?per_page=100&page=1" | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'Cannot list releases'}
+          $release=@(($response | ConvertFrom-Json) | Where-Object { $_.tag_name -eq 'v0.15.175' -and $_.draft })
+          if($release.Count -ne 1){throw "Missing private draft release"}
+          $assets=@($release[0].assets | Where-Object { $_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip' })
+          if($assets.Count -ne 1){throw 'Missing baseline source asset'}
+          $dst=Join-Path $env:RUNNER_TEMP 'higi-v213-private-source.zip'
+          & curl.exe --silent --show-error --fail --location --retry 2 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $dst "https://api.github.com/repos/$env:REPO/releases/assets/$($assets[0].id)"
+          if($LASTEXITCODE -ne 0){throw "Private draft asset download failed"}
+          if((Get-FileHash $dst -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Source integrity failed'}
+          if((Get-Item $dst).Length -ne [long]$assets[0].size){throw 'Source size failed'}
+          Write-Host 'V213_PRIVATE_BASELINE_SHA256_OK; no source uploaded or published'
