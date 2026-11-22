@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 55
     env:
-      GH_TOKEN: \${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
       REPO: higicrossword/Higi-Releases
       BASELINE_SHA: AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7
     steps:
@@ -103,7 +103,7 @@ jobs:
       - name: Restore original debug signing key for certified candidate
         shell: pwsh
         env:
-          HIGI_DEBUG_KEYSTORE_B64: \${{ secrets.HIGI_DEBUG_KEYSTORE_B64 }}
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.HIGI_DEBUG_KEYSTORE_B64 }}
         run: |
           if([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)){throw 'Original signer secret missing'}
           $dir=Join-Path $env:USERPROFILE '.android'
