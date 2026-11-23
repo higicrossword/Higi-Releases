@@ -1,0 +1,49 @@
+name: Higi v217 read-only pinned source handoff (no APK)
+on:
+  push:
+    branches: ['qa/v0.15.216-maariv-oded-crop']
+    paths: ['.github/workflows/higi-v217-readonly-source-review.yml']
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Decode pinned 0.15.215 patch and check scoped 0.15.216 overlay
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,base64,lzma,hashlib,json
+          p=pathlib.Path('.')
+          cfg=json.loads((p/'cloud-releases/v0.15.215-DRY.json').read_text())
+          assert cfg['version']=='0.15.215' and cfg['versionCode']==365
+          payload=lzma.decompress(base64.b64decode(''.join((p/cfg['patchFile']).read_text().split()),validate=True))
+          sha=hashlib.sha256(payload).hexdigest()
+          assert sha==cfg['patchSha256']=='c6073356bf06605ba9ad78c6ebd9f45f1c5bcfb1154060bf1ac7b491b70c22f2'
+          pathlib.Path('v215-pinned-source.patch').write_bytes(payload)
+          print('V215_PINNED_PATCH_OK sha256='+sha)
+          PY
+      - name: Retrieve exact reviewed 0.15.216 overlay from QA branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method GET 'repos/higicrossword/Higi-Releases/contents/qa/v0.15.216/review-only-v215.patch?ref=qa%2Fv0.15.216-maariv-oded-crop' --jq .content | base64 -d > v216-reviewed.patch
+          python3 - <<'PY'
+          import hashlib,pathlib
+          p=pathlib.Path('v216-reviewed.patch').read_bytes().replace(b'\r\n',b'\n')
+          assert hashlib.sha256(p).hexdigest()=='4ad136d1c9d5ad726e986a0b3bcdc040e8382cfb5ebcbaed7173e6f321d701e5'
+          pathlib.Path('v216-reviewed.patch').write_bytes(p)
+          print('V216_PATCH_SHA256_OK')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: higi-v217-pinned-source-diff-readonly
+          path: |
+            v215-pinned-source.patch
+            v216-reviewed.patch
+          retention-days: 3
