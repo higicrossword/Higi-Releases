@@ -1,0 +1,158 @@
+name: Higi v218 administrator OCR/timeouts signed QA (NO RELEASE)
+on:
+  push:
+    branches: ['release/v0.15.218-admin-timeout-ocr']
+    paths:
+      - '.github/workflows/higi-v218-admin-qa.yml'
+      - 'qa/v0.15.218/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Download sealed v175 and reconstruct verified v217 plus admin-only v218 overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $info=(& gh api "repos/$env:REPO/releases/437513599" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or !$info.draft -or $info.tag_name -ne 'v0.15.175'){throw 'Baseline source unavailable'}
+          $asset=@($info.assets|Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1 -or [long]$asset[0].size -ne 8145322){throw 'Wrong baseline asset'}
+          $z=Join-Path $env:RUNNER_TEMP 'sealed-v175.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $z "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0 -or (Get-FileHash $z -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Sealed v175 mismatch'}
+          $location=Join-Path $env:RUNNER_TEMP 'HigiV218'
+          Expand-Archive $z -DestinationPath $location -Force
+          $src=Join-Path $location 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $src 'app/build.gradle.kts'))){throw 'Invalid source layout'}
+          Add-Content $env:GITHUB_ENV "HIGI_SOURCE_ROOT=$src"
+          & git -C $src init -q
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm exact175
+          if($LASTEXITCODE -ne 0){throw 'Cannot pin v175'}
+          $py=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);dst=pathlib.Path(sys.argv[2])
+          cfg=json.loads((repo/'cloud-releases/v0.15.217-DRY.json').read_text())
+          assert cfg['channel']=='dry' and cfg['version']=='0.15.217' and cfg['versionCode']==367
+          assert cfg['patchFile']=='cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'
+          b=lzma.decompress(base64.b64decode(''.join((repo/cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(b).hexdigest()==cfg['patchSha256']=='bfa9ee063adf996ea394da52f2f4bdffd80377fb65857c882d9c6fcfd43f651f'
+          (dst/'pinned-v217.patch').write_bytes(b)
+          overlay=(repo/'qa/v0.15.218/admin-diagnostics.patch').read_bytes().replace(b'\r\n',b'\n')
+          assert hashlib.sha256(overlay).hexdigest()=='e167694028b6e45030ecdb38e53c6f53e4ea0ed1a1f20785e1082cb1ce5f0f9b'
+          (dst/'reviewed-v218.patch').write_bytes(overlay)
+          print('V218_PINNED_BASE_AND_REVIEWED_SCOPE_SHA256_PASS')
+          '@
+          $decoder=Join-Path $env:RUNNER_TEMP 'decode-v218.py'
+          [IO.File]::WriteAllText($decoder,$py)
+          & python $decoder $env:GITHUB_WORKSPACE $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Pinned source or v218 overlay hash invalid'}
+          $base=Join-Path $env:RUNNER_TEMP 'pinned-v217.patch'
+          & git -C $src apply --check $base
+          if($LASTEXITCODE -ne 0){throw 'v217 patch does not reconstruct from v175'}
+          & git -C $src apply $base
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct published v217'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm pinned217
+          $overlay=Join-Path $env:RUNNER_TEMP 'reviewed-v218.patch'
+          & git -C $src apply --check $overlay
+          if($LASTEXITCODE -ne 0){throw 'v218 overlay not applicable to exact published v217'}
+          & git -C $src apply $overlay
+          if($LASTEXITCODE -ne 0){throw 'Cannot apply v218 overlay'}
+          & git -C $src add -N -A
+          $changed=@(& git -C $src diff --name-only HEAD)
+          $allowed=@(
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt',
+            'app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt',
+            'app/src/test/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218JUnitTest.kt',
+            'tools/tests/AdminAiTimeBudgetV218Test.kt'
+          )
+          if($changed.Count -ne 6 -or @($changed|Where-Object{$_ -notin $allowed}).Count -ne 0 -or @($allowed|Where-Object{$_ -notin $changed}).Count -ne 0){
+            throw "v218 admin-only scope violation: $($changed -join ',')"
+          }
+          $s=[IO.File]::ReadAllText((Join-Path $src 'app/build.gradle.kts'))
+          if(([regex]::Matches($s,'versionCode\s*=\s*367\b')).Count -ne 1 -or
+             ([regex]::Matches($s,'versionName\s*=\s*"0\.15\.217"')).Count -ne 1){throw 'Unexpected published v217 version'}
+          Write-Host 'V218_SIX_ADMIN_AND_TEST_FILES_ONLY'
+      - name: Bump test APK version and compare against original signing certificate
+        shell: pwsh
+        env:
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=$env:HIGI_SOURCE_ROOT
+          $file=Join-Path $src 'app/build.gradle.kts'
+          $s=[IO.File]::ReadAllText($file).Replace('versionCode = 367','versionCode = 368').Replace('versionName = "0.15.217"','versionName = "0.15.218"')
+          [IO.File]::WriteAllText($file,$s)
+          & python (Join-Path $src 'tools/sync-release-version.py') --write --root $src
+          if($LASTEXITCODE -ne 0){throw 'Local metadata version staging failed'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'Local metadata check failed'}
+          if([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)){throw 'Original signer secret unavailable'}
+          $dir=Join-Path $env:USERPROFILE '.android'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $dir 'debug.keystore'),[Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
+          & gh release download v0.15.217-DRY --repo $env:REPO --pattern Higi-0.15.217-DRY.apk --dir $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Cannot inspect published v217 signing certificate'}
+          Write-Host 'V218_VERSION_368_ORIGINAL_SIGNING_KEY_READY'
+      - name: Gradle Android unit tests and signed debug APK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:HIGI_SOURCE_ROOT
+          & gradle --no-daemon -PhigiDryBuild=true testDebugUnitTest assembleDebug
+          if($LASTEXITCODE -ne 0){throw 'Android compilation or JUnit tests failed'}
+          $apk=Join-Path $env:HIGI_SOURCE_ROOT 'app/build/outputs/apk/debug/app-debug.apk'
+          $cfg=Join-Path $env:HIGI_SOURCE_ROOT 'app/build/generated/source/buildConfig/debug/com/example/hebrewcrossword/BuildConfig.java'
+          if(!(Test-Path $apk) -or !(Test-Path $cfg) -or
+             (Get-Content -Raw $cfg) -notmatch 'HIGI_DRY_BUILD\s*=\s*true'){throw 'Wrong APK or DRY BuildConfig'}
+          $sdk=$env:ANDROID_HOME;if(!$sdk){$sdk=$env:ANDROID_SDK_ROOT}
+          $aapt=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter aapt.exe | Sort-Object FullName -Descending | Select-Object -First 1
+          $sig=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat | Sort-Object FullName -Descending | Select-Object -First 1
+          if(!$aapt -or !$sig){throw 'Android verification tools missing'}
+          $line=(& $aapt.FullName dump badging $apk | Select-String '^package:').ToString()
+          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='368' versionName='0\.15\.218'"){throw "Wrong version or package: $line"}
+          $old=(& $sig.FullName verify --print-certs (Join-Path $env:RUNNER_TEMP 'Higi-0.15.217-DRY.apk') 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'Published v217 signature invalid'}
+          $new=(& $sig.FullName verify --print-certs $apk 2>&1 | Out-String)
+          if($LASTEXITCODE -ne 0){throw 'WIP v218 signature invalid'}
+          $pattern='(?i)certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $prev=([regex]::Match($old,$pattern).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          $next=([regex]::Match($new,$pattern).Groups[1].Value -replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          if($prev.Length -ne 64 -or $prev -ne $next){throw 'v218 signature differs from installed v217'}
+          $out=Join-Path $env:RUNNER_TEMP 'Higi-0.15.218-QA.apk'
+          Copy-Item $apk $out
+          $sha=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.218-QA.sha256'),"$sha  Higi-0.15.218-QA.apk")
+          Write-Host "V218_SIGNED_ANDROID_TESTS_PASS SHA256=$sha"
+      - name: Preserve signed QA APK without publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-0.15.218-signed-admin-qa
+          path: |
+            ${{ runner.temp }}/Higi-0.15.218-QA.apk
+            ${{ runner.temp }}/Higi-0.15.218-QA.sha256
+          retention-days: 3
+          if-no-files-found: error
