@@ -1,0 +1,167 @@
+name: Higi v218 sealed source stage and official DRY publisher
+on:
+  push:
+    branches: ['release/v0.15.218-admin-timeout-ocr']
+    paths: ['.github/workflows/higi-v218-stage-release.yml']
+permissions:
+  contents: write
+  actions: write
+jobs:
+  stage:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify signed QA and obtain exact source baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $qa=(& gh api "repos/$env:REPO/actions/runs/45230117284"|Out-String|ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or $qa.conclusion -ne 'success' -or
+             $qa.head_sha -ne 'c8743282cf032ef7b7b8648403afda363be05667'){
+            throw 'Exact signed v218 QA did not pass'
+          }
+          if(Test-Path 'cloud-releases/v0.15.218-DRY.json'){throw 'Release manifest already staged'}
+          & gh release view v0.15.218-DRY --repo $env:REPO *> $null
+          if($LASTEXITCODE -eq 0){throw 'Release already exists'}
+          $r=(& gh api "repos/$env:REPO/releases/437513599"|Out-String|ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or !$r.draft -or $r.tag_name -ne 'v0.15.175'){throw 'Sealed baseline absent'}
+          $a=@($r.assets|Where-Object{$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($a.Count -ne 1 -or [long]$a[0].size -ne 8145322){throw 'Sealed source mismatch'}
+          $zip=Join-Path $env:RUNNER_TEMP 'source.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $zip "https://api.github.com/repos/$env:REPO/releases/assets/$($a[0].id)"
+          if($LASTEXITCODE -ne 0 -or (Get-FileHash $zip -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Baseline hash mismatch'}
+          $dir=Join-Path $env:RUNNER_TEMP 'staging'
+          Expand-Archive $zip -DestinationPath $dir -Force
+          $src=Join-Path $dir 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $src 'app/build.gradle.kts'))){throw 'Source root invalid'}
+          Add-Content $env:GITHUB_ENV "SRC_ROOT=$src"
+          Write-Host 'V218_SIGNED_QA_AND_PINNED_SOURCE_PASS'
+          exit 0
+      - name: Reconstruct cumulative v218 source and stage patch plus manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=@'
+          import pathlib,base64,lzma,hashlib,json,sys
+          repo=pathlib.Path(sys.argv[1]); dest=pathlib.Path(sys.argv[2])
+          cfg=json.loads((repo/'cloud-releases/v0.15.217-DRY.json').read_text())
+          assert cfg['version']=='0.15.217' and cfg['versionCode']==367
+          assert cfg['patchFile']=='cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'
+          base=lzma.decompress(base64.b64decode(''.join((repo/cfg['patchFile']).read_text().split()),validate=True))
+          assert hashlib.sha256(base).hexdigest()==cfg['patchSha256']=='bfa9ee063adf996ea394da52f2f4bdffd80377fb65857c882d9c6fcfd43f651f'
+          (dest/'v217.patch').write_bytes(base)
+          v218=(repo/'qa/v0.15.218/admin-diagnostics.patch').read_bytes().replace(b'\r\n',b'\n')
+          assert hashlib.sha256(v218).hexdigest()=='e167694028b6e45030ecdb38e53c6f53e4ea0ed1a1f20785e1082cb1ce5f0f9b'
+          (dest/'v218.patch').write_bytes(v218)
+          print('V218_SOURCE_SHA256_PINNED')
+          '@
+          $f=Join-Path $env:RUNNER_TEMP 'decode.py'
+          [IO.File]::WriteAllText($f,$script)
+          & python $f $env:GITHUB_WORKSPACE $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Pinned patches invalid'}
+          $src=$env:SRC_ROOT
+          & git -C $src init -q
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm sealed175
+          if($LASTEXITCODE -ne 0){throw 'Cannot pin sealed source'}
+          $root=(& git -C $src rev-parse HEAD)
+          $base=Join-Path $env:RUNNER_TEMP 'v217.patch'
+          & git -C $src apply --check $base
+          if($LASTEXITCODE -ne 0){throw 'Cannot validate published v217 patch'}
+          & git -C $src apply $base
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct published v217'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm published217
+          $extra=Join-Path $env:RUNNER_TEMP 'v218.patch'
+          & git -C $src apply --check $extra
+          if($LASTEXITCODE -ne 0){throw 'v218 patch mismatch against published v217'}
+          & git -C $src apply $extra
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct reviewed v218'}
+          & git -C $src add -N -A
+          $expected=@(
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt',
+            'app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt',
+            'app/src/test/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218JUnitTest.kt',
+            'tools/tests/AdminAiTimeBudgetV218Test.kt'
+          )
+          $changed=@(& git -C $src diff --name-only HEAD)
+          if($changed.Count -ne 6 -or @($changed|Where-Object{$_ -notin $expected}).Count -ne 0 -or
+             @($expected|Where-Object{$_ -notin $changed}).Count -ne 0){throw 'Source change exceeded six admin/test files'}
+          $build=Join-Path $src 'app/build.gradle.kts'
+          $content=[IO.File]::ReadAllText($build)
+          if(([regex]::Matches($content,'versionCode\s*=\s*367\b')).Count -ne 1 -or
+             ([regex]::Matches($content,'versionName\s*=\s*"0\.15\.217"')).Count -ne 1){throw 'Unexpected v217 version'}
+          $content=$content.Replace('versionCode = 367','versionCode = 368').Replace('versionName = "0.15.217"','versionName = "0.15.218"')
+          [IO.File]::WriteAllText($build,$content)
+          & python (Join-Path $src 'tools/sync-release-version.py') --write --root $src
+          if($LASTEXITCODE -ne 0){throw 'Cannot stage new version'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'New version consistency failed'}
+          & git -C $src add -N -A
+          $all=@(& git -C $src diff --name-only HEAD)
+          $allow=@($expected)+@('app/build.gradle.kts','firebase/public/app-version.json','firebase/public/update/index.html')
+          if($all.Count -ne 9 -or @($all|Where-Object{$_ -notin $allow}).Count -ne 0 -or
+             @($allow|Where-Object{$_ -notin $all}).Count -ne 0){throw 'Cumulative source scope exceeded nine files'}
+          $full=Join-Path $env:RUNNER_TEMP 'v218-full.patch'
+          & git -C $src diff --binary "--output=$full" $root
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $full)){throw 'Full source delta unavailable'}
+          & git -C $src reset --hard $root
+          if($LASTEXITCODE -ne 0){throw 'Cannot restore sealed source'}
+          & git -C $src clean -fdq
+          & git -C $src apply --check $full
+          if($LASTEXITCODE -ne 0){throw 'Full patch does not reapply to sealed source'}
+          & git -C $src apply $full
+          if($LASTEXITCODE -ne 0){throw 'Full patch roundtrip failed'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'Roundtrip source metadata mismatch'}
+          $script=@'
+          import pathlib,base64,lzma,hashlib,json,sys
+          repo=pathlib.Path(sys.argv[1]);raw=pathlib.Path(sys.argv[2]).read_bytes()
+          assert 10000<len(raw)<3000000
+          patch=repo/'cloud-patches/v0.15.218-from-v0.15.175.patch.xz.b64'
+          manifest=repo/'cloud-releases/v0.15.218-DRY.json'
+          assert not patch.exists() and not manifest.exists()
+          patch.write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode('ascii')+'\n')
+          obj={'channel':'dry','version':'0.15.218','versionCode':368,
+              'patchFile':patch.relative_to(repo).as_posix(),
+              'patchSha256':hashlib.sha256(raw).hexdigest(),
+              'notes':'Administrator-only DRY: inclusive 110 s per-AI-probe and 330 s overall word-length diagnostic limits; OCR-only action without Gemini; all expected local OCR gate rows even on failed AI calls; monotonic probe_timing.csv. SDK-stage submetrics are explicitly unavailable. Production OCR/word ordering, frozen series, Canonical and Firebase deployment unchanged.'}
+          manifest.write_text(json.dumps(obj,ensure_ascii=False,indent=2)+'\n')
+          print('V218_FULL_PATCH_SHA256',obj['patchSha256'])
+          '@
+          $writer=Join-Path $env:RUNNER_TEMP 'write.py'
+          [IO.File]::WriteAllText($writer,$script)
+          & python $writer $env:GITHUB_WORKSPACE $full
+          if($LASTEXITCODE -ne 0){throw 'Manifest or full patch creation failed'}
+          Write-Host 'V218_SOURCE_ROUNDTRIP_VERIFIED'
+      - name: Push verified definitions to main and start official DRY publisher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:GITHUB_WORKSPACE
+          & git fetch origin main
+          if($LASTEXITCODE -ne 0){throw 'Cannot fetch main'}
+          & git checkout -B main origin/main
+          if($LASTEXITCODE -ne 0){throw 'Cannot select main'}
+          & git add cloud-patches/v0.15.218-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.218-DRY.json
+          if($LASTEXITCODE -ne 0){throw 'Cannot stage release files'}
+          & git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage Higi 0.15.218 DRY after signed QA'
+          if($LASTEXITCODE -ne 0){throw 'Cannot commit release files'}
+          & git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'Cannot push release files'}
+          Write-Host 'V218_MANIFEST_STAGED_ON_MAIN'
+          & gh workflow run higi-cloud-dry-release.yml --repo $env:REPO --ref main -f 'manifest_file=cloud-releases/v0.15.218-DRY.json'
+          if($LASTEXITCODE -ne 0){throw 'Could not start signed DRY publisher'}
+          Write-Host 'V218_DRY_PUBLISHER_DISPATCHED'
