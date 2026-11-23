@@ -1,0 +1,352 @@
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+index 43e429c..bcde863 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+@@ -176,9 +176,29 @@ object AdminAiPromptDiagnostic {
+             // Never force the dimensions from a cached Canonical/local crossword.
+             // A previously accepted 4x4 sub-grid gave a misleading 2+2 benchmark
+             // against the 11x11 / 12+12 source image. Re-detect independently.
+-            val located=GridDetector.locate(bitmap)
++            val sourceKey=CrosswordCatalog.sourceKey(item).orEmpty()
++            val sourceTitle=WeeklyCrosswordsFetcher.displayTitle(item)
++            val maarivOded=OcrMaarivOdedLayoutV216.exactSeries(sourceKey,sourceTitle)
++            val normallyLocated=GridDetector.locate(bitmap)
++            // The fixed 11x11 grid is only a *pixel-verified* optional fallback
++            // for the exact Oded Rosen series in this administrator diagnostic.
++            // No series-specific grid is applied to regular decoding or others.
++            val located=if(maarivOded && (normallyLocated==null ||
++                !OcrMaarivOdedLayoutV216.matches(normallyLocated.result.crossword.rows,
++                    normallyLocated.result.crossword.cols,
++                    GridConsistency.blockedMask(normallyLocated.result.crossword)))) {
++                val gridTemplate=Crossword(11,11,
++                    OcrMaarivOdedLayoutV216.BLOCK_ROWS.map { line ->
++                        line.map { char -> Cell(blocked=char=='#') }.toMutableList()
++                    }.toMutableList()).also { it.assignNumbers() }
++                val recovered=GridDetector.locateMatching(bitmap,gridTemplate)
++                if(recovered!=null) DebugLog.i("AI_LENGTH_LOCAL",
++                    "MAARIV_ODED_PIXEL_VERIFIED_GRID_FALLBACK variant=${recovered.variant} mutation=none")
++                recovered ?: normallyLocated
++            } else normallyLocated
++            val actualLocated=located
+                 ?: error("INVALID_INPUT: לא זוהתה רשת בתמונת המקור; בדיקת המודלים לא הופעלה")
+-            val crossword=located.result.crossword
++            val crossword=actualLocated.result.crossword
+             if(preferredCrossword!=null && (preferredCrossword.rows!=crossword.rows ||
+                     preferredCrossword.cols!=crossword.cols ||
+                     GridConsistency.blockedMask(preferredCrossword)!=GridConsistency.blockedMask(crossword))) {
+@@ -197,7 +217,7 @@ object AdminAiPromptDiagnostic {
+                     "v=${crossword.startNumbers(Direction.VERTICAL).size}")
+                 error("INVALID_INPUT: זוהתה רשת לא מהימנה לבדיקת AI. יש לתקן את זיהוי הרשת לפני השוואת מודלים")
+             }
+-            val grid=located.bounds
++            val grid=actualLocated.bounds
+             val h=crossword.startNumbers(Direction.HORIZONTAL).size
+             val v=crossword.startNumbers(Direction.VERTICAL).size
+             val profiles=if(mode==TestMode.WORD_LENGTHS)
+@@ -279,17 +299,32 @@ object AdminAiPromptDiagnostic {
+                 localOcrContext==null -> Triple(emptyMap(),"no-android-context",null)
+                 !localSeriesInScope -> Triple(emptyMap(),"series-out-of-scope",null)
+                 else -> runCatching {
+-                    val lines=LocalHebrewOcrV031(localOcrContext).use { engine ->
+-                        engine.readFullPageLines(bitmap,sparse=false)
+-                    }
+-                    val raw=lines.sortedWith(compareBy<OcrTextLocatorV032.Line>{it.box.top}
+-                        .thenByDescending{it.box.right}).joinToString("\n"){it.text}
+                     val expectedH=crossword.startNumbers(Direction.HORIZONTAL).associateWith {
+                         crossword.wordLengthForNumber(it,Direction.HORIZONTAL)?:0 }
+                     val expectedV=crossword.startNumbers(Direction.VERTICAL).associateWith {
+                         crossword.wordLengthForNumber(it,Direction.VERTICAL)?:0 }
+-                    val audit=AdminLocalOcrGateDiagnosticsV215.inspect(raw,expectedH,expectedV,lines.size)
+-                    // Never log raw clue/OCR text; only bounded failure codes and counts.
++                    val layout=OcrMaarivOdedLayoutV216.plan(
++                        sourceKey,sourceTitle,crossword.rows,crossword.cols,
++                        GridConsistency.blockedMask(crossword),bitmap.width,bitmap.height,
++                        grid.left,grid.top,grid.right,grid.bottom)
++                    val lines=LocalHebrewOcrV031(localOcrContext).use { engine ->
++                        if(layout!=null)engine.readFullPageLines(bitmap,
++                            startY=layout.startY,sparse=false)
++                        else engine.readFullPageLines(bitmap,sparse=false)
++                    }
++                    val raw=lines.sortedWith(compareBy<OcrTextLocatorV032.Line>{it.box.top}
++                        .thenByDescending{it.box.right}).joinToString("\n"){it.text}
++                    val audit=if(layout!=null) {
++                        val scoped=OcrMaarivOdedCluesV216.inspect(raw,expectedH,expectedV)
++                        AdminLocalOcrGateDiagnosticsV215.Audit(scoped.candidates,
++                            scoped.reason,scoped.stats,scoped.perClue)
++                    } else {
++                        // Fail closed: never apply fixed-layout recovery if pixel
++                        // structure and source-area geometry were not verified.
++                        val legacy=AdminLocalOcrGateDiagnosticsV215.inspect(raw,expectedH,expectedV,lines.size)
++                        legacy.copy(reason="maariv-template-not-verified:"+legacy.reason)
++                    }
++                    // Neither text nor raw OCR output is persisted in diagnostics.
+                     DebugLog.i("AI_LENGTH_LOCAL_GATE",
+                         "reason=${audit.reason} stats=${audit.stats} mutation=none")
+                     Triple(audit.candidates,
+diff --git a/app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt b/app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt
+new file mode 100644
+index 0000000..83d747b
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt
+@@ -0,0 +1,168 @@
++package com.example.hebrewcrossword
++
++import kotlin.math.ceil
++import kotlin.math.max
++
++/**
++ * MAARIV_ODED_ROZEN-specific, administrator REVIEW_ONLY source layout.
++ *
++ * Proven by two independent printed images with the same 11x11 block mask and
++ * numbering. This is NOT a general rule for 'Maariv' and not a date-specific rule.
++ * It is guarded by exact series identity, exact grid topology and realistic
++ * image-space bounds. No candidate can modify a clue or Canonical data.
++ */
++object OcrMaarivOdedLayoutV216 {
++    const val SERIES_ID = "MAARIV_ODED_ROZEN"
++    val BLOCK_ROWS = listOf(
++        ".....#.....",
++        ".#.#.#.#.#.",
++        ".......#...",
++        ".#.#.###.#.",
++        "...#.......",
++        "####.#.#.##",
++        "....#......",
++        ".#.#.#.###.",
++        "........#..",
++        ".#.#.#.#.#.",
++        ".....##...."
++    )
++    val BLOCK_MASK = BLOCK_ROWS.joinToString("")
++    data class Plan(val startY: Int, val reason: String = "MAARIV_ODED_11X11_CLUES_BELOW_GRID")
++
++    /** Never route a generic Maariv/guest puzzle into this profile. */
++    fun exactSeries(sourceKey: String, title: String): Boolean {
++        val explicit = sourceKey.substringBefore(':')
++        if (explicit == SERIES_ID) return true
++        if (explicit in setOf("TARTEY_DEKEL", "HAFUCH_DEKEL", "YEDIOTH_DEKEL_WEEKLY",
++                "YEDIOTH_MONDAY_DEKEL", "YEDIOTH_WEDNESDAY_DEKEL",
++                "MAKOR_RISHON", "LAISHA_DEKEL", "MAARIV_GUEST", "GUEST_AVISHAI",
++                "BARUCH_LIOR", "TZAFNAT_PAANEACH", "ISRAEL_HAYOM_BIRMAN")) return false
++        // Some catalog entries expose only a human-readable series title.
++        return "מעריב" in title && "עודד" in title && "רוזן" in title && "אורח" !in title
++    }
++
++    fun matches(rows: Int, cols: Int, blockedMask: String): Boolean =
++        rows == 11 && cols == 11 && blockedMask == BLOCK_MASK
++
++    /** A source-image crop, not a screen or zoom crop. No hardcoded pixel values. */
++    fun plan(
++        sourceKey: String, title: String, rows: Int, cols: Int, blockedMask: String,
++        imageWidth: Int, imageHeight: Int,
++        gridLeft: Float, gridTop: Float, gridRight: Float, gridBottom: Float
++    ): Plan? {
++        if (!exactSeries(sourceKey, title) || !matches(rows, cols, blockedMask)) return null
++        if (imageWidth < 650 || imageHeight < 900) return null
++        val width = gridRight - gridLeft
++        val height = gridBottom - gridTop
++        if (!width.isFinite() || !height.isFinite() || width <= 0 || height <= 0) return null
++        // Reject a partial grid, a misplaced grid, and a page with no clue area.
++        if (gridLeft < -1 || gridRight > imageWidth + 1 || gridTop < 0 || gridBottom >= imageHeight) return null
++        if (width / imageWidth !in 0.70f..0.98f ||
++            height / imageHeight !in 0.38f..0.76f ||
++            width / height !in .86f..1.15f ||
++            gridTop / imageHeight !in 0.025f..0.20f ||
++            gridBottom / imageHeight !in 0.49f..0.76f ||
++            imageHeight - gridBottom < imageHeight * .22f) return null
++        // Start just below the bottom border. The two text sections remain in
++        // source order; the Tesseract pass no longer has to interpret the grid.
++        val start = ceil(gridBottom + max(5f, height * .014f)).toInt()
++        if (start !in 0 until imageHeight || imageHeight - start < imageHeight / 5) return null
++        return Plan(start)
++    }
++}
++
++/** Read-only, per-clue fail-closed extraction from the selected clue band.
++ *
++ * OCR text is in logical Hebrew reading order; its tuples MUST NOT be treated
++ * as physical left-to-right pixel observations and MUST NOT be used to rewrite
++ * Higi's authoritative printedParts/typingParts conversions.
++ */
++object OcrMaarivOdedCluesV216 {
++    data class Audit(
++        val candidates: Map<AdminLocalOcrLengthV213.Key, List<Int>>,
++        val perClue: Map<AdminLocalOcrLengthV213.Key, String>,
++        val reason: String,
++        val stats: String
++    )
++    private val headingH = Regex("(?m)^[ \\t]*[:：]?[ \\t]*מאוזן[ \\t]*[:：]?")
++    private val headingV = Regex("(?m)^[ \\t]*[:：]?[ \\t]*מאונך[ \\t]*[:：]?")
++    private val marker = Regex("(?<![0-9])([0-9]{1,2})[ \\t]*[.:]")
++    private val tuple = Regex("\\(\\s*([0-9]{1,2}(?:\\s*[,;.]\\s*[0-9]{1,2}){1,5})\\s*\\)")
++    private val number = Regex("[0-9]{1,2}")
++    private val crossReference = Regex("[0-9]{1,2}\\s*(מאוזן|מאונך)")
++    private val bidiControls = Regex("[\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]")
++    private data class Marker(val number: Int, val range: IntRange)
++
++    fun inspect(raw: String, h: Map<Int, Int>, v: Map<Int, Int>): Audit {
++        // Keep line breaks: the headings are paragraph starts, not incidental
++        // words in the text of "with 17 across" cross-references.
++        val text = raw.replace(bidiControls, "")
++        val states = linkedMapOf<AdminLocalOcrLengthV213.Key, String>()
++        for (n in h.keys) states[AdminLocalOcrLengthV213.Key("across", n)] = "number-not-seen"
++        for (n in v.keys) states[AdminLocalOcrLengthV213.Key("down", n)] = "number-not-seen"
++        val results = linkedMapOf<AdminLocalOcrLengthV213.Key, List<Int>>()
++        val horiz = headingH.find(text)
++        val vert = horiz?.let { headingV.find(text, it.range.last + 1) }
++        var labels = 0
++        var unknown = 0
++        var unordered = 0
++        var ambiguities = 0
++        var mismatches = 0
++        var safe = 0
++
++        fun scan(section: String, dir: String, expected: Map<Int, Int>) {
++            // ALL markers delimit a candidate; a misread 11 as "1." must not
++            // contaminate the adjacent number 9 or silently become 11.
++            val tokens = marker.findAll(section).mapNotNull { m ->
++                m.groupValues[1].toIntOrNull()?.let { Marker(it, m.range) }
++            }.toList()
++            val counts = tokens.filter { it.number in expected }.groupingBy { it.number }.eachCount()
++            var last = 0
++            tokens.forEachIndexed { i, item ->
++                val n = item.number
++                if (n !in expected) { unknown++; return@forEachIndexed }
++                val key = AdminLocalOcrLengthV213.Key(dir, n)
++                if ((counts[n] ?: 0) != 1) { states[key] = "duplicate-number-anchor"; ambiguities++; return@forEachIndexed }
++                if (n <= last) { states[key] = "number-order-conflict"; unordered++; return@forEachIndexed }
++                last = n
++                labels++
++                val end = tokens.getOrNull(i + 1)?.range?.first ?: section.length
++                val clue = section.substring(item.range.last + 1, end)
++                val brackets = tuple.findAll(clue).toList()
++                if (brackets.size != 1) {
++                    states[key] = if (brackets.isEmpty()) "no-multipart-tuple" else "ambiguous-multiple-tuples"
++                    if (brackets.size > 1) ambiguities++
++                    return@forEachIndexed
++                }
++                val parts = number.findAll(brackets.single().groupValues[1]).map { it.value.toInt() }.toList()
++                val sum = parts.sum()
++                val grid = expected[n] ?: 0
++                val referred = crossReference.containsMatchIn(clue)
++                if (parts.size !in 2..6 || parts.any { it !in 1..99 } ||
++                    !(sum == grid || (referred && sum > grid && grid > 0))) {
++                    states[key] = "tuple-grid-or-reference-mismatch"
++                    mismatches++
++                    return@forEachIndexed
++                }
++                results[key] = parts  // OCR logical word order, unverified.
++                states[key] = "source-clue-ocr-observed-unverified"
++                safe++
++            }
++        }
++        if (horiz != null && vert != null && vert.range.first > horiz.range.last) {
++            scan(text.substring(horiz.range.last + 1, vert.range.first), "across", h)
++            scan(text.substring(vert.range.last + 1), "down", v)
++        }
++        val reason = when {
++            horiz == null -> "missing-across-heading-in-cropped-text"
++            vert == null -> "missing-down-heading-in-cropped-text"
++            results.isEmpty() -> "no-safe-observations-after-heading-recovery"
++            else -> "series-template-readonly-observations"
++        }
++        val stats = "profile=MAARIV_ODED_V216;headingH=${if (horiz != null) 1 else 0};" +
++            "headingV=${if (vert != null) 1 else 0};labels=$labels;unknown=$unknown;" +
++            "unordered=$unordered;ambiguous=$ambiguities;gridMismatch=$mismatches;" +
++            "observed=$safe;authority=none"
++        return Audit(results, states, reason, stats)
++    }
++}
+diff --git a/tools/tests/OcrMaarivOdedLayoutV216Test.kt b/tools/tests/OcrMaarivOdedLayoutV216Test.kt
+new file mode 100644
+index 0000000..ce2c361
+--- /dev/null
++++ b/tools/tests/OcrMaarivOdedLayoutV216Test.kt
+@@ -0,0 +1,87 @@
++package com.example.hebrewcrossword
++
++/** Synthetic OCR strings only; no copyrighted crossword clue text in fixtures. */
++fun main() {
++    var checks = 0
++    fun must(value:Boolean, reason:String) { check(value) { reason }; checks++ }
++    val layout = OcrMaarivOdedLayoutV216
++    val mask = layout.BLOCK_MASK
++    must(layout.BLOCK_ROWS.size==11 && layout.BLOCK_ROWS.all{it.length==11}, "11x11 mask")
++    must(mask.length==121, "full mask")
++    must(layout.matches(11,11,mask), "template exact match")
++    must(!layout.matches(11,11,mask.replaceFirst('#','.')), "blocked-cell mismatch")
++    must(!layout.matches(11,10,mask) && !layout.matches(10,11,mask), "dimensions mismatch")
++    must(layout.exactSeries("MAARIV_ODED_ROZEN:20261120",""), "exact stable source key")
++    must(layout.exactSeries("","מעריב – עודד רוזן"), "explicit two-name fallback")
++    must(!layout.exactSeries("","מעריב אורח"), "no guest")
++    must(!layout.exactSeries("","מעריב"), "not generic Maariv")
++    must(!layout.exactSeries("YEDIOTH_DEKEL_WEEKLY:x","דקל בנו שני"), "no Dekel")
++    must(!layout.exactSeries("HAFUCH_DEKEL:x","הפוך על הפוך"), "no Hafuch")
++    must(!layout.exactSeries("HAFUCH_DEKEL:20261123","מעריב – עודד רוזן"),
++        "explicit other series outranks conflicting title")
++    fun plan(w:Int,h:Int,left:Float,top:Float,right:Float,bottom:Float)=layout.plan(
++        "MAARIV_ODED_ROZEN:20261120","",11,11,mask,w,h,left,top,right,bottom)
++    val a=plan(1000,1581,22f,110f,949f,1029f)
++    val b=plan(1039,1536,38f,91f,969f,987f)
++    must(a!=null && b!=null, "both verified reference photographs")
++    must(a!!.startY>1029 && b!!.startY>987, "crop begins below bottom border")
++    must(a.startY<1100 && b!!.startY<1070, "not cutting first clue line")
++    must(layout.plan("HAFUCH_DEKEL", "",11,11,mask,1000,1581,22f,110f,949f,1029f)==null,
++        "wrong source series blocked")
++    must(layout.plan("MAARIV_ODED_ROZEN", "",11,11,mask.replaceFirst('#','.'),
++        1000,1581,22f,110f,949f,1029f)==null, "false identity blocks layout")
++    must(plan(1000,1581,22f,110f,949f,1540f)==null, "missing clue zone")
++    must(plan(1000,1581,22f,110f,500f,1029f)==null, "partial grid")
++    must(plan(1000,1581,-150f,110f,949f,1029f)==null, "off-image grid")
++
++    val h = mapOf(1 to 5,4 to 5,7 to 3,8 to 7,9 to 7,11 to 3,12 to 6,
++        13 to 4,17 to 2,18 to 8,20 to 4,21 to 5)
++    val v = mapOf(1 to 5,2 to 7,3 to 3,4 to 6,5 to 5,6 to 5,10 to 6,
++        12 to 5,14 to 5,15 to 5,16 to 4,19 to 2)
++    fun key(d:String,n:Int)=AdminLocalOcrLengthV213.Key(d,n)
++    val text="""
++        מאוזן: 1. הגדרה (5) 4. הגדרה (3,2)
++        7. (עם 17 מאוזן) הגדרה (3,2) 8. הגדרה (7)
++        9. הגדרה (7) 11. (עם 19 מאונך) הגדרה (3,2)
++        12. הגדרה (6) 13. הגדרה (4) 17. ר' 7 מאוזן
++        18. הגדרה (3,5) 20. הגדרה (4) 21. הגדרה (5)
++        מאונך: 1. הגדרה (5) 2. הגדרה (7)
++        3. הגדרה (3) 4. הגדרה (6) 5. הגדרה (5)
++        6. הגדרה (5) 10. הגדרה (6) 12. הגדרה (5)
++        14. הגדרה (5) 15. הגדרה (3,2)
++        16. הגדרה (4) 19. (עם 17 מאוזן) הגדרה (2,2)
++    """.trimIndent()
++    val first=OcrMaarivOdedCluesV216.inspect(text,h,v)
++    must(first.reason=="series-template-readonly-observations", "accepted diagnostic")
++    must(first.candidates[key("across",4)]==listOf(3,2), "H4 OCR logical order")
++    must(first.candidates[key("across",7)]==listOf(3,2), "H7 reference sum exceeds own grid")
++    must(first.candidates[key("across",11)]==listOf(3,2), "H11 reference")
++    must(first.candidates[key("across",18)]==listOf(3,5), "H18 no auto-reversal")
++    must(first.candidates[key("down",15)]==listOf(3,2), "V15")
++    must(first.candidates[key("down",19)]==listOf(2,2), "V19 reference")
++    must(key("across",17) !in first.candidates, "pure reference has no own length")
++    must(first.perClue[key("across",17)]=="no-multipart-tuple", "reference explained")
++    // Old strict parser rejects a whole section when 11 is misread as 1;
++    // v216 must instead skip that anchor while retaining the unambiguous H18.
++    val noisy=text.replace(" 11. (עם", " 1. (עם")
++    val degraded=OcrMaarivOdedCluesV216.inspect(noisy,h,v)
++    must(degraded.candidates[key("across",18)]==listOf(3,5), "H18 survives 11->1 OCR misread")
++    must(degraded.candidates[key("across",4)]==listOf(3,2), "H4 survives unrelated OCR misread")
++    must(key("across",11) !in degraded.candidates, "no invented 11")
++    must(key("across",1) !in degraded.candidates, "duplicated 1 is not trusted")
++    must(degraded.perClue[key("across",1)]=="duplicate-number-anchor", "duplicate status")
++    val missingColon=OcrMaarivOdedCluesV216.inspect(text.replace("מאוזן:","מאוזן").replace("מאונך:","מאונך"),h,v)
++    must(missingColon.candidates[key("across",18)]==listOf(3,5), "no colon supported")
++    val beforeColon=OcrMaarivOdedCluesV216.inspect(text.replace("מאוזן:",":מאוזן").replace("מאונך:",":מאונך"),h,v)
++    must(beforeColon.candidates[key("across",18)]==listOf(3,5), "reversed colon supported")
++    must(OcrMaarivOdedCluesV216.inspect("1. (עם 17 מאוזן) (3,2)\n19. (עם 11 מאונך) (2,2)",h,v)
++        .candidates.isEmpty(), "references are not section headings")
++    val ambiguous=OcrMaarivOdedCluesV216.inspect(text.replace("18. הגדרה (3,5)","18. הגדרה (3,5) (5,3)"),h,v)
++    must(key("across",18) !in ambiguous.candidates, "multiple tuples rejected")
++    val invalidSum=OcrMaarivOdedCluesV216.inspect(text.replace("18. הגדרה (3,5)","18. הגדרה (2,5)"),h,v)
++    must(key("across",18) !in invalidSum.candidates, "wrong grid sum rejected")
++    val swapped=OcrMaarivOdedCluesV216.inspect(text.substringAfter("מאונך:").prependIndent("מאונך: ")+"\n"+
++        text.substringBefore("מאונך:").prependIndent("מאוזן: "),h,v)
++    must(swapped.candidates.isEmpty(), "wrong paragraph order rejected")
++    println("V216_MAARIV_ODED_LAYOUT_QA_PASS assertions=$checks")
++}
