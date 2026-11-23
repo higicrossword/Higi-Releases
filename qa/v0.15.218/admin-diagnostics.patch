@@ -1,0 +1,456 @@
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+index bcde863..f77f948 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+@@ -7,6 +7,7 @@ import android.graphics.Bitmap
+ import android.content.ContentValues
+ import android.os.Build
+ import android.os.Environment
++import android.os.SystemClock
+ import android.provider.MediaStore
+ import androidx.core.content.FileProvider
+ import java.io.File
+@@ -17,6 +18,8 @@ import java.util.Locale
+ import java.util.zip.ZipEntry
+ import java.util.zip.ZipOutputStream
+ import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.withTimeout
++import kotlinx.coroutines.TimeoutCancellationException
+ import org.json.JSONArray
+ import org.json.JSONObject
+ 
+@@ -79,7 +82,7 @@ object AdminAiPromptDiagnostic {
+     }
+ 
+     /** Keeps the previous Current/Grid diagnostic intact, with an opt-in lengths probe. */
+-    enum class TestMode { CURRENT_VS_GRID, WORD_LENGTHS }
++    enum class TestMode { CURRENT_VS_GRID, WORD_LENGTHS, LOCAL_OCR_ONLY }
+ 
+     data class WordLengthRow(
+         val direction:String,
+@@ -136,7 +139,11 @@ object AdminAiPromptDiagnostic {
+         val validationStatus:String,
+         val error:String?,
+         val simple:GeminiSmartOcr.SimplePrintedLengthsResult?=null,
+-        val bracket:GeminiSmartOcr.BracketLengthResult?=null
++        val bracket:GeminiSmartOcr.BracketLengthResult?=null,
++        // Monotonic end-to-end budget of this administrator probe, not SDK-only latency.
++        val probeElapsedMs:Long=0L,
++        val deadlineBudgetMs:Long=0L,
++        val failureCategory:String="none"
+     ) {
+         val usage:GeminiSmartOcr.TokenUsage?
+             get()=recognition?.adminTokenUsage ?: simple?.usage ?: bracket?.usage
+@@ -158,7 +165,9 @@ object AdminAiPromptDiagnostic {
+         localOcrContext:Context?=null,
+         onProgress:((index:Int,total:Int,label:String)->Unit)?=null
+     ):Summary {
+-        require(selectedModels.isNotEmpty()) { "יש לבחור לפחות מודל אחד" }
++        require(mode==TestMode.LOCAL_OCR_ONLY || selectedModels.isNotEmpty()) {
++            "יש לבחור לפחות מודל אחד"
++        }
+         val uniqueModels=selectedModels.distinct()
+         require(mode!=TestMode.WORD_LENGTHS || uniqueModels.all { it.provider==Provider.GEMINI }) {
+             "בדיקת אורכי מילים פשוטה נתמכת כעת במודלי Gemini בלבד"
+@@ -220,9 +229,12 @@ object AdminAiPromptDiagnostic {
+             val grid=actualLocated.bounds
+             val h=crossword.startNumbers(Direction.HORIZONTAL).size
+             val v=crossword.startNumbers(Direction.VERTICAL).size
+-            val profiles=if(mode==TestMode.WORD_LENGTHS)
+-                listOf(AiPromptProfile.CURRENT,AiPromptProfile.PRINTED_LENGTHS_ONLY,AiPromptProfile.BRACKET_ANCHORED_LENGTHS)
+-            else listOf(AiPromptProfile.CURRENT,AiPromptProfile.GRID_AWARE_DIAGNOSTIC)
++            val profiles=when(mode) {
++                TestMode.WORD_LENGTHS -> listOf(AiPromptProfile.CURRENT,
++                    AiPromptProfile.PRINTED_LENGTHS_ONLY,AiPromptProfile.BRACKET_ANCHORED_LENGTHS)
++                TestMode.LOCAL_OCR_ONLY -> emptyList()
++                TestMode.CURRENT_VS_GRID -> listOf(AiPromptProfile.CURRENT,AiPromptProfile.GRID_AWARE_DIAGNOSTIC)
++            }
+             val cases=uniqueModels.flatMap { model ->
+                 profiles.map { profile -> model to profile }
+             }.mapIndexed { index,(model,profile) -> ProbeCase(index+1,model,profile) }
+@@ -234,16 +246,41 @@ object AdminAiPromptDiagnostic {
+             )
+             val records=mutableListOf<RunRecord>()
+             var ok=0
++            // A single monotonic limit also covers waiting for the AI mutex,
++            // background/network reconnection and SDK retries. It applies ONLY
++            // to the administrator's word-length benchmark, not normal decoding.
++            val runDeadline=if(mode==TestMode.WORD_LENGTHS)
++                AdminAiTimeBudgetV218.deadline(SystemClock.elapsedRealtime()) else null
+             runBlocking {
+                 cases.forEachIndexed { index,probe ->
+                     onProgress?.invoke(index+1,cases.size,"${probe.model.displayName} — ${profileDisplay(probe.profile)}")
+                     val started=System.currentTimeMillis()
++                    val monotonicStarted=SystemClock.elapsedRealtime()
++                    val probeBudget=runDeadline?.let {
++                        AdminAiTimeBudgetV218.probeBudget(it,monotonicStarted)
++                    } ?: 0L
+                     DebugLog.i(
+                         "AI_AB_TEST",
+                         "id=$testId case=${probe.id} start index=${index+1}/${cases.size} provider=${probe.model.provider} " +
+-                            "model=${probe.model.modelName} reasoning=${probe.model.reasoning?.wireValue.orEmpty()} profile=${probe.profile.wireValue}"
++                            "model=${probe.model.modelName} reasoning=${probe.model.reasoning?.wireValue.orEmpty()} " +
++                            "profile=${probe.profile.wireValue} budgetMs=${if(runDeadline!=null)probeBudget else -1}"
+                     )
+-                    val result=runCatching { executeProbe(bitmap,crossword,grid,probe) }
++                    val result:Result<ProbeOutput> = when {
++                        runDeadline!=null && probeBudget<=0L ->
++                            Result.failure(IllegalStateException("admin-run-deadline-exceeded"))
++                        runDeadline!=null -> runCatching {
++                            withTimeout(probeBudget) { executeProbe(bitmap,crossword,grid,probe) }
++                        }
++                        else -> runCatching { executeProbe(bitmap,crossword,grid,probe) }
++                    }
++                    val monotonicElapsed=(SystemClock.elapsedRealtime()-monotonicStarted).coerceAtLeast(0L)
++                    val failureCategory=result.exceptionOrNull()?.let {
++                        AdminAiTimeBudgetV218.failureCategory(it)
++                    } ?: "none"
++                    DebugLog.i("AI_AB_PROBE_TIMING",
++                        "id=$testId case=${probe.id} elapsedMs=$monotonicElapsed " +
++                        "budgetMs=${if(runDeadline!=null)probeBudget else -1} failureCategory=$failureCategory " +
++                        "sdkStageBreakdown=not-instrumented mutation=none")
+                     result.onSuccess { output ->
+                         ok++
+                         val recognized=output.recognition
+@@ -260,7 +297,8 @@ object AdminAiPromptDiagnostic {
+                             }
+                             else -> "empty-result"
+                         }
+-                        records += RunRecord(probe,started,System.currentTimeMillis(),recognized,validation,null,simple,bracket)
++                        records += RunRecord(probe,started,System.currentTimeMillis(),recognized,validation,null,simple,bracket,
++                            monotonicElapsed,probeBudget,failureCategory)
+                         if(recognized!=null)logResult(testId,probe,bitmap,grid,crossword,recognized,validation)
+                         else if(simple!=null)DebugLog.i("AI_AB_RESULT","id=$testId case=${probe.id} " +
+                             "profile=printed-lengths-only-v1 parsed=${simple.parts.size}/${h+v} " +
+@@ -272,7 +310,9 @@ object AdminAiPromptDiagnostic {
+                             "status=$validation elapsedMs=${bracket.elapsedMs} mutation=none")
+                     }.onFailure { t ->
+                         val safe=DebugLog.sanitize(t.message.orEmpty()).ifBlank { t.javaClass.simpleName }
+-                        records += RunRecord(probe,started,System.currentTimeMillis(),null,"call-failed",safe)
++                        records += RunRecord(probe,started,System.currentTimeMillis(),null,"call-failed",safe,
++                            probeElapsedMs=monotonicElapsed,deadlineBudgetMs=probeBudget,
++                            failureCategory=failureCategory)
+                         DebugLog.w(
+                             "AI_AB_TEST",
+                             "id=$testId case=${probe.id} failed type=${t.javaClass.simpleName} reason=$safe"
+@@ -285,7 +325,7 @@ object AdminAiPromptDiagnostic {
+             // No added AI requests and no processing in production decoding.
+             // Capture why independent OCR was not available instead of exporting
+             // a misleading undifferentiated 'not-compared'. This is admin-only.
+-            val localSeriesInScope=mode==TestMode.WORD_LENGTHS &&
++            val localSeriesInScope=(mode==TestMode.WORD_LENGTHS || mode==TestMode.LOCAL_OCR_ONLY) &&
+                 OcrSeriesProfilesV197.resolve(
+                     WeeklyCrosswordsFetcher.displayTitle(item),
+                     CrosswordCatalog.sourceKey(item).orEmpty()
+@@ -295,7 +335,8 @@ object AdminAiPromptDiagnostic {
+                 String,
+                 AdminLocalOcrGateDiagnosticsV215.Audit?
+             > = when {
+-                mode!=TestMode.WORD_LENGTHS -> Triple(emptyMap(),"not-requested",null)
++                mode!=TestMode.WORD_LENGTHS && mode!=TestMode.LOCAL_OCR_ONLY ->
++                    Triple(emptyMap(),"not-requested",null)
+                 localOcrContext==null -> Triple(emptyMap(),"no-android-context",null)
+                 !localSeriesInScope -> Triple(emptyMap(),"series-out-of-scope",null)
+                 else -> runCatching {
+@@ -338,7 +379,8 @@ object AdminAiPromptDiagnostic {
+             val localOcrRunStatus=localAttempt.second
+             val localAudit=localAttempt.third
+             DebugLog.i("AI_LENGTH_LOCAL","status=$localOcrRunStatus count=${localEvidence.size} mutation=none")
+-            val lengthRows=wordLengthRows(records,crossword,localEvidence,localOcrRunStatus,localAudit)
++            val lengthRows=wordLengthRows(records,crossword,localEvidence,localOcrRunStatus,localAudit,
++                mode==TestMode.LOCAL_OCR_ONLY || (mode==TestMode.WORD_LENGTHS && localSeriesInScope))
+             val export=createExport(cacheDir,item,testId,bitmap,grid,crossword,uniqueModels,records,mode,lengthRows)
+             DebugLog.i(
+                 "AI_AB_TEST",
+@@ -530,6 +572,7 @@ object AdminAiPromptDiagnostic {
+             writeZipText(zip,"metadata.json",metadataJson(item,testId,bitmap,grid,crossword,models,records,mode).toString(2))
+             writeZipText(zip,"comparison.csv",comparisonCsv(records,crossword))
+             writeZipText(zip,"word_lengths.csv",lengthCsv)
++            writeZipText(zip,"probe_timing.csv",probeTimingCsv(records))
+             records.forEach { record ->
+                 writeZipText(zip,"runs/${record.probe.ordinal.toString().padStart(2,'0')}-${record.probe.id}.json",runJson(record,crossword).toString(2))
+             }
+@@ -578,6 +621,17 @@ object AdminAiPromptDiagnostic {
+         put("startedAtMs",record.startedAtMs)
+         put("finishedAtMs",record.finishedAtMs)
+         put("wallElapsedMs",record.finishedAtMs-record.startedAtMs)
++        put("monotonicProbeElapsedMs",record.probeElapsedMs)
++        put("probeBudgetMs",record.deadlineBudgetMs)
++        put("failureCategory",record.failureCategory)
++        put("queueWaitMs",JSONObject.NULL)
++        put("appCheckElapsedMs",JSONObject.NULL)
++        put("networkRecoveryMs",JSONObject.NULL)
++        put("sdkAttempts",JSONObject.NULL)
++        put("stageMetricsStatus","not-instrumented-in-sdk")
++        put("deadlineExceededStage", if(record.failureCategory=="admin-probe-deadline")
++            "probe-including-queue-recovery-and-sdk" else if(record.failureCategory=="admin-run-deadline")
++            "total-admin-run" else JSONObject.NULL)
+         put("validationStatus",record.validationStatus)
+         record.error?.let { put("error",it) }
+         record.usage?.let { put("tokenUsage",usageJson(it)) }
+@@ -683,7 +737,8 @@ object AdminAiPromptDiagnostic {
+         records:List<RunRecord>,crossword:Crossword,
+         localEvidence:Map<AdminLocalOcrLengthV213.Key,List<Int>> = emptyMap(),
+         localOcrRunStatus:String="not-requested",
+-        localAudit:AdminLocalOcrGateDiagnosticsV215.Audit?=null
++        localAudit:AdminLocalOcrGateDiagnosticsV215.Audit?=null,
++        includeAllExpectedLocalGates:Boolean=false
+     ):List<WordLengthRow> {
+         data class WordKey(val model:String,val direction:Direction,val number:Int)
+         val simple=mutableMapOf<WordKey,List<Int>>()
+@@ -769,6 +824,23 @@ object AdminAiPromptDiagnostic {
+                 }
+             }
+         }
++        // Precisely one fail-closed gate-status row per expected printed clue,
++        // regardless of whether Gemini returned any data or local OCR accepted a
++        // candidate. This preserves evidence of rejected 7/11-across candidates.
++        if(includeAllExpectedLocalGates) {
++            listOf(Direction.HORIZONTAL to "across",Direction.VERTICAL to "down").forEach { (dir,direction) ->
++                crossword.startNumbers(dir).sorted().forEach { number ->
++                    val key=AdminLocalOcrLengthV213.Key(direction,number)
++                    val status=localAudit?.perClue?.get(key) ?: localOcrRunStatus
++                    out+=WordLengthRow(direction,number,"Tesseract (local)","source-ocr-gates-v218",
++                        "local-ocr-gate","unverified",null,"not-compared",status,null,
++                        sameAiResponseCheck="not-applicable",localOcrRunStatus=localOcrRunStatus,
++                        localOcrGateReason=localAudit?.reason ?: localOcrRunStatus,
++                        localOcrGateStats=localAudit?.stats.orEmpty(),
++                        localOcrClueGate=status)
++                }
++            }
++        }
+         // This evidence is neither a published answer nor an authority to replace
+         // conflicting text; its purpose is to reveal false same-response confidence.
+         val mismatches=out.filter { it.source=="higi-normalized" && it.localComparison=="differs-local-unverified" }
+@@ -821,6 +893,23 @@ object AdminAiPromptDiagnostic {
+         }
+     }
+ 
++    private fun probeTimingCsv(records:List<RunRecord>):String = buildString {
++        append('\uFEFF').append(csvRow(listOf("case","profile","model","start_utc_epoch_ms",
++            "finish_utc_epoch_ms","monotonic_probe_elapsed_ms","probe_budget_ms",
++            "failure_category","validation_status","deadline_exceeded_stage", "queue_wait_ms",
++            "appcheck_elapsed_ms","network_recovery_ms","sdk_attempts","stage_metrics_status"))).append('\n')
++        records.forEach { record ->
++            append(csvRow(listOf(record.probe.id,record.probe.profile.wireValue,
++                record.probe.model.modelName,record.startedAtMs.toString(),
++                record.finishedAtMs.toString(),record.probeElapsedMs.toString(),
++                record.deadlineBudgetMs.takeIf{it>0L}?.toString().orEmpty(),
++                record.failureCategory,record.validationStatus,
++                if(record.failureCategory=="admin-probe-deadline") "probe-including-queue-recovery-and-sdk"
++                else if(record.failureCategory=="admin-run-deadline")"total-admin-run" else "",
++                "","","","","not-instrumented-in-sdk"))).append('\n')
++        }
++    }
++
+     private fun comparisonCsv(records:List<RunRecord>,crossword:Crossword):String {
+         val header=listOf(
+             "case","profile","provider","model_display","model_id","reasoning","validation","ai_elapsed_ms","status",
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218.kt
+new file mode 100644
+index 0000000..3c7a0b2
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218.kt
+@@ -0,0 +1,34 @@
++package com.example.hebrewcrossword
++
++/** Pure, fail-closed administrator diagnostic time budget.
++ * It does not change normal OCR, Gemini settings, retries, or decoding.
++ */
++object AdminAiTimeBudgetV218 {
++    const val SINGLE_PROBE_MS=110_000L
++    const val RUN_LIMIT_MS=330_000L
++
++    fun deadline(startedElapsedMs:Long):Long =
++        if(startedElapsedMs > Long.MAX_VALUE-RUN_LIMIT_MS) Long.MAX_VALUE
++        else startedElapsedMs+RUN_LIMIT_MS
++
++    /** Zero means do not start a new paid request. */
++    fun probeBudget(deadlineElapsedMs:Long,nowElapsedMs:Long):Long =
++        (deadlineElapsedMs-nowElapsedMs).coerceAtLeast(0L).coerceAtMost(SINGLE_PROBE_MS)
++
++    fun failureCategory(error:Throwable):String {
++        val chain=generateSequence(error){it.cause}.take(8).toList()
++        val names=chain.map{it.javaClass.simpleName}
++        val msg=chain.joinToString(" "){it.message.orEmpty()}.lowercase()
++        return when {
++            "TimeoutCancellationException" in names -> "admin-probe-deadline"
++            "AiAttemptTimeoutException" in names -> "sdk-attempt-timeout"
++            "admin-run-deadline-exceeded" in msg -> "admin-run-deadline"
++            "UnknownHostException" in names || "ConnectException" in names || "SocketException" in names -> "network-error"
++            "CancellationException" in names -> "cancelled"
++            "429" in msg || "resource_exhausted" in msg -> "provider-rate-limit"
++            "503" in msg || "unavailable" in msg -> "provider-unavailable"
++            "app check" in msg || "appcheck" in msg -> "app-check-error"
++            else -> "other-error"
++        }
++    }
++}
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
+index ca3e8e7..15741d2 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
+@@ -22,7 +22,10 @@ object AdminAiWordLengthsDialog {
+             setPadding(dp(activity,12),dp(activity,6),dp(activity,12),dp(activity,4))
+         }
+         val subtitle=TextView(activity).apply {
+-            text="${summary.succeeded}/${summary.cases} קריאות הצליחו. ליצירת קבצים בתיקיית Downloads יש ללחוץ על שמור CSV ושמור ZIP בתחתית החלון. " +
++            text=(if(summary.mode==AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY)
++                "בדיקת OCR מקומי בלבד — ללא קריאות AI. " else
++                "${summary.succeeded}/${summary.cases} קריאות הצליחו. ") +
++                "ליצירת קבצים בתיקיית Downloads יש ללחוץ על שמור CSV ושמור ZIP בתחתית החלון. " +
+                 "'תמלול פשוט' והשדות הצמודים לסוגריים הם תצפיות עצמאיות, לא אמת מידה מאומתת מול התמונה."
+             textSize=13f
+             setPadding(0,0,0,dp(activity,8))
+@@ -30,7 +33,7 @@ object AdminAiWordLengthsDialog {
+         wrapper.addView(subtitle)
+         val onlyMulti=CheckBox(activity).apply {
+             text="הצג רק הגדרות מרובות מילים"
+-            isChecked=true
++            isChecked=summary.mode!=AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY
+         }
+         wrapper.addView(onlyMulti)
+         val scroll=ScrollView(activity).apply { isFillViewport=false }
+@@ -73,9 +76,13 @@ object AdminAiWordLengthsDialog {
+                 if(text.length<=3)textDirection=View.TEXT_DIRECTION_LTR
+             }
+             table.addView(TableRow(activity).apply{heading.forEach{addView(cell(it,true))}})
+-            val filtered=rows.filter { !onlyMulti.isChecked || it.number<0 || "${it.direction}:${it.number}" in multi }
++            // Always show gate outcomes for all expected clues, even when the
++            // administrator filters the table to multi-word observations.
++            val filtered=rows.filter { !onlyMulti.isChecked || it.source=="local-ocr-gate" ||
++                it.number<0 || "${it.direction}:${it.number}" in multi }
+             filtered.forEach{ r ->
+                 val kind=when(r.source){
++                    "local-ocr-gate"->"מצב OCR להגדרה"
+                     "higi-normalized"->"Higi"
+                     "lengths_right_to_left","word_lengths_rtl"->"גולמי RTL"
+                     "printed_lengths"->"printed_lengths"
+@@ -125,8 +132,11 @@ object AdminAiWordLengthsDialog {
+             }
+         }
+         val dialog=AlertDialog.Builder(activity)
+-            .setTitle(if(summary.mode==AdminAiPromptDiagnostic.TestMode.WORD_LENGTHS)
+-                "בדיקת אורכי מילים" else "השוואת מודלי AI")
++            .setTitle(when(summary.mode) {
++                AdminAiPromptDiagnostic.TestMode.WORD_LENGTHS -> "בדיקת אורכי מילים"
++                AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY -> "בדיקת OCR מקומי בלבד"
++                else -> "השוואת מודלי AI"
++            })
+             .setView(wrapper)
+             .setPositiveButton("שמור CSV",null)
+             .setNeutralButton("שמור ZIP",null)
+diff --git a/app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt b/app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt
+index 6253488..bd3e143 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/RecentCrosswordsActivity.kt
+@@ -1652,12 +1652,17 @@ class RecentCrosswordsActivity : AppCompatActivity() {
+         if(adminAiTestRunning){toastAdmin("בדיקת AI כבר מתבצעת");return}
+         val models=AdminAiPromptDiagnostic.ModelChoice.entries.toList()
+         val checked=BooleanArray(models.size) // No model preselected; avoid accidental paid calls.
++        val localOcrAvailable=OcrMaarivOdedLayoutV216.exactSeries(
++            CrosswordCatalog.sourceKey(effective).orEmpty(),WeeklyCrosswordsFetcher.displayTitle(effective))
+         AlertDialog.Builder(this)
+             .setTitle("בדיקת AI — בחר מודלים")
+             .setMultiChoiceItems(models.map{it.displayName}.toTypedArray(),checked){_,which,isChecked->
+                 if(which in checked.indices)checked[which]=isChecked
+             }
+-            .setNegativeButton("ביטול",null)
++            .setNegativeButton(if(localOcrAvailable)"OCR מקומי בלבד" else "ביטול"){_,_->
++                if(localOcrAvailable) startAdminAiPromptDiagnostic(raw,effective,emptyList(),
++                    AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY)
++            }
+             .setPositiveButton("הרץ נוכחית + חדשה"){_,_->
+                 val selected=models.filterIndexed{index,_->checked[index]}
+                 if(selected.isEmpty())toastAdmin("יש לבחור לפחות מודל אחד")
+@@ -1679,11 +1684,13 @@ class RecentCrosswordsActivity : AppCompatActivity() {
+         models:List<AdminAiPromptDiagnostic.ModelChoice>,
+         mode:AdminAiPromptDiagnostic.TestMode
+     ){
+-        if(adminAiTestRunning||models.isEmpty())return
++        if(adminAiTestRunning || (models.isEmpty() && mode!=AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY))return
+         adminAiTestRunning=true
+         progress.visibility=View.VISIBLE
+         val total=models.size*(if(mode==AdminAiPromptDiagnostic.TestMode.WORD_LENGTHS)3 else 2)
+-        message.text="מריץ בדיקת AI — $total קריאות…"
++        message.text=if(mode==AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY)
++            "בודק OCR מקומי בלבד — ללא קריאות AI…"
++        else "מריץ בדיקת AI — $total קריאות…"
+         val record=runCatching{findAdminRecord(raw,effective)}.getOrNull()
+         DebugLog.i(
+             "AI_AB_TEST",
+@@ -1703,7 +1710,9 @@ class RecentCrosswordsActivity : AppCompatActivity() {
+                 adminAiTestRunning=false
+                 progress.visibility=View.INVISIBLE
+                 result.onSuccess{summary->
+-                    message.text="בדיקת AI הסתיימה — קובץ השוואה מוכן"
++                    message.text=if(mode==AdminAiPromptDiagnostic.TestMode.LOCAL_OCR_ONLY)
++                        "בדיקת OCR מקומי הסתיימה — דוח מוכן"
++                    else "בדיקת AI הסתיימה — קובץ השוואה מוכן"
+                     AdminAiWordLengthsDialog.show(this,summary)
+                 }.onFailure{t->
+                     DebugLog.e("AI_AB_TEST","diagnostic setup failed",t)
+diff --git a/app/src/test/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218JUnitTest.kt b/app/src/test/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218JUnitTest.kt
+new file mode 100644
+index 0000000..ede3156
+--- /dev/null
++++ b/app/src/test/java/com/example/hebrewcrossword/AdminAiTimeBudgetV218JUnitTest.kt
+@@ -0,0 +1,29 @@
++package com.example.hebrewcrossword
++
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class AdminAiTimeBudgetV218JUnitTest {
++    @Test fun boundedAtStartAndEnd() {
++        val d=AdminAiTimeBudgetV218.deadline(1_000L)
++        assertEquals(331_000L,d)
++        assertEquals(110_000L,AdminAiTimeBudgetV218.probeBudget(d,1_000L))
++        assertEquals(1L,AdminAiTimeBudgetV218.probeBudget(d,330_999L))
++        assertEquals(0L,AdminAiTimeBudgetV218.probeBudget(d,331_000L))
++        assertEquals(0L,AdminAiTimeBudgetV218.probeBudget(d,331_001L))
++    }
++
++    @Test fun exhaustionAndOverflow() {
++        assertEquals(Long.MAX_VALUE,AdminAiTimeBudgetV218.deadline(Long.MAX_VALUE))
++        assertEquals(0L,AdminAiTimeBudgetV218.probeBudget(4L,8L))
++    }
++
++    @Test fun errorCategorizationDoesNotRevealTokens() {
++        assertEquals("admin-run-deadline",AdminAiTimeBudgetV218.failureCategory(
++            IllegalStateException("admin-run-deadline-exceeded")))
++        assertEquals("provider-rate-limit",AdminAiTimeBudgetV218.failureCategory(
++            IllegalStateException("HTTP 429 secret-123")))
++        assertEquals("network-error",AdminAiTimeBudgetV218.failureCategory(
++            java.net.UnknownHostException("secret-host")))
++    }
++}
+diff --git a/tools/tests/AdminAiTimeBudgetV218Test.kt b/tools/tests/AdminAiTimeBudgetV218Test.kt
+new file mode 100644
+index 0000000..cc21f00
+--- /dev/null
++++ b/tools/tests/AdminAiTimeBudgetV218Test.kt
+@@ -0,0 +1,23 @@
++package com.example.hebrewcrossword
++
++import java.net.UnknownHostException
++
++fun main() {
++    var count = 0
++    fun verify(condition:Boolean,description:String){check(condition){description};count++}
++    val deadline=AdminAiTimeBudgetV218.deadline(1000L)
++    verify(deadline==331000L,"run deadline is 330 seconds")
++    verify(AdminAiTimeBudgetV218.probeBudget(deadline,1000L)==110000L,"probe cap is 110 seconds")
++    verify(AdminAiTimeBudgetV218.probeBudget(deadline,221000L)==110000L,"second probe cap")
++    verify(AdminAiTimeBudgetV218.probeBudget(deadline,330999L)==1L,"one ms before total deadline")
++    verify(AdminAiTimeBudgetV218.probeBudget(deadline,331000L)==0L,"no request at deadline")
++    verify(AdminAiTimeBudgetV218.probeBudget(deadline,400000L)==0L,"no request after deadline")
++    verify(AdminAiTimeBudgetV218.deadline(Long.MAX_VALUE)==Long.MAX_VALUE,"deadline overflow guarded")
++    verify(AdminAiTimeBudgetV218.failureCategory(UnknownHostException())=="network-error","network type")
++    verify(AdminAiTimeBudgetV218.failureCategory(IllegalStateException("admin-run-deadline-exceeded"))=="admin-run-deadline","global limit")
++    verify(AdminAiTimeBudgetV218.failureCategory(IllegalStateException("HTTP 429"))=="provider-rate-limit","429")
++    verify(AdminAiTimeBudgetV218.failureCategory(IllegalStateException("HTTP 503"))=="provider-unavailable","503")
++    verify(AdminAiTimeBudgetV218.failureCategory(IllegalStateException("App Check failed"))=="app-check-error","App Check")
++    verify(AdminAiTimeBudgetV218.failureCategory(IllegalStateException("other"))=="other-error","other")
++    println("V218_ADMIN_TIME_BUDGET_PASSED assertions=$count")
++}
