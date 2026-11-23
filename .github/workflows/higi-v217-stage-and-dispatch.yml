@@ -40,6 +40,7 @@ jobs:
           if(Test-Path 'cloud-releases/v0.15.217-DRY.json'){throw 'v217 manifest already staged; refuse overwrite'}
           if(Test-Path 'cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'){throw 'v217 full patch already staged'}
           Write-Host 'V217_PINNED_SIGNED_QA_PASS'
+          exit 0
       - name: Download and verify immutable private v175 source without publishing it
         shell: pwsh
         run: |
