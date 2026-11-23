@@ -1,0 +1,46 @@
+name: Higi v215 dispatch approved DRY manifest to official publisher
+on:
+  push:
+    branches: ['release/v0.15.215-local-ocr-gates']
+    paths: ['.github/workflows/higi-v215-dispatch-publisher.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Fail closed unless signed QA and main source stage passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$REPO/actions/runs/45127173473 --jq .conclusion)" = success
+          test "$(gh api repos/$REPO/actions/runs/45127883379 --jq .conclusion)" = success
+          python3 - <<'PY'
+          import json, pathlib, re
+          cfg=json.loads(pathlib.Path('cloud-releases/v0.15.215-DRY.json').read_text())
+          assert cfg['channel']=='dry' and cfg['version']=='0.15.215' and cfg['versionCode']==365
+          assert cfg['patchFile']=='cloud-patches/v0.15.215-from-v0.15.175.patch.xz.b64'
+          assert cfg['patchSha256']=='c6073356bf06605ba9ad78c6ebd9f45f1c5bcfb1154060bf1ac7b491b70c22f2'
+          assert pathlib.Path(cfg['patchFile']).is_file()
+          print('V215_RELEASE_MAIN_MANIFEST_PIN_VERIFIED')
+          PY
+          if gh release view v0.15.215-DRY --repo "$REPO" >/dev/null 2>&1; then
+            echo "Already released: refusing duplicate publication" >&2
+            exit 1
+          fi
+      - name: Launch official signed Android DRY publisher once
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run higi-cloud-dry-release.yml --repo "$REPO" --ref main \
+            -f manifest_file=cloud-releases/v0.15.215-DRY.json
+          echo "V215_OFFICIAL_DRY_PUBLISHER_DISPATCHED"
