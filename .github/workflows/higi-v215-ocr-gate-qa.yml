@@ -1,0 +1,120 @@
+name: Higi v215 isolated administrator OCR gate QA (no release)
+on:
+  push:
+    branches: ['qa/v0.15.215-admin-ocr-gates']
+    paths:
+      - '.github/workflows/higi-v215-ocr-gate-qa.yml'
+      - 'cloud-tests/v215-local-gate-audit/**'
+      - 'qa/v215-local-ocr-gates/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  regression:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Reconstruct exact sealed published v214 and gate four-file-only QA patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=(& gh api "repos/$env:REPO/releases/437513599" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or !$r.draft -or $r.tag_name -ne 'v0.15.175'){throw 'Source draft unavailable'}
+          $asset=@($r.assets | Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1 -or [long]$asset[0].size -ne 8145322){throw 'Sealed asset mismatch'}
+          $zip=Join-Path $env:RUNNER_TEMP 'v175-source.zip'
+          & curl.exe --silent --show-error --fail --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header 'Accept: application/octet-stream' --header 'X-GitHub-Api-Version: 2022-11-28' --output $zip "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0){throw 'Source download failed'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Source SHA mismatch'}
+          $location=Join-Path $env:RUNNER_TEMP 'v215-source'
+          Expand-Archive $zip -DestinationPath $location -Force
+          $src=Join-Path $location 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $src 'app/build.gradle.kts'))){throw 'Bad source tree'}
+          Add-Content $env:GITHUB_ENV "HIGI_SRC=$src"
+          & git -C $src init -q
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm sealed-v175
+          if($LASTEXITCODE -ne 0){throw 'Source commit failed'}
+          $script=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);tmp=pathlib.Path(sys.argv[2])
+          cfg=json.loads((repo/'cloud-releases/v0.15.214-DRY.json').read_text())
+          assert cfg['version']=='0.15.214' and cfg['versionCode']==364
+          assert cfg['patchFile']=='cloud-patches/v0.15.214-from-v0.15.175.patch.xz.b64'
+          assert cfg['patchSha256']=='94f5fa423aa9fc28cf8fe3efa5ca1d4aff6566afb46d9fb463b9ce1b8a142817'
+          def decode(path):
+              return lzma.decompress(base64.b64decode(''.join(path.read_text().split()),validate=True))
+          old=decode(repo/cfg['patchFile'])
+          assert hashlib.sha256(old).hexdigest()==cfg['patchSha256']
+          (tmp/'full-v214.patch').write_bytes(old)
+          overlay=decode(repo/'cloud-tests/v215-local-gate-audit/overlay.patch.xz.b64')
+          sha=hashlib.sha256(overlay).hexdigest()
+          assert sha=='09626adc306cc6f11b213ac65dab921cba6fe27969bdb0e499e24969d5938729',sha
+          (tmp/'v215-gate.patch').write_bytes(overlay)
+          print('V215_RELEASE_SOURCE_AND_GATE_PATCH_SHA256_PASS')
+          '@
+          $py=Join-Path $env:RUNNER_TEMP 'pinned-v215.py'
+          [IO.File]::WriteAllText($py,$script)
+          & python $py $env:GITHUB_WORKSPACE $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Patch SHA or manifest mismatch'}
+          $base=Join-Path $env:RUNNER_TEMP 'full-v214.patch'
+          & git -C $src apply --check $base
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct published v214'}
+          & git -C $src apply $base
+          if($LASTEXITCODE -ne 0){throw 'Cannot apply v214'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm exact-v214
+          if($LASTEXITCODE -ne 0){throw 'Cannot pin v214'}
+          $patch=Join-Path $env:RUNNER_TEMP 'v215-gate.patch'
+          & git -C $src apply --check $patch
+          if($LASTEXITCODE -ne 0){throw 'QA patch not based on published v214'}
+          & git -C $src apply $patch
+          if($LASTEXITCODE -ne 0){throw 'Cannot apply QA overlay'}
+          & git -C $src add -N -A
+          $changed=@(& git -C $src diff --name-only HEAD)
+          $allow=@('app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt',
+            'app/src/main/java/com/example/hebrewcrossword/AdminLocalOcrGateDiagnosticsV215.kt',
+            'tools/tests/AdminLocalOcrGateDiagnosticsV215Test.kt')
+          if($changed.Count -ne 4 -or @($changed | Where-Object {$_ -notin $allow}).Count -ne 0){throw "Unexpected files: $($changed -join ',')"}
+          $build=Get-Content -Raw (Join-Path $src 'app/build.gradle.kts')
+          if($build -notmatch 'versionCode\s*=\s*364' -or $build -notmatch 'versionName\s*=\s*"0.15.214"'){throw 'Base version changed'}
+          Write-Host 'V215_FOUR_ADMIN_FILES_ONLY_FROZEN_ALGORITHMS_UNMODIFIED'
+      - name: Run isolated strict-gate Kotlin tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $qa=Join-Path $env:GITHUB_WORKSPACE 'qa/v215-local-ocr-gates'
+          $dir=Join-Path $qa 'src'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $source=Join-Path $env:HIGI_SRC 'app/src/main/java/com/example/hebrewcrossword'
+          Copy-Item (Join-Path $source 'AdminLocalOcrLengthV213.kt') $dir
+          Copy-Item (Join-Path $source 'AdminLocalOcrGateDiagnosticsV215.kt') $dir
+          Copy-Item (Join-Path $env:HIGI_SRC 'tools/tests/AdminLocalOcrGateDiagnosticsV215Test.kt') $dir
+          & gradle -p $qa --no-daemon qaCheck
+          if($LASTEXITCODE -ne 0){throw 'Kotlin gate tests failed'}
+          Write-Host 'V215_GATE_KOTLIN_TESTS_PASS'
+      - name: Full Android compile and unit test (no publish)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:HIGI_SRC
+          & gradle --no-daemon -PhigiDryBuild=true testDebugUnitTest assembleDebug
+          if($LASTEXITCODE -ne 0){throw 'Android unit test or assembly failed'}
+          Write-Host 'V215_ANDROID_UNIT_TESTS_AND_ASSEMBLY_PASS_NO_RELEASE'
