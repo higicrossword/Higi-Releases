@@ -1,0 +1,430 @@
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+index 38554b1..43e429c 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt
+@@ -101,7 +101,10 @@ object AdminAiPromptDiagnostic {
+         val localComparison:String="not-compared",
+         val sameAiResponseCheck:String="not-applicable",
+         val localOcrRunStatus:String="not-requested",
+-        val sourceImageVerification:String=AdminLengthEvidenceV214.SOURCE_NOT_VERIFIED
++        val sourceImageVerification:String=AdminLengthEvidenceV214.SOURCE_NOT_VERIFIED,
++        val localOcrGateReason:String="not-requested",
++        val localOcrGateStats:String="",
++        val localOcrClueGate:String="not-requested"
+     )
+ 
+     data class Summary(
+@@ -112,7 +115,9 @@ object AdminAiPromptDiagnostic {
+         val csvFile:File,
+         val mode:TestMode,
+         val lengthRows:List<WordLengthRow>,
+-        val localOcrRunStatus:String="not-requested"
++        val localOcrRunStatus:String="not-requested",
++        val localOcrGateReason:String="not-requested",
++        val localOcrGateStats:String=""
+     )
+ 
+     private data class ProbeCase(
+@@ -265,37 +270,47 @@ object AdminAiPromptDiagnostic {
+                     WeeklyCrosswordsFetcher.displayTitle(item),
+                     CrosswordCatalog.sourceKey(item).orEmpty()
+                 ).id==OcrSeriesProfilesV197.MAARIV.id
+-            val localAttempt:Pair<Map<AdminLocalOcrLengthV213.Key,List<Int>>,String> = when {
+-                mode!=TestMode.WORD_LENGTHS -> emptyMap<AdminLocalOcrLengthV213.Key,List<Int>>() to "not-requested"
+-                localOcrContext==null -> emptyMap<AdminLocalOcrLengthV213.Key,List<Int>>() to "no-android-context"
+-                !localSeriesInScope -> emptyMap<AdminLocalOcrLengthV213.Key,List<Int>>() to "series-out-of-scope"
++            val localAttempt:Triple<
++                Map<AdminLocalOcrLengthV213.Key,List<Int>>,
++                String,
++                AdminLocalOcrGateDiagnosticsV215.Audit?
++            > = when {
++                mode!=TestMode.WORD_LENGTHS -> Triple(emptyMap(),"not-requested",null)
++                localOcrContext==null -> Triple(emptyMap(),"no-android-context",null)
++                !localSeriesInScope -> Triple(emptyMap(),"series-out-of-scope",null)
+                 else -> runCatching {
+                     val lines=LocalHebrewOcrV031(localOcrContext).use { engine ->
+                         engine.readFullPageLines(bitmap,sparse=false)
+                     }
+                     val raw=lines.sortedWith(compareBy<OcrTextLocatorV032.Line>{it.box.top}
+                         .thenByDescending{it.box.right}).joinToString("\n"){it.text}
+-                    val candidates=AdminLocalOcrLengthV213.extract(raw,
+-                        crossword.startNumbers(Direction.HORIZONTAL).associateWith {
+-                            crossword.wordLengthForNumber(it,Direction.HORIZONTAL)?:0 },
+-                        crossword.startNumbers(Direction.VERTICAL).associateWith {
+-                            crossword.wordLengthForNumber(it,Direction.VERTICAL)?:0 })
+-                    candidates to if(candidates.isEmpty()) "ran-no-candidates" else "ran-candidates-unverified"
++                    val expectedH=crossword.startNumbers(Direction.HORIZONTAL).associateWith {
++                        crossword.wordLengthForNumber(it,Direction.HORIZONTAL)?:0 }
++                    val expectedV=crossword.startNumbers(Direction.VERTICAL).associateWith {
++                        crossword.wordLengthForNumber(it,Direction.VERTICAL)?:0 }
++                    val audit=AdminLocalOcrGateDiagnosticsV215.inspect(raw,expectedH,expectedV,lines.size)
++                    // Never log raw clue/OCR text; only bounded failure codes and counts.
++                    DebugLog.i("AI_LENGTH_LOCAL_GATE",
++                        "reason=${audit.reason} stats=${audit.stats} mutation=none")
++                    Triple(audit.candidates,
++                        if(audit.candidates.isEmpty()) "ran-no-candidates" else "ran-candidates-unverified",audit)
+                 }.getOrElse { e ->
+                     DebugLog.w("AI_LENGTH_LOCAL","failed type=${e.javaClass.simpleName} mutation=none")
+-                    emptyMap<AdminLocalOcrLengthV213.Key,List<Int>>() to "engine-error:${e.javaClass.simpleName}"
++                    Triple(emptyMap(),"engine-error:${e.javaClass.simpleName}",null)
+                 }
+             }
+             val localEvidence=localAttempt.first
+             val localOcrRunStatus=localAttempt.second
++            val localAudit=localAttempt.third
+             DebugLog.i("AI_LENGTH_LOCAL","status=$localOcrRunStatus count=${localEvidence.size} mutation=none")
+-            val lengthRows=wordLengthRows(records,crossword,localEvidence,localOcrRunStatus)
++            val lengthRows=wordLengthRows(records,crossword,localEvidence,localOcrRunStatus,localAudit)
+             val export=createExport(cacheDir,item,testId,bitmap,grid,crossword,uniqueModels,records,mode,lengthRows)
+             DebugLog.i(
+                 "AI_AB_TEST",
+                 "id=$testId end cases=${cases.size} succeeded=$ok failed=${cases.size-ok} mutation=none export=${export.zip.name}"
+             )
+-            return Summary(cases.size,ok,cases.size-ok,export.zip,export.csv,mode,lengthRows,localOcrRunStatus)
++            return Summary(cases.size,ok,cases.size-ok,export.zip,export.csv,mode,lengthRows,
++                localOcrRunStatus,localAudit?.reason ?: localOcrRunStatus,localAudit?.stats.orEmpty())
+         } finally {
+             WeeklyImageSelector.recycle(loaded)
+         }
+@@ -632,7 +647,8 @@ object AdminAiPromptDiagnostic {
+     private fun wordLengthRows(
+         records:List<RunRecord>,crossword:Crossword,
+         localEvidence:Map<AdminLocalOcrLengthV213.Key,List<Int>> = emptyMap(),
+-        localOcrRunStatus:String="not-requested"
++        localOcrRunStatus:String="not-requested",
++        localAudit:AdminLocalOcrGateDiagnosticsV215.Audit?=null
+     ):List<WordLengthRow> {
+         data class WordKey(val model:String,val direction:Direction,val number:Int)
+         val simple=mutableMapOf<WordKey,List<Int>>()
+@@ -650,7 +666,9 @@ object AdminAiPromptDiagnostic {
+             if(recognition==null && plain==null && bracket==null){
+                 out+=WordLengthRow("",-1,model,record.probe.profile.wireValue,"call-failed","printed",
+                     null,"not-compared",record.validationStatus,record.usage,record.error.orEmpty(),
+-                    localOcrRunStatus=localOcrRunStatus)
++                    localOcrRunStatus=localOcrRunStatus,
++                    localOcrGateReason=localAudit?.reason ?: localOcrRunStatus,
++                    localOcrGateStats=localAudit?.stats.orEmpty())
+                 return@forEach
+             }
+             listOf(Direction.HORIZONTAL,Direction.VERTICAL).forEach { dir ->
+@@ -659,7 +677,11 @@ object AdminAiPromptDiagnostic {
+                 crossword.startNumbers(dir).sorted().forEach { number ->
+                     val key=ClueEditorModel.Key(number,dir)
+                     val reference=simple[WordKey(record.probe.model.id,dir,number)]
+-                    val local=localEvidence[AdminLocalOcrLengthV213.Key(direction,number)]
++                    val localKey=AdminLocalOcrLengthV213.Key(direction,number)
++                    val local=localEvidence[localKey]
++                    val localClueGate=localAudit?.perClue?.get(localKey) ?: localOcrRunStatus
++                    val localGateReason=localAudit?.reason ?: localOcrRunStatus
++                    val localGateStats=localAudit?.stats.orEmpty()
+                     // Both Gemini arrays are supplied by a SINGLE model call.
+                     val rawEvidence=recognition?.adminLengthEvidence?.get(key)
+                     val sameResponse=if(recognition!=null)
+@@ -675,7 +697,9 @@ object AdminAiPromptDiagnostic {
+                         val localMatch=AdminLengthEvidenceV214.compareLocal(order,source,parts,local)
+                         return WordLengthRow(direction,number,model,record.probe.profile.wireValue,
+                             source,order,parts,match,status,record.usage,localComparison=localMatch,
+-                            sameAiResponseCheck=sameResponse,localOcrRunStatus=localOcrRunStatus)
++                            sameAiResponseCheck=sameResponse,localOcrRunStatus=localOcrRunStatus,
++                            localOcrGateReason=localGateReason,localOcrGateStats=localGateStats,
++                            localOcrClueGate=localClueGate)
+                     }
+                     if(plain!=null){
+                         val parts=plain.parts[key]
+@@ -692,7 +716,9 @@ object AdminAiPromptDiagnostic {
+                             record.usage,"",obs?.numberNextToShapeOpen,obs?.numberNextToShapeClose,
+                             obs?.leftEdgeShape,obs?.rightEdgeShape,obs?.consistency?:"insufficient",
+                             sameAiResponseCheck=AdminLengthEvidenceV214.bracketObservationCheck(obs?.consistency),
+-                            localOcrRunStatus=localOcrRunStatus)
++                            localOcrRunStatus=localOcrRunStatus,
++                            localOcrGateReason=localGateReason,localOcrGateStats=localGateStats,
++                            localOcrClueGate=localClueGate)
+                     } else if(recognition!=null){
+                         val original=textMap?.get(number).orEmpty()
+                         val printed=AnswerLengths.last(original)?.printedParts
+@@ -718,7 +744,10 @@ object AdminAiPromptDiagnostic {
+             out+=WordLengthRow(key.direction,key.number,"Tesseract (local)","source-ocr-v213",
+                 "local-hebrew-ocr","raw-rtl",parts,"not-compared","unverified",null,
+                 sameAiResponseCheck="independent-local-observation-only",
+-                localOcrRunStatus=localOcrRunStatus)
++                localOcrRunStatus=localOcrRunStatus,
++                localOcrGateReason=localAudit?.reason ?: localOcrRunStatus,
++                localOcrGateStats=localAudit?.stats.orEmpty(),
++                localOcrClueGate=localAudit?.perClue?.get(key) ?: localOcrRunStatus)
+         }
+         return out.sortedWith(compareBy<WordLengthRow>(
+             { if(it.direction=="across")0 else if(it.direction=="down")1 else 2 },
+@@ -737,7 +766,8 @@ object AdminAiPromptDiagnostic {
+             (1..wordColumns).map{"word_$it"}+
+             listOf("number_next_to_shape_(","number_next_to_shape_)","left_edge_shape","right_edge_shape",
+                 "bracket_consistency","match_to_simple","match_to_local_ocr","status","prompt_tokens","candidate_tokens","thoughts_tokens","total_tokens","error",
+-                "same_ai_response_check","local_ocr_run_status","source_image_verification")
++                "same_ai_response_check","local_ocr_run_status","source_image_verification",
++                "local_ocr_gate_reason","local_ocr_gate_stats","local_ocr_clue_gate")
+         return buildString {
+             append('\uFEFF').append(csvRow(header)).append('\n')
+             rows.forEach { row ->
+@@ -749,7 +779,8 @@ object AdminAiPromptDiagnostic {
+                         row.match,row.localComparison,row.status,row.usage?.promptTokens?.toString().orEmpty(),
+                         row.usage?.candidateTokens?.toString().orEmpty(),row.usage?.thoughtsTokens?.toString().orEmpty(),
+                         row.usage?.totalTokens?.toString().orEmpty(),row.error,
+-                        row.sameAiResponseCheck,row.localOcrRunStatus,row.sourceImageVerification)
++                        row.sameAiResponseCheck,row.localOcrRunStatus,row.sourceImageVerification,
++                        row.localOcrGateReason,row.localOcrGateStats,row.localOcrClueGate)
+                 append(csvRow(values)).append('\n')
+             }
+         }
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt b/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
+index aee230e..ca3e8e7 100644
+--- a/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminAiWordLengthsDialog.kt
+@@ -48,7 +48,10 @@ object AdminAiWordLengthsDialog {
+                 "עמודות צמוד ל-(/) מתייחסות לצורת הסוגר שבתמונה. " +
+                 "שני שדות האורך באותה תשובת AI בודקים עקביות בלבד, ולא אימות מול צילום המקור. " +
+                 "Tesseract המקומי הוא תצפית נוספת שאינה אמת מידה מאומתת. " +
+-                "מצב OCR: ${summary.localOcrRunStatus}. בכל השורות אימות תמונת המקור טרם הושלם. " +
++                "מצב OCR: ${summary.localOcrRunStatus}. " +
++                "שער אבחון: ${summary.localOcrGateReason}. " +
++                "מונים (ללא טקסט ההגדרות): ${summary.localOcrGateStats}. " +
++                "בכל השורות אימות תמונת המקור טרם הושלם. " +
+                 "סתירה מסומנת לבדיקה בלבד; אין תיקון אוטומטי."
+             textSize=12f
+             setPadding(0,dp(activity,8),0,0)
+@@ -59,7 +62,7 @@ object AdminAiWordLengthsDialog {
+         fun render() {
+             table.removeAllViews()
+             val heading=listOf("הגדרה","מודל","מקור")+(1..maxParts).map{"מילה $it"}+
+-                listOf("צמוד ל-(","צמוד ל-)","סוגר שמאל","סוגר ימין","עקביות","השוואה","מול OCR","בדיקה פנימית","מצב OCR","אימות מקור")
++                listOf("צמוד ל-(","צמוד ל-)","סוגר שמאל","סוגר ימין","עקביות","השוואה","מול OCR","בדיקה פנימית","מצב OCR","אימות מקור","סיבת דחיית OCR")
+             fun cell(text:String,isHead:Boolean=false,wrong:Boolean=false):TextView=TextView(activity).apply {
+                 this.text=text
+                 textSize=if(isHead)13f else 12f
+@@ -100,7 +103,7 @@ object AdminAiWordLengthsDialog {
+                     listOf(r.numberNextToShapeOpen?.toString().orEmpty(),
+                         r.numberNextToShapeClose?.toString().orEmpty(),r.leftEdgeShape.orEmpty(),
+                         r.rightEdgeShape.orEmpty(),r.bracketConsistency,match,localMatch,
+-                    r.sameAiResponseCheck,r.localOcrRunStatus,"לא אומת מול תמונה")
++                    r.sameAiResponseCheck,r.localOcrRunStatus,"לא אומת מול תמונה",r.localOcrClueGate)
+                 val wrong=r.match=="differs-simple" || r.localComparison=="differs-local-unverified" ||
+                     r.bracketConsistency=="conflict"
+                 table.addView(TableRow(activity).apply{values.forEach{addView(cell(it,wrong=wrong))}})
+diff --git a/app/src/main/java/com/example/hebrewcrossword/AdminLocalOcrGateDiagnosticsV215.kt b/app/src/main/java/com/example/hebrewcrossword/AdminLocalOcrGateDiagnosticsV215.kt
+new file mode 100644
+index 0000000..57ef707
+--- /dev/null
++++ b/app/src/main/java/com/example/hebrewcrossword/AdminLocalOcrGateDiagnosticsV215.kt
+@@ -0,0 +1,160 @@
++package com.example.hebrewcrossword
++
++/** Administrator-only, non-authoritative diagnostics for an EXISTING OCR parser.
++ *
++ * All candidates come from AdminLocalOcrLengthV213.extract(), unchanged.
++ * The side-channel reports which strict gates stopped an observation. It does
++ * not alter word order, candidate selection, puzzle state or any OCR profile.
++ * No recognized text is retained or logged; only counts and bounded statuses.
++ */
++object AdminLocalOcrGateDiagnosticsV215 {
++    data class Audit(
++        val candidates: Map<AdminLocalOcrLengthV213.Key, List<Int>>,
++        val reason: String,
++        val stats: String,
++        val perClue: Map<AdminLocalOcrLengthV213.Key, String>
++    )
++    private val strictAcross = Regex("מאוזן\\s*:")
++    private val strictDown = Regex("מאונך\\s*:")
++    private val bareAcross = Regex("מאוזן")
++    private val bareDown = Regex("מאונך")
++    private val marker = Regex("(?<![0-9])([0-9]{1,3})\\s*\\.")
++    private val tuple = Regex("\\(\\s*([0-9]{1,2}(?:\\s*[,;.]\\s*[0-9]{1,2}){1,5})\\s*\\)")
++    private val part = Regex("[0-9]{1,2}")
++    private val explicitReference = Regex("[0-9]{1,3}\\s*(מאוזן|מאונך)")
++
++    fun inspect(
++        original: String,
++        expectedHorizontal: Map<Int, Int>,
++        expectedVertical: Map<Int, Int>,
++        recognizedLineCount: Int = 0
++    ): Audit {
++        // The legacy parser, not the audit, remains the only candidate authority.
++        val accepted = AdminLocalOcrLengthV213.extract(
++            original, expectedHorizontal, expectedVertical)
++        val text = original.replace(Regex("[\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]"), " ")
++            .replace(Regex("\\s+"), " ").trim()
++        val h = strictAcross.find(text)
++        val v = h?.let { strictDown.find(text, it.range.last + 1) }
++        val stats = Counters()
++        val states = linkedMapOf<AdminLocalOcrLengthV213.Key, String>()
++        for (number in expectedHorizontal.keys) {
++            states[AdminLocalOcrLengthV213.Key("across", number)] = "not-reached"
++        }
++        for (number in expectedVertical.keys) {
++            states[AdminLocalOcrLengthV213.Key("down", number)] = "not-reached"
++        }
++        if (h != null && v != null && v.range.first > h.range.last) {
++            scan(text.substring(h.range.last + 1, v.range.first), "across", expectedHorizontal, states, stats)
++            scan(text.substring(v.range.last + 1), "down", expectedVertical, states, stats)
++        }
++        val reason = when {
++            text.isBlank() -> "no-recognized-text"
++            h == null -> "missing-horizontal-heading"
++            v == null -> if (strictDown.containsMatchIn(text))
++                "missing-vertical-heading-after-horizontal" else "missing-vertical-heading"
++            v.range.first <= h.range.last -> "invalid-heading-order"
++            accepted.isNotEmpty() -> if (states.values.any { it == "unordered-or-duplicate-number-labels" ||
++                it == "multiple-tuples-ownership-unclear" || it == "tuple-grid-length-mismatch" })
++                "candidates-with-rejections" else "candidates-present"
++            stats.unorderedSections > 0 -> "unordered-or-duplicate-number-labels"
++            stats.acceptableLabels == 0 -> "no-recognized-grid-labels"
++            stats.ambiguousTuples > 0 -> "ambiguous-multiple-tuples"
++            stats.gridMismatch > 0 -> "tuple-grid-length-mismatch"
++            stats.tuples == 0 -> "no-multipart-tuple-in-numbered-clue"
++            else -> "no-safe-candidates"
++        }
++        val fallback = when {
++            h == null || v == null -> "section-header-unavailable"
++            else -> "label-not-seen"
++        }
++        val finalStates = states.mapValues { (key, value) ->
++            when {
++                key in accepted -> "accepted"
++                value == "not-reached" -> fallback
++                else -> value
++            }
++        }
++        val summary = listOf(
++            "lines=$recognizedLineCount", "chars=${text.length}",
++            "headingH=${if (h != null) 1 else 0}", "headingV=${if (v != null) 1 else 0}",
++            "bareH=${if (bareAcross.containsMatchIn(text)) 1 else 0}",
++            "bareV=${if (bareDown.containsMatchIn(text)) 1 else 0}",
++            "labelsH=${stats.horizontalLabels}", "labelsV=${stats.verticalLabels}",
++            "unordered=${stats.unorderedSections}", "singleTuples=${stats.tuples}",
++            "missingTuple=${stats.missingTuples}", "ambiguous=${stats.ambiguousTuples}",
++            "badGridSum=${stats.gridMismatch}", "accepted=${accepted.size}"
++        ).joinToString(";")
++        return Audit(accepted, reason, summary, finalStates)
++    }
++
++    private class Counters {
++        var horizontalLabels = 0
++        var verticalLabels = 0
++        var acceptableLabels = 0
++        var unorderedSections = 0
++        var tuples = 0
++        var missingTuples = 0
++        var ambiguousTuples = 0
++        var gridMismatch = 0
++    }
++
++    private fun scan(
++        section: String,
++        direction: String,
++        expected: Map<Int, Int>,
++        states: MutableMap<AdminLocalOcrLengthV213.Key, String>,
++        stats: Counters
++    ) {
++        // Mirror v213's exact number ownership/ordering gates for diagnostics.
++        val labels = marker.findAll(section).mapNotNull { m ->
++            val number = m.groupValues[1].toIntOrNull() ?: return@mapNotNull null
++            if (number !in expected) return@mapNotNull null
++            number to m
++        }.toList()
++        if (direction == "across") stats.horizontalLabels = labels.size
++        else stats.verticalLabels = labels.size
++        stats.acceptableLabels += labels.size
++        if (labels.map { it.first }.distinct().size != labels.size ||
++            labels.zipWithNext().any { (a, b) -> a.first >= b.first }) {
++            stats.unorderedSections++
++            for (number in expected.keys) {
++                states[AdminLocalOcrLengthV213.Key(direction, number)] = "unordered-or-duplicate-number-labels"
++            }
++            return
++        }
++        for ((index, labelled) in labels.withIndex()) {
++            val (number, m) = labelled
++            val end = labels.getOrNull(index + 1)?.second?.range?.first ?: section.length
++            val clue = section.substring(m.range.last + 1, end)
++            val matches = tuple.findAll(clue).toList()
++            val key = AdminLocalOcrLengthV213.Key(direction, number)
++            when {
++                matches.isEmpty() -> {
++                    stats.missingTuples++
++                    states[key] = "no-single-multipart-tuple"
++                }
++                matches.size > 1 -> {
++                    stats.ambiguousTuples++
++                    states[key] = "multiple-tuples-ownership-unclear"
++                }
++                else -> {
++                    stats.tuples++
++                    val parts = part.findAll(matches.single().groupValues[1]).map { it.value.toInt() }.toList()
++                    val hasReference = ("מאוזן" in clue || "מאונך" in clue) &&
++                        explicitReference.containsMatchIn(clue)
++                    val valid = parts.sum() == expected[number] ||
++                        (hasReference && parts.sum() > (expected[number] ?: 0))
++                    if (parts.size !in 2..6 || parts.any { it !in 1..99 } || !valid) {
++                        stats.gridMismatch++
++                        states[key] = "tuple-grid-length-mismatch"
++                    } else {
++                        // Only extract() can authorize a candidate; this is a
++                        // reason label, never an alternate parse result.
++                        states[key] = "structurally-eligible"
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/tools/tests/AdminLocalOcrGateDiagnosticsV215Test.kt b/tools/tests/AdminLocalOcrGateDiagnosticsV215Test.kt
+new file mode 100644
+index 0000000..6cc59db
+--- /dev/null
++++ b/tools/tests/AdminLocalOcrGateDiagnosticsV215Test.kt
+@@ -0,0 +1,48 @@
++package com.example.hebrewcrossword
++
++/** v215 is a pure observer: it must never change what v213 extracts. */
++fun main() {
++    var assertions=0
++    val h=mapOf(4 to 5,7 to 5,11 to 5,18 to 8)
++    val v=mapOf(1 to 5,2 to 4)
++    fun checkCase(name:String,raw:String,expectedReason:String,expectedKey:String?=null,
++                  expectedAcross:Int?=null) {
++        val a=AdminLocalOcrGateDiagnosticsV215.inspect(raw,h,v,17)
++        val old=AdminLocalOcrLengthV213.extract(raw,h,v)
++        check(a.candidates==old) { "candidate regression $name" }; assertions++
++        check(a.reason==expectedReason) { "$name reason=${a.reason} expected=$expectedReason stats=${a.stats}" }; assertions++
++        check(a.stats.contains("lines=17;")) { "missing counters $name" }; assertions++
++        if(expectedKey!=null) {
++            check(a.perClue[AdminLocalOcrLengthV213.Key("across",4)]==expectedKey) {
++                "$name clue=${a.perClue[AdminLocalOcrLengthV213.Key("across",4)]}" }; assertions++
++        }
++        if(expectedAcross!=null) {
++            check(a.candidates[AdminLocalOcrLengthV213.Key("across",4)]?.sum()==expectedAcross) {name}; assertions++
++        }
++        // Source OCR/clue prose must never appear in diagnostics.
++        check(!a.stats.contains("secret") && !a.reason.contains("secret") &&
++            a.perClue.values.none { it.contains("secret") }) { "OCR text leak $name" }; assertions++
++    }
++    val base="מאוזן: 4. secret (3,2) 7. other (3,2) 11. other (3,2) 18. other (5,3) מאונך: 1. one (5) 2. two (4)"
++    checkCase("valid baseline",base,"candidates-present","accepted",5)
++    checkCase("missing H heading",base.replace("מאוזן:","אופקי"),"missing-horizontal-heading","section-header-unavailable")
++    checkCase("colonless H heading",base.replace("מאוזן:","מאוזן"),"missing-horizontal-heading","section-header-unavailable")
++    checkCase("missing V heading",base.replace("מאונך:","אנכי"),"missing-vertical-heading","section-header-unavailable")
++    checkCase("V heading before H",base.replace("מאונך:","x").replace("מאוזן:","מאונך: מאוזן:").replace("x","end"),"missing-vertical-heading-after-horizontal","section-header-unavailable")
++    checkCase("blank OCR text","","no-recognized-text","section-header-unavailable")
++    checkCase("no printed clue markers","מאוזן: no markers here מאונך: no markers","no-recognized-grid-labels","label-not-seen")
++    checkCase("duplicate labels","מאוזן: 4. secret (3,2) 4. extra (3,2) מאונך: 1. one (5)","unordered-or-duplicate-number-labels","unordered-or-duplicate-number-labels")
++    checkCase("nonmonotonic labels","מאוזן: 7. first (3,2) 4. secret (3,2) מאונך: 1. one (5)","unordered-or-duplicate-number-labels","unordered-or-duplicate-number-labels")
++    checkCase("no tuples","מאוזן: 4. secret only מאונך: 1. one only","no-multipart-tuple-in-numbered-clue","no-single-multipart-tuple")
++    checkCase("ambiguous tuples","מאוזן: 4. secret (3,2) (2,3) מאונך: 1. one (5)","ambiguous-multiple-tuples","multiple-tuples-ownership-unclear")
++    checkCase("grid sum conflict","מאוזן: 4. secret (4,2) מאונך: 1. one (5)","tuple-grid-length-mismatch","tuple-grid-length-mismatch")
++    checkCase("safe compound reference","מאוזן: 4. עם 17 מאוזן secret (3,5) מאונך: 1. one (5)","candidates-present","accepted",8)
++    checkCase("mixed successful and bad tuple","מאוזן: 4. secret (3,2) 7. secret (8,2) מאונך: 1. one (5)","candidates-with-rejections","accepted",5)
++    // Importantly a correctly parsed tuple must not be reversed by this audit.
++    val photoCase="מאוזן: 4. secret (2,3) 18. secret (5,3) מאונך: 1. one (5)"
++    val result=AdminLocalOcrGateDiagnosticsV215.inspect(photoCase,h,v,8)
++    check(result.candidates[AdminLocalOcrLengthV213.Key("across",4)]==listOf(2,3)); assertions++
++    check(result.candidates[AdminLocalOcrLengthV213.Key("across",18)]==listOf(5,3)); assertions++
++    check(result.candidates==AdminLocalOcrLengthV213.extract(photoCase,h,v)); assertions++
++    println("V215_GATE_DIAGNOSTICS_PASSED assertions=$assertions")
++}
