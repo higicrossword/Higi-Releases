@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.215",
+  "versionCode": 365,
+  "patchFile": "cloud-patches/v0.15.215-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "c6073356bf06605ba9ad78c6ebd9f45f1c5bcfb1154060bf1ac7b491b70c22f2",
+  "notes": "Administrator-only DRY: add failure reasons and count-only diagnostics for Tesseract local OCR gates; no changes to authoritative word-length parsing, typing order, grid separators, Canonical, Firebase or frozen series. Review-only."
+}
