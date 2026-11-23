@@ -137,8 +137,19 @@ jobs:
           & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
           if($LASTEXITCODE -ne 0){throw 'Version metadata validation failed'}
           & git -C $src add -N -A
-          $actual=@(& git -C $src diff --name-only HEAD)
-          $allowed=@(
+          $v216Changes=@(& git -C $src diff --name-only HEAD)
+          $v216Expected=@(
+            'app/build.gradle.kts',
+            'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt',
+            'firebase/public/app-version.json',
+            'firebase/public/update/index.html'
+          )
+          if($v216Changes.Count -ne 4 -or @($v216Changes|Where-Object{$_ -notin $v216Expected}).Count -ne 0 -or
+             @($v216Expected|Where-Object{$_ -notin $v216Changes}).Count -ne 0){
+            throw "v217 source changes relative to reviewed v216 violate scope: $($v216Changes -join ',')"
+          }
+          $v215Changes=@(& git -C $src diff --name-only HEAD^)
+          $v215Expected=@(
             'app/build.gradle.kts',
             'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
             'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt',
@@ -146,9 +157,9 @@ jobs:
             'firebase/public/app-version.json',
             'firebase/public/update/index.html'
           )
-          if($actual.Count -ne 6 -or @($actual|Where-Object{$_ -notin $allowed}).Count -ne 0 -or
-             @($allowed|Where-Object{$_ -notin $actual}).Count -ne 0){
-            throw "v217 scope violation: $($actual -join ',')"
+          if($v215Changes.Count -ne 6 -or @($v215Changes|Where-Object{$_ -notin $v215Expected}).Count -ne 0 -or
+             @($v215Expected|Where-Object{$_ -notin $v215Changes}).Count -ne 0){
+            throw "Cumulative v217 changes relative to published v215 violate scope: $($v215Changes -join ',')"
           }
           $full=Join-Path $env:RUNNER_TEMP 'v217-full-from-v175.patch'
           & git -C $src diff --binary "--output=$full" $rootCommit
