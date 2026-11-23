@@ -1,0 +1,212 @@
+name: Higi v217 stage signed Oded OCR DRY and dispatch official publisher
+on:
+  push:
+    branches: ['release/v0.15.217-oded-dry']
+    paths: ['.github/workflows/higi-v217-stage-and-dispatch.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: higi-v217-staging-release
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require exact previously signed WIP QA and absent release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $qa=(& gh api "repos/$env:REPO/actions/runs/45181563063" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or $qa.conclusion -ne 'success' -or
+            $qa.head_sha -ne 'ce948ff7da44cd4de5a44dad49fabadf73ae6ba9' -or
+            $qa.head_branch -ne 'qa/v0.15.216-maariv-oded-crop'){
+            throw 'Pinned signed v217 QA has not passed'
+          }
+          & gh release view v0.15.217-DRY --repo $env:REPO *> $null
+          if($LASTEXITCODE -eq 0){throw 'v217 DRY release already exists; refuse overwrite'}
+          if(Test-Path 'cloud-releases/v0.15.217-DRY.json'){throw 'v217 manifest already staged; refuse overwrite'}
+          if(Test-Path 'cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'){throw 'v217 full patch already staged'}
+          Write-Host 'V217_PINNED_SIGNED_QA_PASS'
+      - name: Download and verify immutable private v175 source without publishing it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=(& gh api "repos/$env:REPO/releases/437513599" | Out-String | ConvertFrom-Json)
+          if($LASTEXITCODE -ne 0 -or $release.draft -ne $true -or $release.tag_name -ne 'v0.15.175'){throw 'Private baseline source unavailable'}
+          $asset=@($release.assets|Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1 -or [long]$asset[0].size -ne 8145322){throw 'Baseline asset mismatch'}
+          $zip=Join-Path $env:RUNNER_TEMP 'sealed-source-175.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header 'Accept: application/octet-stream' --header 'X-GitHub-Api-Version: 2022-11-28' --output $zip "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0 -or (Get-FileHash $zip -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){
+            throw 'Sealed baseline source SHA-256 mismatch'
+          }
+          $folder=Join-Path $env:RUNNER_TEMP 'higi-v217-release-stage'
+          Expand-Archive $zip -DestinationPath $folder -Force
+          $src=Join-Path $folder 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $src 'app/build.gradle.kts'))){throw 'Baseline archive root invalid'}
+          Add-Content $env:GITHUB_ENV "HIGI_SOURCE_ROOT=$src"
+          Write-Host 'V217_PRIVATE_BASELINE_VERIFIED'
+      - name: Decode exact pinned v215, v216 and v217 changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $python=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);dst=pathlib.Path(sys.argv[2])
+          cfg=json.loads((repo/'cloud-releases/v0.15.215-DRY.json').read_text())
+          assert cfg['channel']=='dry' and cfg['version']=='0.15.215' and cfg['versionCode']==365
+          assert cfg['patchFile']=='cloud-patches/v0.15.215-from-v0.15.175.patch.xz.b64'
+          def decode(path):
+              return lzma.decompress(base64.b64decode(''.join(path.read_text().split()),validate=True))
+          v215=decode(repo/cfg['patchFile'])
+          assert hashlib.sha256(v215).hexdigest()==cfg['patchSha256']=='c6073356bf06605ba9ad78c6ebd9f45f1c5bcfb1154060bf1ac7b491b70c22f2'
+          (dst/'v215-source.patch').write_bytes(v215)
+          v216=(repo/'qa/v0.15.216/review-only-v215.patch').read_bytes().replace(b'\r\n',b'\n')
+          assert hashlib.sha256(v216).hexdigest()=='4ad136d1c9d5ad726e986a0b3bcdc040e8382cfb5ebcbaed7173e6f321d701e5'
+          (dst/'v216-oded.patch').write_bytes(v216)
+          v217=decode(repo/'qa/v0.15.217/oded-core.patch.xz.b64')
+          assert hashlib.sha256(v217).hexdigest()=='773b949686a17e46867103b679d3dcd6d19c6e2dae2c0fb3cd97b86d08ddd2ee'
+          (dst/'v217-oded.patch').write_bytes(v217)
+          print('V217_ALL_THREE_SOURCE_PATCHES_SHA256_VERIFIED')
+          '@
+          $file=Join-Path $env:RUNNER_TEMP 'decode-v217.py'
+          [IO.File]::WriteAllText($file,$python)
+          & python $file $env:GITHUB_WORKSPACE $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Pinned source patch verification failed'}
+      - name: Reconstruct exact signed-QA source and produce full v175-to-v217 patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=$env:HIGI_SOURCE_ROOT
+          & git -C $src init -q
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm sealed175
+          if($LASTEXITCODE -ne 0){throw 'Could not pin v175'}
+          $roots=@(& git -C $src rev-list --max-parents=0 HEAD)
+          if($roots.Count -ne 1){throw 'Ambiguous original source commit'}
+          $rootCommit=$roots[0]
+          $p=Join-Path $env:RUNNER_TEMP 'v215-source.patch'
+          & git -C $src apply --check $p
+          if($LASTEXITCODE -ne 0){throw 'Published v215 full patch mismatch'}
+          & git -C $src apply $p
+          if($LASTEXITCODE -ne 0){throw 'Could not reconstruct v215'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm published215
+          if($LASTEXITCODE -ne 0){throw 'Could not pin v215'}
+          $q=Join-Path $env:RUNNER_TEMP 'v216-oded.patch'
+          & git -C $src apply --check $q
+          if($LASTEXITCODE -ne 0){throw 'Reviewed v216 patch mismatch'}
+          & git -C $src apply $q
+          if($LASTEXITCODE -ne 0){throw 'Could not reconstruct v216'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm reviewed216
+          if($LASTEXITCODE -ne 0){throw 'Could not pin v216'}
+          $r=Join-Path $env:RUNNER_TEMP 'v217-oded.patch'
+          & git -C $src apply --check $r
+          if($LASTEXITCODE -ne 0){throw 'Reviewed v217 patch mismatch'}
+          & git -C $src apply $r
+          if($LASTEXITCODE -ne 0){throw 'Could not apply v217 review-only code'}
+          $scope=@(& git -C $src diff --name-only)
+          if($scope.Count -ne 1 -or $scope[0] -ne 'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt'){
+            throw "Unexpected v217 source changes: $($scope -join ',')"
+          }
+          $gradle=Join-Path $src 'app/build.gradle.kts'
+          $source=[IO.File]::ReadAllText($gradle)
+          if(([regex]::Matches($source,'versionCode\s*=\s*365\b')).Count -ne 1 -or
+             ([regex]::Matches($source,'versionName\s*=\s*"0\.15\.215"')).Count -ne 1){
+            throw 'Unexpected v215 source version'
+          }
+          $source=$source.Replace('versionCode = 365','versionCode = 367').Replace('versionName = "0.15.215"','versionName = "0.15.217"')
+          [IO.File]::WriteAllText($gradle,$source)
+          & python (Join-Path $src 'tools/sync-release-version.py') --write --root $src
+          if($LASTEXITCODE -ne 0){throw 'Version metadata synchronization failed'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'Version metadata validation failed'}
+          & git -C $src add -N -A
+          $actual=@(& git -C $src diff --name-only HEAD)
+          $allowed=@(
+            'app/build.gradle.kts',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt',
+            'tools/tests/OcrMaarivOdedLayoutV216Test.kt',
+            'firebase/public/app-version.json',
+            'firebase/public/update/index.html'
+          )
+          if($actual.Count -ne 6 -or @($actual|Where-Object{$_ -notin $allowed}).Count -ne 0 -or
+             @($allowed|Where-Object{$_ -notin $actual}).Count -ne 0){
+            throw "v217 scope violation: $($actual -join ',')"
+          }
+          $full=Join-Path $env:RUNNER_TEMP 'v217-full-from-v175.patch'
+          & git -C $src diff --binary "--output=$full" $rootCommit
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $full)){throw 'Full v217 source patch generation failed'}
+          & git -C $src reset --hard $rootCommit
+          if($LASTEXITCODE -ne 0){throw 'Cannot restore sealed v175 baseline'}
+          & git -C $src clean -fdq
+          & git -C $src apply --check $full
+          if($LASTEXITCODE -ne 0){throw 'Generated full v217 patch not applicable to v175'}
+          & git -C $src apply $full
+          if($LASTEXITCODE -ne 0){throw 'Generated full v217 patch round-trip failed'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'Reconstructed v217 metadata invalid'}
+          $create=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]);full=pathlib.Path(sys.argv[2])
+          raw=full.read_bytes()
+          assert 10000<len(raw)<3000000, ('Unsafe full source patch size',len(raw))
+          patch=repo/'cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'
+          manifest=repo/'cloud-releases/v0.15.217-DRY.json'
+          assert not patch.exists() and not manifest.exists(), 'Refuse overwriting release files'
+          patch.write_text(base64.b64encode(lzma.compress(raw,preset=9)).decode('ascii')+'\n')
+          cfg={
+            'channel':'dry',
+            'version':'0.15.217',
+            'versionCode':367,
+            'patchFile':patch.relative_to(repo).as_posix(),
+            'patchSha256':hashlib.sha256(raw).hexdigest(),
+            'notes':'Administrator-only DRY: gated MAARIV_ODED_ROZEN fixed-grid review-only clue OCR improvements (RTL dot-before-number anchors, reversed bracket glyphs, safe cross-references and guarded title fallback). No automatic number-order corrections, no changes to AnswerLengths, frozen Dekel/Hafuch series algorithms, Firebase or Canonical deployment. Source from exact signed v217 WIP QA.'
+          }
+          assert cfg['patchFile']=='cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64'
+          manifest.write_text(json.dumps(cfg,ensure_ascii=False,indent=2)+'\n')
+          print('V217_FULL_RELEASE_PATCH_SHA256',cfg['patchSha256'])
+          '@
+          $file=Join-Path $env:RUNNER_TEMP 'create-v217-manifest.py'
+          [IO.File]::WriteAllText($file,$create)
+          & python $file $env:GITHUB_WORKSPACE $full
+          if($LASTEXITCODE -ne 0){throw 'v217 manifest generation failed'}
+          Write-Host 'V217_FULL_SOURCE_ROUND_TRIP_AND_EXACT_SCOPE_OK'
+      - name: Stage approved full source patch and manifest on main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:GITHUB_WORKSPACE
+          & git fetch origin main
+          if($LASTEXITCODE -ne 0){throw 'Cannot fetch latest main'}
+          & git checkout -B main origin/main
+          if($LASTEXITCODE -ne 0){throw 'Cannot select latest main'}
+          & git add cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64 cloud-releases/v0.15.217-DRY.json
+          if($LASTEXITCODE -ne 0){throw 'Cannot stage v217 files on main'}
+          & git -c user.name=Higi -c user.email=higi@localhost commit -m 'Stage sealed-source Higi 0.15.217 DRY'
+          if($LASTEXITCODE -ne 0){throw 'Cannot commit v217 files'}
+          & git push origin HEAD:main
+          if($LASTEXITCODE -ne 0){throw 'Cannot stage v217 on main'}
+          Write-Host 'V217_RELEASE_MANIFEST_STAGED_ON_MAIN'
+      - name: Launch existing official DRY Android publisher
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & gh workflow run higi-cloud-dry-release.yml --repo $env:REPO --ref main -f 'manifest_file=cloud-releases/v0.15.217-DRY.json'
+          if($LASTEXITCODE -ne 0){throw 'Official DRY release workflow dispatch failed'}
+          Write-Host 'V217_OFFICIAL_DRY_PUBLISHER_DISPATCHED'
