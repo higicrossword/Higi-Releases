@@ -92,7 +92,7 @@ jobs:
           if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count -ne 0){throw "WIP scope violation"}
           $build=Get-Content -Raw (Join-Path $src 'app/build.gradle.kts')
           if($build -notmatch 'versionCode\s*=\s*364' -or $build -notmatch 'versionName\s*=\s*"0.15.214"'){throw 'Released baseline version changed'}
-          Write-Host 'V214_ADMIN_ONLY_FOUR_FILES_MATCH_PINNED_V213'
+          Write-Host 'V215_ADMIN_ONLY_FOUR_FILES_MATCH_PINNED_V214'
       - name: Stage 0.15.215 test-only version and restore original signer
         shell: pwsh
         env:
@@ -103,7 +103,7 @@ jobs:
           $file=Join-Path $src 'app/build.gradle.kts'
           $s=[IO.File]::ReadAllText($file)
           if(([regex]::Matches($s,'versionCode\s*=\s*364\b')).Count -ne 1 -or
-             ([regex]::Matches($s,'versionName\s*=\s*"0\.15\.213"')).Count -ne 1){throw 'Unexpected base version'}
+             ([regex]::Matches($s,'versionName\s*=\s*"0\.15\.214"')).Count -ne 1){throw 'Unexpected base version'}
           $s=$s.Replace('versionCode = 364','versionCode = 365').Replace('versionName = "0.15.214"','versionName = "0.15.215"')
           [IO.File]::WriteAllText($file,$s)
           & python (Join-Path $src 'tools/sync-release-version.py') --write --root $src
@@ -125,7 +125,7 @@ jobs:
             [Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
           & gh release download v0.15.214-DRY --repo $env:REPO --pattern Higi-0.15.214-DRY.apk --dir $env:RUNNER_TEMP
           if($LASTEXITCODE -ne 0){throw 'Cannot inspect previous signed APK'}
-          Write-Host 'V214_STAGED_VERSION_364_ORIGINAL_SIGNER_AVAILABLE'
+          Write-Host 'V215_STAGED_VERSION_365_ORIGINAL_SIGNER_AVAILABLE'
       - name: Build signed WIP APK and verify compatibility
         shell: pwsh
         run: |
@@ -142,7 +142,7 @@ jobs:
           $sig=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat|Sort-Object FullName -Descending|Select-Object -First 1
           if(!$aapt -or !$sig){throw 'Android verification tools missing'}
           $line=(& $aapt.FullName dump badging $apk|Select-String '^package:').ToString()
-          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='365' versionName='0\.15\.214'"){throw "Version/package mismatch: $line"}
+          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='365' versionName='0\.15\.215'"){throw "Version/package mismatch: $line"}
           $old=(& $sig.FullName verify --print-certs (Join-Path $env:RUNNER_TEMP 'Higi-0.15.214-DRY.apk') 2>&1|Out-String)
           if($LASTEXITCODE -ne 0){throw 'Old signature invalid'}
           $new=(& $sig.FullName verify --print-certs $apk 2>&1|Out-String)
@@ -155,8 +155,8 @@ jobs:
           Copy-Item $apk $dst
           $sha=(Get-FileHash $dst -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.215-WIP.sha256'),"$sha  Higi-0.15.215-WIP.apk")
-          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.215-WIP-readme.txt'),"Signed administrator-only device QA. Not a GitHub Release. v0.15.215 code364, original signer. No Firebase or Canonical writes. Please test CSV/ZIP and OCR status UI.")
-          Write-Host "V214_SIGNED_WIP_APK_VERIFIED SHA256=$sha"
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.215-WIP-readme.txt'),"Signed administrator-only device QA. Not a GitHub Release. v0.15.215 code365, original signer. No Firebase or Canonical writes. Please test CSV/ZIP and OCR status UI.")
+          Write-Host "V215_SIGNED_WIP_APK_VERIFIED SHA256=$sha"
       - name: Upload signed device QA artifact only
         uses: actions/upload-artifact@v4
         with:
