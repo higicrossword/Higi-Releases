@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.218",
+  "versionCode": 368,
+  "patchFile": "cloud-patches/v0.15.218-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "2fbfdd46680c4a092170d9146f4242bd9f7d1eac4f72122b617d84ed52c2b2af",
+  "notes": "Administrator-only DRY: inclusive 110 s per-AI-probe and 330 s overall word-length diagnostic limits; OCR-only action without Gemini; all expected local OCR gate rows even on failed AI calls; monotonic probe_timing.csv. SDK-stage submetrics are explicitly unavailable. Production OCR/word ordering, frozen series, Canonical and Firebase deployment unchanged."
+}
