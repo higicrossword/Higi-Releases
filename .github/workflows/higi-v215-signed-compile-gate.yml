@@ -60,7 +60,7 @@ jobs:
           baseline=decode(repo/manifest['patchFile'])
           assert hashlib.sha256(baseline).hexdigest()==manifest['patchSha256']=='94f5fa423aa9fc28cf8fe3efa5ca1d4aff6566afb46d9fb463b9ce1b8a142817'
           (dest/'pinned-v214.patch').write_bytes(baseline)
-          overlay=(repo/'cloud-tests/v215/overlay-from-v214.patch').read_bytes()
+          overlay=(repo/'cloud-tests/v215/overlay-from-v214.patch').read_bytes().replace(b'\r\n',b'\n')
           assert hashlib.sha256(overlay).hexdigest()=='09626adc306cc6f11b213ac65dab921cba6fe27969bdb0e499e24969d5938729'
           (dest/'reviewed-v215.patch').write_bytes(overlay)
           print('V214_PATCH_SHA256_VERIFIED')
