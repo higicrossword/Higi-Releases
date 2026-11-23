@@ -1,0 +1,167 @@
+name: Higi v216 Oded Rozen REVIEW_ONLY signed device QA (NO RELEASE)
+on:
+  push:
+    branches: ['qa/v0.15.216-maariv-oded-crop']
+    paths:
+      - '.github/workflows/higi-v216-oded-review-build.yml'
+      - 'qa/v0.15.216/**'
+  workflow_dispatch:
+permissions:
+  contents: write # needed for authenticated private draft source asset; this workflow has no writes
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: higicrossword/Higi-Releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Read and verify exact sealed source and source overlays
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $info=(& gh api "repos/$env:REPO/releases/437513599" | Out-String | ConvertFrom-Json)
+          if(!$info.draft -or $info.tag_name -ne 'v0.15.175'){throw 'Private source draft mismatch'}
+          $asset=@($info.assets|Where-Object {$_.name -eq 'HebrewCrosswordApp_v0.15.175_SOURCE.zip'})
+          if($asset.Count -ne 1){throw 'Missing immutable source asset'}
+          $z=Join-Path $env:RUNNER_TEMP 'sealed-v175.zip'
+          & curl.exe --fail --silent --show-error --location --retry 3 --header "Authorization: Bearer $env:GH_TOKEN" --header "Accept: application/octet-stream" --header "X-GitHub-Api-Version: 2022-11-28" --output $z "https://api.github.com/repos/$env:REPO/releases/assets/$($asset[0].id)"
+          if($LASTEXITCODE -ne 0){throw 'Cannot download sealed source'}
+          if((Get-FileHash $z -Algorithm SHA256).Hash -ne 'AD14647EDF7FACD1D20309CFD2AE48CCA779288AD06488C4D80B2404D8933DD7'){throw 'Source hash mismatch'}
+          if((Get-Item $z).Length -ne [long]$asset[0].size){throw 'Source size mismatch'}
+          $location=Join-Path $env:RUNNER_TEMP 'HigiV216'
+          Expand-Archive $z -DestinationPath $location -Force
+          $src=Join-Path $location 'HebrewCrosswordApp_v0.15.175'
+          if(!(Test-Path (Join-Path $src 'app/build.gradle.kts'))){throw 'Wrong source root'}
+          Add-Content $env:GITHUB_ENV "HIGI_SOURCE_ROOT=$src"
+          & git -C $src init -q
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm exact175
+          $py=@'
+          import base64,hashlib,json,lzma,pathlib,sys
+          repo=pathlib.Path(sys.argv[1]); dest=pathlib.Path(sys.argv[2])
+          manifest=json.loads((repo/'cloud-releases/v0.15.215-DRY.json').read_text())
+          assert manifest['version']=='0.15.215' and manifest['versionCode']==365
+          def decode(path):
+              return lzma.decompress(base64.b64decode(''.join(path.read_text().split()),validate=True))
+          baseline=decode(repo/manifest['patchFile'])
+          assert hashlib.sha256(baseline).hexdigest()==manifest['patchSha256']=='c6073356bf06605ba9ad78c6ebd9f45f1c5bcfb1154060bf1ac7b491b70c22f2'
+          (dest/'pinned-v215.patch').write_bytes(baseline)
+          overlay=(repo/'qa/v0.15.216/review-only-v215.patch').read_bytes().replace(b'\r\n',b'\n')
+          assert hashlib.sha256(overlay).hexdigest()=='4ad136d1c9d5ad726e986a0b3bcdc040e8382cfb5ebcbaed7173e6f321d701e5'
+          (dest/'reviewed-v216.patch').write_bytes(overlay)
+          print('V216_PATCH_SHA256_VERIFIED')
+          '@
+          $decoder=Join-Path $env:RUNNER_TEMP 'decode-qa.py'
+          [IO.File]::WriteAllText($decoder,$py)
+          & python $decoder $env:GITHUB_WORKSPACE $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Patch verification failed'}
+          $p=Join-Path $env:RUNNER_TEMP 'pinned-v215.patch'
+          & git -C $src apply --check $p
+          if($LASTEXITCODE -ne 0){throw 'Cannot reconstruct v215'}
+          & git -C $src apply $p
+          if($LASTEXITCODE -ne 0){throw 'Cannot apply v215'}
+          & git -C $src add -A
+          & git -C $src -c user.name=QA -c user.email=qa@localhost commit -qm exact213
+          $q=Join-Path $env:RUNNER_TEMP 'reviewed-v216.patch'
+          & git -C $src apply --check $q
+          if($LASTEXITCODE -ne 0){throw 'WIP OCR gate overlay does not match pinned v215'}
+          & git -C $src apply $q
+          if($LASTEXITCODE -ne 0){throw 'WIP OCR gate overlay apply failed'}
+          & git -C $src add -N .
+          $changed=@(& git -C $src diff --name-only)
+          $allowed=@(
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt',
+            'tools/tests/OcrMaarivOdedLayoutV216Test.kt'
+          )
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count -ne 0){throw "WIP scope violation"}
+          $build=Get-Content -Raw (Join-Path $src 'app/build.gradle.kts')
+          if($build -notmatch 'versionCode\s*=\s*365' -or $build -notmatch 'versionName\s*=\s*"0.15.215"'){throw 'Released baseline version changed'}
+          Write-Host 'V216_ADMIN_ONLY_THREE_FILES_MATCH_PINNED_V215'
+      - name: Stage 0.15.216 test-only version and restore original signer
+        shell: pwsh
+        env:
+          HIGI_DEBUG_KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=$env:HIGI_SOURCE_ROOT
+          $file=Join-Path $src 'app/build.gradle.kts'
+          $s=[IO.File]::ReadAllText($file)
+          if(([regex]::Matches($s,'versionCode\s*=\s*365\b')).Count -ne 1 -or
+             ([regex]::Matches($s,'versionName\s*=\s*"0\.15\.215"')).Count -ne 1){throw 'Unexpected base version'}
+          $s=$s.Replace('versionCode = 365','versionCode = 366').Replace('versionName = "0.15.215"','versionName = "0.15.216"')
+          [IO.File]::WriteAllText($file,$s)
+          & python (Join-Path $src 'tools/sync-release-version.py') --write --root $src
+          if($LASTEXITCODE -ne 0){throw 'Version metadata write failed'}
+          & python (Join-Path $src 'tools/sync-release-version.py') --check --root $src
+          if($LASTEXITCODE -ne 0){throw 'Version metadata check failed'}
+          $permitted=@('app/build.gradle.kts',
+            'app/src/main/java/com/example/hebrewcrossword/AdminAiPromptDiagnostic.kt',
+            'app/src/main/java/com/example/hebrewcrossword/OcrMaarivOdedLayoutV216.kt',
+            'tools/tests/OcrMaarivOdedLayoutV216Test.kt',
+            'firebase/public/app-version.json','firebase/public/update/index.html')
+          $changed=@(& git -C $src diff --name-only HEAD)
+          if(@($changed|Where-Object{$_ -notin $permitted}).Count -ne 0){throw 'Unexpected source modifications'}
+          if([string]::IsNullOrWhiteSpace($env:HIGI_DEBUG_KEYSTORE_B64)){throw 'Original signer secret missing'}
+          $dir=Join-Path $env:USERPROFILE '.android'
+          New-Item -ItemType Directory -Force -Path $dir|Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $dir 'debug.keystore'),
+            [Convert]::FromBase64String($env:HIGI_DEBUG_KEYSTORE_B64))
+          & gh release download v0.15.215-DRY --repo $env:REPO --pattern Higi-0.15.215-DRY.apk --dir $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Cannot inspect previous signed APK'}
+          Write-Host 'V216_STAGED_VERSION_366_ORIGINAL_SIGNER_AVAILABLE'
+      - name: Build signed WIP APK and verify compatibility
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:HIGI_SOURCE_ROOT
+          & gradle --no-daemon -PhigiDryBuild=true testDebugUnitTest assembleDebug
+          if($LASTEXITCODE -ne 0){throw 'Android tests or APK compile failed'}
+          $apk=Join-Path $env:HIGI_SOURCE_ROOT 'app/build/outputs/apk/debug/app-debug.apk'
+          $cfg=Join-Path $env:HIGI_SOURCE_ROOT 'app/build/generated/source/buildConfig/debug/com/example/hebrewcrossword/BuildConfig.java'
+          if(!(Test-Path $apk) -or !(Test-Path $cfg)){throw 'Android output missing'}
+          if((Get-Content -Raw $cfg) -notmatch 'HIGI_DRY_BUILD\s*=\s*true'){throw 'Not DRY build'}
+          $sdk=$env:ANDROID_HOME; if(!$sdk){$sdk=$env:ANDROID_SDK_ROOT}
+          $aapt=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter aapt.exe|Sort-Object FullName -Descending|Select-Object -First 1
+          $sig=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat|Sort-Object FullName -Descending|Select-Object -First 1
+          if(!$aapt -or !$sig){throw 'Android verification tools missing'}
+          $line=(& $aapt.FullName dump badging $apk|Select-String '^package:').ToString()
+          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='366' versionName='0\.15\.215'"){throw "Version/package mismatch: $line"}
+          $old=(& $sig.FullName verify --print-certs (Join-Path $env:RUNNER_TEMP 'Higi-0.15.215-DRY.apk') 2>&1|Out-String)
+          if($LASTEXITCODE -ne 0){throw 'Old signature invalid'}
+          $new=(& $sig.FullName verify --print-certs $apk 2>&1|Out-String)
+          if($LASTEXITCODE -ne 0){throw 'New signature invalid'}
+          $pattern='(?i)certificate\s+SHA-?256\s+digest\s*:\s*([0-9a-f:]+)'
+          $oldSha=([regex]::Match($old,$pattern).Groups[1].Value-replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          $newSha=([regex]::Match($new,$pattern).Groups[1].Value-replace '[^0-9A-Fa-f]','').ToLowerInvariant()
+          if($oldSha.Length -ne 64 -or $newSha -ne $oldSha){throw 'Signer differs from v0.15.215'}
+          $dst=Join-Path $env:RUNNER_TEMP 'Higi-0.15.216-WIP.apk'
+          Copy-Item $apk $dst
+          $sha=(Get-FileHash $dst -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.216-WIP.sha256'),"$sha  Higi-0.15.216-WIP.apk")
+          [IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Higi-0.15.216-WIP-readme.txt'),"Signed administrator-only device QA. Not a GitHub Release. v0.15.216 code366, original signer. No Firebase or Canonical writes. Please test CSV/ZIP and OCR status UI.")
+          Write-Host "V216_SIGNED_WIP_APK_VERIFIED SHA256=$sha"
+      - name: Upload signed device QA artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: higi-0.15.216-wip-device-qa-signed
+          path: |
+            ${{ runner.temp }}/Higi-0.15.216-WIP.apk
+            ${{ runner.temp }}/Higi-0.15.216-WIP.sha256
+            ${{ runner.temp }}/Higi-0.15.216-WIP-readme.txt
+          if-no-files-found: error
+          retention-days: 3
