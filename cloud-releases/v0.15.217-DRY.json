@@ -1,0 +1,8 @@
+{
+  "channel": "dry",
+  "version": "0.15.217",
+  "versionCode": 367,
+  "patchFile": "cloud-patches/v0.15.217-from-v0.15.175.patch.xz.b64",
+  "patchSha256": "bfa9ee063adf996ea394da52f2f4bdffd80377fb65857c882d9c6fcfd43f651f",
+  "notes": "Administrator-only DRY: gated MAARIV_ODED_ROZEN fixed-grid review-only clue OCR improvements (RTL dot-before-number anchors, reversed bracket glyphs, safe cross-references and guarded title fallback). No automatic number-order corrections, no changes to AnswerLengths, frozen Dekel/Hafuch series algorithms, Firebase or Canonical deployment. Source from exact signed v217 WIP QA."
+}
