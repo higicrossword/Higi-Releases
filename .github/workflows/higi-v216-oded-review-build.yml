@@ -140,7 +140,7 @@ jobs:
           $sig=Get-ChildItem (Join-Path $sdk 'build-tools') -Recurse -Filter apksigner.bat|Sort-Object FullName -Descending|Select-Object -First 1
           if(!$aapt -or !$sig){throw 'Android verification tools missing'}
           $line=(& $aapt.FullName dump badging $apk|Select-String '^package:').ToString()
-          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='366' versionName='0\.15\.215'"){throw "Version/package mismatch: $line"}
+          if($line -notmatch "name='com\.example\.hebrewcrossword' versionCode='366' versionName='0\.15\.216'"){throw "Version/package mismatch: $line"}
           $old=(& $sig.FullName verify --print-certs (Join-Path $env:RUNNER_TEMP 'Higi-0.15.215-DRY.apk') 2>&1|Out-String)
           if($LASTEXITCODE -ne 0){throw 'Old signature invalid'}
           $new=(& $sig.FullName verify --print-certs $apk 2>&1|Out-String)
